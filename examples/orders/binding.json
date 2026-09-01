@@ -1,0 +1,43 @@
+{
+  "api_version": "metricspire.io/v1alpha1",
+  "kind": "SourceBinding",
+  "metadata": {
+    "name": "demo_binding",
+    "version": "1.0.0"
+  },
+  "manifest_fingerprint": "sha256:4955d7e8d35d0f6f70fa24bc9f518e92bea43128cb218664b7e746e49e7f9a78",
+  "engine": "fixture",
+  "datasets": [
+    {
+      "name": "orders",
+      "resource": {
+        "kind": "table",
+        "catalog": "demo",
+        "schema": "public",
+        "table": "orders"
+      },
+      "fields": [
+        {"name": "order_id", "column": "order_id"},
+        {"name": "customer_id", "column": "customer_id"},
+        {"name": "order_ts", "column": "order_ts"},
+        {"name": "gross_amount", "column": "gross_amount"},
+        {"name": "refunded_amount", "column": "refunded_amount"},
+        {"name": "order_count", "column": "order_count"}
+      ]
+    },
+    {
+      "name": "customers",
+      "resource": {
+        "kind": "table",
+        "catalog": "demo",
+        "schema": "public",
+        "table": "customers"
+      },
+      "fields": [
+        {"name": "customer_id", "column": "customer_id"},
+        {"name": "segment", "column": "segment"},
+        {"name": "region", "column": "region"}
+      ]
+    }
+  ]
+}

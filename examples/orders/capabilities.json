@@ -1,0 +1,7 @@
+{
+  "engine": "fixture",
+  "expression_ops": ["sum", "metric", "literal", "add", "subtract", "multiply", "divide"],
+  "join_cardinalities": ["many_to_one"],
+  "time_granularities": ["day", "week", "month"],
+  "max_joins": 4
+}

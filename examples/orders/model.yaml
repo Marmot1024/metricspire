@@ -1,0 +1,121 @@
+api_version: metricspire.io/v1alpha1
+kind: SemanticModel
+metadata:
+  name: commerce
+  version: 1.0.0
+spec:
+  datasets:
+    - name: orders
+      description: Neutral order facts for the public example.
+      fields:
+        - name: order_id
+          data_type: string
+        - name: customer_id
+          data_type: string
+        - name: order_ts
+          data_type: timestamp
+        - name: gross_amount
+          data_type: decimal
+        - name: refunded_amount
+          data_type: decimal
+        - name: order_count
+          data_type: integer
+    - name: customers
+      fields:
+        - name: customer_id
+          data_type: string
+        - name: segment
+          data_type: string
+        - name: region
+          data_type: string
+  entities:
+    - name: orders
+      dataset: orders
+      key: order_id
+    - name: customers
+      dataset: customers
+      key: customer_id
+  dimensions:
+    - name: order_date
+      description: Business date derived from the order timestamp.
+      entity: orders
+      field: order_ts
+      type: time
+      time_granularities: [day, week, month]
+    - name: customer_segment
+      entity: customers
+      field: segment
+      type: categorical
+    - name: customer_region
+      entity: customers
+      field: region
+      type: categorical
+  relationships:
+    - name: orders_customer
+      from_entity: orders
+      to_entity: customers
+      cardinality: many_to_one
+      from_field: customer_id
+      to_field: customer_id
+  metrics:
+    - name: gross_revenue
+      description: Sum of gross order amount before refunds.
+      entity: orders
+      kind: aggregate
+      value_type: decimal
+      unit: currency
+      expression:
+        op: sum
+        field: orders.gross_amount
+      allowed_dimensions: [order_date, customer_segment, customer_region]
+      time_dimension: order_date
+      verification:
+        status: verified
+        evidence: [fixture_reconciliation]
+    - name: order_count
+      entity: orders
+      kind: aggregate
+      value_type: integer
+      unit: orders
+      expression:
+        op: sum
+        field: orders.order_count
+      allowed_dimensions: [order_date, customer_segment, customer_region]
+      time_dimension: order_date
+      verification:
+        status: verified
+        evidence: [fixture_reconciliation]
+    - name: refund_rate
+      entity: orders
+      kind: ratio
+      value_type: decimal
+      unit: ratio
+      expression:
+        op: divide
+        args:
+          - op: sum
+            field: orders.refunded_amount
+          - op: sum
+            field: orders.gross_amount
+      allowed_dimensions: [order_date, customer_segment, customer_region]
+      time_dimension: order_date
+      verification:
+        status: verified
+        evidence: [fixture_reconciliation]
+    - name: average_order_value
+      entity: orders
+      kind: derived
+      value_type: decimal
+      unit: currency_per_order
+      expression:
+        op: divide
+        args:
+          - op: metric
+            metric: gross_revenue
+          - op: metric
+            metric: order_count
+      allowed_dimensions: [order_date, customer_segment, customer_region]
+      time_dimension: order_date
+      verification:
+        status: verified
+        evidence: [fixture_reconciliation]

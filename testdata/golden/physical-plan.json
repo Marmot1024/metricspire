@@ -1,0 +1,227 @@
+{
+  "api_version": "metricspire.io/v1alpha1",
+  "kind": "PhysicalPlan",
+  "fingerprint": "sha256:ca41d64a41e704f3a2e26dbc2467e40d9597d8ed0b5e3f24c90bb15e01aae597",
+  "logical_fingerprint": "sha256:bbe57573d498be67e62ec7ff53c1889f1c8a863ca7643f533f9929a6014c2bea",
+  "manifest_fingerprint": "sha256:4955d7e8d35d0f6f70fa24bc9f518e92bea43128cb218664b7e746e49e7f9a78",
+  "policy_fingerprint": "sha256:273ce477ecd1be8fa50edd6b5a03798b514deecc8deabd558e26761820897512",
+  "binding_fingerprint": "sha256:f7567b4a841ec71a63fc33dfbceba28a6348bcaa1b08065c7b425cfa71557199",
+  "engine": "fixture",
+  "root": {
+    "name": "orders",
+    "resource": {
+      "kind": "table",
+      "catalog": "demo",
+      "schema": "public",
+      "table": "orders"
+    }
+  },
+  "metrics": [
+    {
+      "name": "gross_revenue",
+      "output": false,
+      "kind": "aggregate",
+      "value_type": "decimal",
+      "unit": "currency",
+      "expression": {
+        "op": "sum",
+        "field": "orders.gross_amount"
+      }
+    },
+    {
+      "name": "order_count",
+      "output": false,
+      "kind": "aggregate",
+      "value_type": "integer",
+      "unit": "orders",
+      "expression": {
+        "op": "sum",
+        "field": "orders.order_count"
+      }
+    },
+    {
+      "name": "average_order_value",
+      "output": true,
+      "kind": "derived",
+      "value_type": "decimal",
+      "unit": "currency_per_order",
+      "expression": {
+        "op": "divide",
+        "args": [
+          {
+            "op": "metric",
+            "metric": "gross_revenue"
+          },
+          {
+            "op": "metric",
+            "metric": "order_count"
+          }
+        ]
+      },
+      "dependencies": [
+        "gross_revenue",
+        "order_count"
+      ]
+    },
+    {
+      "name": "refund_rate",
+      "output": true,
+      "kind": "ratio",
+      "value_type": "decimal",
+      "unit": "ratio",
+      "expression": {
+        "op": "divide",
+        "args": [
+          {
+            "op": "sum",
+            "field": "orders.refunded_amount"
+          },
+          {
+            "op": "sum",
+            "field": "orders.gross_amount"
+          }
+        ]
+      }
+    }
+  ],
+  "metric_fields": [
+    {
+      "entity": "orders",
+      "field": "gross_amount",
+      "resource": {
+        "kind": "table",
+        "catalog": "demo",
+        "schema": "public",
+        "table": "orders"
+      },
+      "column": "gross_amount"
+    },
+    {
+      "entity": "orders",
+      "field": "order_count",
+      "resource": {
+        "kind": "table",
+        "catalog": "demo",
+        "schema": "public",
+        "table": "orders"
+      },
+      "column": "order_count"
+    },
+    {
+      "entity": "orders",
+      "field": "refunded_amount",
+      "resource": {
+        "kind": "table",
+        "catalog": "demo",
+        "schema": "public",
+        "table": "orders"
+      },
+      "column": "refunded_amount"
+    }
+  ],
+  "dimensions": [
+    {
+      "name": "customer_region",
+      "output": false,
+      "resource": {
+        "kind": "table",
+        "catalog": "demo",
+        "schema": "public",
+        "table": "customers"
+      },
+      "column": "region",
+      "type": "categorical"
+    },
+    {
+      "name": "customer_segment",
+      "output": true,
+      "resource": {
+        "kind": "table",
+        "catalog": "demo",
+        "schema": "public",
+        "table": "customers"
+      },
+      "column": "segment",
+      "type": "categorical"
+    },
+    {
+      "name": "order_date",
+      "output": true,
+      "resource": {
+        "kind": "table",
+        "catalog": "demo",
+        "schema": "public",
+        "table": "orders"
+      },
+      "column": "order_ts",
+      "type": "time"
+    }
+  ],
+  "joins": [
+    {
+      "name": "orders_customer",
+      "cardinality": "many_to_one",
+      "from_resource": {
+        "kind": "table",
+        "catalog": "demo",
+        "schema": "public",
+        "table": "orders"
+      },
+      "from_column": "customer_id",
+      "to_resource": {
+        "kind": "table",
+        "catalog": "demo",
+        "schema": "public",
+        "table": "customers"
+      },
+      "to_column": "customer_id"
+    }
+  ],
+  "time_range": {
+    "dimension": "order_date",
+    "start": "2026-08-31T16:00:00Z",
+    "end": "2026-09-07T16:00:00Z"
+  },
+  "time_grouping": {
+    "dimension": "order_date",
+    "timezone": "Asia/Shanghai",
+    "granularity": "day"
+  },
+  "filters": [
+    {
+      "dimension": "customer_region",
+      "operator": "in",
+      "values": [
+        "east",
+        "south"
+      ]
+    }
+  ],
+  "order_by": [
+    {
+      "field": "average_order_value",
+      "direction": "desc"
+    }
+  ],
+  "limit": 100,
+  "lineage": {
+    "datasets": [
+      "customers",
+      "orders"
+    ],
+    "metrics": [
+      "average_order_value",
+      "gross_revenue",
+      "order_count",
+      "refund_rate"
+    ],
+    "dimensions": [
+      "customer_region",
+      "customer_segment",
+      "order_date"
+    ],
+    "relationships": [
+      "orders_customer"
+    ]
+  }
+}

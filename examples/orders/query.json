@@ -1,0 +1,31 @@
+{
+  "api_version": "metricspire.io/v1alpha1",
+  "kind": "SemanticQuery",
+  "manifest_fingerprint": "sha256:4955d7e8d35d0f6f70fa24bc9f518e92bea43128cb218664b7e746e49e7f9a78",
+  "metrics": ["average_order_value", "refund_rate"],
+  "group_by": ["order_date", "customer_segment"],
+  "time_range": {
+    "dimension": "order_date",
+    "start": "2026-08-31T16:00:00Z",
+    "end": "2026-09-07T16:00:00Z"
+  },
+  "time_grouping": {
+    "dimension": "order_date",
+    "timezone": "Asia/Shanghai",
+    "granularity": "day"
+  },
+  "filters": [
+    {
+      "dimension": "customer_region",
+      "operator": "in",
+      "values": ["east", "south"]
+    }
+  ],
+  "order_by": [
+    {
+      "field": "average_order_value",
+      "direction": "desc"
+    }
+  ],
+  "limit": 100
+}

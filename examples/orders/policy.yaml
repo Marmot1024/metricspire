@@ -1,0 +1,12 @@
+api_version: metricspire.io/v1alpha1
+kind: PolicySource
+metadata:
+  name: demo_access
+  version: 1.0.0
+tenant: demo
+rules:
+  - name: analysts_read_verified_metrics
+    effect: allow
+    roles: [analyst]
+    metrics: ['*']
+    dimensions: ['*']

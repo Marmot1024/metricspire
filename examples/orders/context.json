@@ -1,0 +1,6 @@
+{
+  "tenant": "demo",
+  "principal": "local-analyst",
+  "roles": ["analyst"],
+  "request_id": "demo-001"
+}

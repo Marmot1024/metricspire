@@ -1,0 +1,567 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metricspire.dev/schemas/v1alpha1/metricspire.schema.json",
+  "title": "MetricSpire v1alpha1 contracts",
+  "oneOf": [
+    {"$ref": "#/$defs/SemanticModel"},
+    {"$ref": "#/$defs/SemanticManifest"},
+    {"$ref": "#/$defs/SourceBinding"},
+    {"$ref": "#/$defs/PolicySource"},
+    {"$ref": "#/$defs/PolicyBundle"},
+    {"$ref": "#/$defs/SemanticQuery"},
+    {"$ref": "#/$defs/RequestContext"},
+    {"$ref": "#/$defs/EngineCapabilities"},
+    {"$ref": "#/$defs/LogicalPlan"},
+    {"$ref": "#/$defs/PhysicalPlan"},
+    {"$ref": "#/$defs/ExecutionJob"},
+    {"$ref": "#/$defs/Problem"}
+  ],
+  "$defs": {
+    "APIVersion": {"const": "metricspire.io/v1alpha1"},
+    "Name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+    "Fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "Metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "version": {"type": "string", "minLength": 1}
+      }
+    },
+    "DataType": {"enum": ["string", "integer", "decimal", "boolean", "date", "timestamp"]},
+    "Field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "data_type"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "data_type": {"$ref": "#/$defs/DataType"},
+        "nullable": {"type": "boolean"}
+      }
+    },
+    "Dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "fields"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "description": {"type": "string"},
+        "fields": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Field"}}
+      }
+    },
+    "Entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dataset", "key"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "dataset": {"$ref": "#/$defs/Name"},
+        "key": {"$ref": "#/$defs/Name"}
+      }
+    },
+    "Dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "entity", "field", "type"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "description": {"type": "string"},
+        "entity": {"$ref": "#/$defs/Name"},
+        "field": {"$ref": "#/$defs/Name"},
+        "type": {"enum": ["categorical", "time"]},
+        "time_granularities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["day", "week", "month"]}
+        }
+      }
+    },
+    "Relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "from_entity", "to_entity", "cardinality", "from_field", "to_field"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "from_entity": {"$ref": "#/$defs/Name"},
+        "to_entity": {"$ref": "#/$defs/Name"},
+        "cardinality": {"const": "many_to_one"},
+        "from_field": {"$ref": "#/$defs/Name"},
+        "to_field": {"$ref": "#/$defs/Name"}
+      }
+    },
+    "Expression": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["op", "field"],
+          "properties": {
+            "op": {"const": "sum"},
+            "field": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["op", "metric"],
+          "properties": {
+            "op": {"const": "metric"},
+            "metric": {"$ref": "#/$defs/Name"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["op", "value"],
+          "properties": {
+            "op": {"const": "literal"},
+            "value": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["op", "args"],
+          "properties": {
+            "op": {"enum": ["add", "subtract", "multiply", "divide"]},
+            "args": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {"$ref": "#/$defs/Expression"}
+            }
+          }
+        }
+      ]
+    },
+    "Verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["draft", "verified"]},
+        "evidence": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "open_questions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "Metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "entity", "kind", "value_type", "expression", "allowed_dimensions", "verification"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "description": {"type": "string"},
+        "entity": {"$ref": "#/$defs/Name"},
+        "kind": {"enum": ["aggregate", "ratio", "derived"]},
+        "value_type": {"enum": ["integer", "decimal"]},
+        "unit": {"type": "string"},
+        "expression": {"$ref": "#/$defs/Expression"},
+        "allowed_dimensions": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/Name"}},
+        "time_dimension": {"$ref": "#/$defs/Name"},
+        "verification": {"$ref": "#/$defs/Verification"}
+      }
+    },
+    "SemanticSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["datasets", "entities", "dimensions", "relationships", "metrics"],
+      "properties": {
+        "datasets": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Dataset"}},
+        "entities": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Entity"}},
+        "dimensions": {"type": "array", "items": {"$ref": "#/$defs/Dimension"}},
+        "relationships": {"type": "array", "items": {"$ref": "#/$defs/Relationship"}},
+        "metrics": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Metric"}}
+      }
+    },
+    "SemanticModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_version", "kind", "metadata", "spec"],
+      "properties": {
+        "api_version": {"$ref": "#/$defs/APIVersion"},
+        "kind": {"const": "SemanticModel"},
+        "metadata": {"$ref": "#/$defs/Metadata"},
+        "spec": {"$ref": "#/$defs/SemanticSpec"}
+      }
+    },
+    "SemanticManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_version", "kind", "metadata", "fingerprint", "definitions"],
+      "properties": {
+        "api_version": {"$ref": "#/$defs/APIVersion"},
+        "kind": {"const": "SemanticManifest"},
+        "metadata": {"$ref": "#/$defs/Metadata"},
+        "fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "definitions": {"$ref": "#/$defs/SemanticSpec"}
+      }
+    },
+    "FieldBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "column"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "column": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_$]*$"}
+      }
+    },
+    "ResourceRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "table"],
+          "properties": {
+            "kind": {"const": "table"},
+            "catalog": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_$]*$"},
+            "schema": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_$]*$"},
+            "table": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_$]*$"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "uri"],
+          "properties": {
+            "kind": {"const": "file"},
+            "uri": {"type": "string", "format": "uri", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "DatasetBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "resource", "fields"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "resource": {"$ref": "#/$defs/ResourceRef"},
+        "fields": {"type": "array", "items": {"$ref": "#/$defs/FieldBinding"}}
+      }
+    },
+    "SourceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_version", "kind", "metadata", "manifest_fingerprint", "engine", "datasets"],
+      "properties": {
+        "api_version": {"$ref": "#/$defs/APIVersion"},
+        "kind": {"const": "SourceBinding"},
+        "metadata": {"$ref": "#/$defs/Metadata"},
+        "manifest_fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "engine": {"type": "string", "minLength": 1},
+        "datasets": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/DatasetBinding"}}
+      }
+    },
+    "PolicyRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "effect", "metrics", "dimensions"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "effect": {"enum": ["allow", "deny"]},
+        "principals": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "roles": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "metrics": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "dimensions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      },
+      "anyOf": [
+        {"required": ["principals"]},
+        {"required": ["roles"]}
+      ]
+    },
+    "PolicySource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_version", "kind", "metadata", "tenant", "rules"],
+      "properties": {
+        "api_version": {"$ref": "#/$defs/APIVersion"},
+        "kind": {"const": "PolicySource"},
+        "metadata": {"$ref": "#/$defs/Metadata"},
+        "manifest_fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "tenant": {"type": "string", "minLength": 1},
+        "rules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/PolicyRule"}}
+      }
+    },
+    "PolicyBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_version", "kind", "metadata", "fingerprint", "manifest_fingerprint", "tenant", "rules"],
+      "properties": {
+        "api_version": {"$ref": "#/$defs/APIVersion"},
+        "kind": {"const": "PolicyBundle"},
+        "metadata": {"$ref": "#/$defs/Metadata"},
+        "fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "manifest_fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "tenant": {"type": "string", "minLength": 1},
+        "rules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/PolicyRule"}}
+      }
+    },
+    "RequestContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant", "principal", "request_id"],
+      "properties": {
+        "tenant": {"type": "string", "minLength": 1},
+        "principal": {"type": "string", "minLength": 1},
+        "roles": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "request_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "TimeRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dimension", "start", "end"],
+      "properties": {
+        "dimension": {"$ref": "#/$defs/Name"},
+        "start": {"type": "string", "format": "date-time"},
+        "end": {"type": "string", "format": "date-time"}
+      }
+    },
+    "TimeGrouping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dimension", "timezone", "granularity"],
+      "properties": {
+        "dimension": {"$ref": "#/$defs/Name"},
+        "timezone": {"type": "string", "minLength": 1},
+        "granularity": {"enum": ["day", "week", "month"]},
+        "week_start": {"enum": ["monday", "sunday"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"granularity": {"const": "week"}}, "required": ["granularity"]},
+          "then": {"required": ["week_start"]},
+          "else": {"not": {"required": ["week_start"]}}
+        }
+      ]
+    },
+    "Filter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dimension", "operator", "values"],
+      "properties": {
+        "dimension": {"$ref": "#/$defs/Name"},
+        "operator": {"enum": ["eq", "in"]},
+        "values": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
+    "OrderBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "direction"],
+      "properties": {
+        "field": {"$ref": "#/$defs/Name"},
+        "direction": {"enum": ["asc", "desc"]}
+      }
+    },
+    "SemanticQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_version", "kind", "manifest_fingerprint", "metrics"],
+      "properties": {
+        "api_version": {"$ref": "#/$defs/APIVersion"},
+        "kind": {"const": "SemanticQuery"},
+        "manifest_fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "metrics": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/Name"}},
+        "group_by": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/Name"}},
+        "time_range": {"$ref": "#/$defs/TimeRange"},
+        "time_grouping": {"$ref": "#/$defs/TimeGrouping"},
+        "filters": {"type": "array", "items": {"$ref": "#/$defs/Filter"}},
+        "order_by": {"type": "array", "items": {"$ref": "#/$defs/OrderBy"}},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 10000}
+      }
+    },
+    "EngineCapabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "expression_ops", "join_cardinalities", "time_granularities", "max_joins"],
+      "properties": {
+        "engine": {"type": "string", "minLength": 1},
+        "expression_ops": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["sum", "metric", "literal", "add", "subtract", "multiply", "divide"]}
+        },
+        "join_cardinalities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"const": "many_to_one"}
+        },
+        "time_granularities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["day", "week", "month"]}
+        },
+        "max_joins": {"type": "integer", "minimum": 0}
+      }
+    },
+    "PlannedMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "output", "kind", "value_type", "expression"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "output": {"type": "boolean"},
+        "kind": {"enum": ["aggregate", "ratio", "derived"]},
+        "value_type": {"enum": ["integer", "decimal"]},
+        "unit": {"type": "string"},
+        "expression": {"$ref": "#/$defs/Expression"},
+        "dependencies": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/Name"}}
+      }
+    },
+    "PlannedDimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "output", "entity", "field", "type"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "output": {"type": "boolean"},
+        "entity": {"$ref": "#/$defs/Name"},
+        "field": {"$ref": "#/$defs/Name"},
+        "type": {"enum": ["categorical", "time"]}
+      }
+    },
+    "PlannedJoin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "from_entity", "to_entity", "cardinality", "from_field", "to_field"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "from_entity": {"$ref": "#/$defs/Name"},
+        "to_entity": {"$ref": "#/$defs/Name"},
+        "cardinality": {"const": "many_to_one"},
+        "from_field": {"$ref": "#/$defs/Name"},
+        "to_field": {"$ref": "#/$defs/Name"}
+      }
+    },
+    "Lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["datasets", "metrics", "dimensions", "relationships"],
+      "properties": {
+        "datasets": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/Name"}},
+        "metrics": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/Name"}},
+        "dimensions": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/Name"}},
+        "relationships": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/Name"}}
+      }
+    },
+    "LogicalPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_version", "kind", "fingerprint", "manifest_fingerprint", "policy_fingerprint", "query_fingerprint", "root_entity", "metrics", "dimensions", "joins", "limit", "lineage"],
+      "properties": {
+        "api_version": {"$ref": "#/$defs/APIVersion"},
+        "kind": {"const": "LogicalPlan"},
+        "fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "manifest_fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "policy_fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "query_fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "root_entity": {"$ref": "#/$defs/Name"},
+        "metrics": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/PlannedMetric"}},
+        "dimensions": {"type": "array", "items": {"$ref": "#/$defs/PlannedDimension"}},
+        "joins": {"type": "array", "items": {"$ref": "#/$defs/PlannedJoin"}},
+        "time_range": {"$ref": "#/$defs/TimeRange"},
+        "time_grouping": {"$ref": "#/$defs/TimeGrouping"},
+        "filters": {"type": "array", "items": {"$ref": "#/$defs/Filter"}},
+        "order_by": {"type": "array", "items": {"$ref": "#/$defs/OrderBy"}},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "lineage": {"$ref": "#/$defs/Lineage"}
+      }
+    },
+    "PhysicalDimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "output", "resource", "column", "type"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "output": {"type": "boolean"},
+        "resource": {"$ref": "#/$defs/ResourceRef"},
+        "column": {"type": "string", "minLength": 1},
+        "type": {"enum": ["categorical", "time"]}
+      }
+    },
+    "PhysicalField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity", "field", "resource", "column"],
+      "properties": {
+        "entity": {"$ref": "#/$defs/Name"},
+        "field": {"$ref": "#/$defs/Name"},
+        "resource": {"$ref": "#/$defs/ResourceRef"},
+        "column": {"type": "string", "minLength": 1}
+      }
+    },
+    "PhysicalJoin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "cardinality", "from_resource", "from_column", "to_resource", "to_column"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Name"},
+        "cardinality": {"const": "many_to_one"},
+        "from_resource": {"$ref": "#/$defs/ResourceRef"},
+        "from_column": {"type": "string", "minLength": 1},
+        "to_resource": {"$ref": "#/$defs/ResourceRef"},
+        "to_column": {"type": "string", "minLength": 1}
+      }
+    },
+    "PhysicalPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_version", "kind", "fingerprint", "logical_fingerprint", "manifest_fingerprint", "policy_fingerprint", "binding_fingerprint", "engine", "root", "metrics", "metric_fields", "dimensions", "joins", "limit", "lineage"],
+      "properties": {
+        "api_version": {"$ref": "#/$defs/APIVersion"},
+        "kind": {"const": "PhysicalPlan"},
+        "fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "logical_fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "manifest_fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "policy_fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "binding_fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "engine": {"type": "string", "minLength": 1},
+        "root": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "resource"],
+          "properties": {
+            "name": {"$ref": "#/$defs/Name"},
+            "resource": {"$ref": "#/$defs/ResourceRef"}
+          }
+        },
+        "metrics": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/PlannedMetric"}},
+        "metric_fields": {"type": "array", "items": {"$ref": "#/$defs/PhysicalField"}},
+        "dimensions": {"type": "array", "items": {"$ref": "#/$defs/PhysicalDimension"}},
+        "joins": {"type": "array", "items": {"$ref": "#/$defs/PhysicalJoin"}},
+        "time_range": {"$ref": "#/$defs/TimeRange"},
+        "time_grouping": {"$ref": "#/$defs/TimeGrouping"},
+        "filters": {"type": "array", "items": {"$ref": "#/$defs/Filter"}},
+        "order_by": {"type": "array", "items": {"$ref": "#/$defs/OrderBy"}},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "lineage": {"$ref": "#/$defs/Lineage"}
+      }
+    },
+    "Problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string", "minLength": 1},
+        "path": {"type": "string"}
+      }
+    },
+    "ExecutionJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "physical_fingerprint", "submitted_at"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "status": {"enum": ["pending", "running", "succeeded", "failed", "cancelled"]},
+        "physical_fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "submitted_at": {"type": "string", "format": "date-time"},
+        "started_at": {"type": "string", "format": "date-time"},
+        "finished_at": {"type": "string", "format": "date-time"},
+        "error": {"$ref": "#/$defs/Problem"}
+      }
+    }
+  }
+}

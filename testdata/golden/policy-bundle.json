@@ -1,0 +1,26 @@
+{
+  "api_version": "metricspire.io/v1alpha1",
+  "kind": "PolicyBundle",
+  "metadata": {
+    "name": "demo_access",
+    "version": "1.0.0"
+  },
+  "fingerprint": "sha256:273ce477ecd1be8fa50edd6b5a03798b514deecc8deabd558e26761820897512",
+  "manifest_fingerprint": "sha256:4955d7e8d35d0f6f70fa24bc9f518e92bea43128cb218664b7e746e49e7f9a78",
+  "tenant": "demo",
+  "rules": [
+    {
+      "name": "analysts_read_verified_metrics",
+      "effect": "allow",
+      "roles": [
+        "analyst"
+      ],
+      "metrics": [
+        "*"
+      ],
+      "dimensions": [
+        "*"
+      ]
+    }
+  ]
+}
