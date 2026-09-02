@@ -1,0 +1,20 @@
+{
+  "api_version": "metricspire.io/v1alpha1",
+  "kind": "SemanticQuery",
+  "metrics": ["gross_revenue", "order_count", "average_order_value"],
+  "group_by": ["customer_segment", "order_status"],
+  "filters": [
+    {
+      "dimension": "order_id",
+      "operator": "in",
+      "values": ["1", "2", "3", "4", "5"]
+    }
+  ],
+  "order_by": [
+    {
+      "field": "average_order_value",
+      "direction": "desc"
+    }
+  ],
+  "limit": 10
+}

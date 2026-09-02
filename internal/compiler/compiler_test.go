@@ -108,6 +108,30 @@ func TestDerivedMetricCannotWidenDependencyDimensions(t *testing.T) {
 	assertProblem(t, err, "invalid_metric")
 }
 
+func TestCompileRejectsDeclaredValueTypeThatDiffersFromExpression(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		metric    string
+		valueType model.DataType
+	}{
+		{name: "integer sum declared decimal", metric: "order_count", valueType: model.DataTypeDecimal},
+		{name: "division declared integer", metric: "refund_rate", valueType: model.DataTypeInteger},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := loadSource(t)
+			for i := range source.Spec.Metrics {
+				if source.Spec.Metrics[i].Name == test.metric {
+					source.Spec.Metrics[i].ValueType = test.valueType
+				}
+			}
+			_, err := compiler.Compile(source)
+			assertProblem(t, err, "invalid_metric")
+		})
+	}
+}
+
 func TestCompilePolicyIsBoundAndDeterministic(t *testing.T) {
 	t.Parallel()
 	manifest, err := compiler.Compile(loadSource(t))

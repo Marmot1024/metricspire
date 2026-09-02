@@ -1,0 +1,116 @@
+api_version: metricspire.io/v1alpha1
+kind: SemanticModel
+metadata:
+  name: tpch_orders
+  version: 1.0.0
+spec:
+  datasets:
+    - name: orders
+      description: Neutral TPCH order facts from the Databricks samples catalog.
+      fields:
+        - name: order_id
+          data_type: integer
+        - name: customer_id
+          data_type: integer
+        - name: order_status
+          data_type: string
+        - name: total_price
+          data_type: decimal
+        - name: order_date
+          data_type: date
+    - name: customers
+      description: Neutral TPCH customer attributes from the Databricks samples catalog.
+      fields:
+        - name: customer_id
+          data_type: integer
+        - name: market_segment
+          data_type: string
+  entities:
+    - name: orders
+      dataset: orders
+      key: order_id
+    - name: customers
+      dataset: customers
+      key: customer_id
+  dimensions:
+    - name: order_id
+      description: Stable order identifier used to keep acceptance queries small.
+      entity: orders
+      field: order_id
+      type: categorical
+    - name: order_status
+      description: TPCH order status.
+      entity: orders
+      field: order_status
+      type: categorical
+    - name: order_date
+      description: TPCH order date.
+      entity: orders
+      field: order_date
+      type: time
+      time_granularities: [day, month]
+    - name: customer_segment
+      description: TPCH customer market segment.
+      entity: customers
+      field: market_segment
+      type: categorical
+  relationships:
+    - name: orders_customer
+      from_entity: orders
+      to_entity: customers
+      cardinality: many_to_one
+      from_field: customer_id
+      to_field: customer_id
+  metrics:
+    - name: gross_revenue
+      display_name: Gross revenue
+      description: Sum of total price for the selected TPCH orders.
+      owner: metricspire-maintainers
+      tags: [acceptance, tpch]
+      entity: orders
+      kind: aggregate
+      value_type: decimal
+      unit: currency
+      expression:
+        op: sum
+        field: orders.total_price
+      allowed_dimensions: [order_id, order_status, order_date, customer_segment]
+      verification:
+        status: verified
+        evidence: [databricks_samples_tpch_reconciliation]
+    - name: order_count
+      display_name: Order count
+      description: Count of selected TPCH orders.
+      owner: metricspire-maintainers
+      tags: [acceptance, tpch]
+      entity: orders
+      kind: aggregate
+      value_type: integer
+      unit: orders
+      expression:
+        op: count
+        field: orders.order_id
+      allowed_dimensions: [order_id, order_status, order_date, customer_segment]
+      verification:
+        status: verified
+        evidence: [databricks_samples_tpch_reconciliation]
+    - name: average_order_value
+      display_name: Average order value
+      description: Gross revenue divided by order count for the selected TPCH orders.
+      owner: metricspire-maintainers
+      tags: [acceptance, tpch]
+      entity: orders
+      kind: derived
+      value_type: decimal
+      unit: currency_per_order
+      expression:
+        op: divide
+        args:
+          - op: metric
+            metric: gross_revenue
+          - op: metric
+            metric: order_count
+      allowed_dimensions: [order_id, order_status, order_date, customer_segment]
+      verification:
+        status: verified
+        evidence: [databricks_samples_tpch_reconciliation]

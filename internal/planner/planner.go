@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,11 +19,16 @@ import (
 )
 
 const (
-	DefaultLimit = 1000
-	MaximumLimit = 10000
+	DefaultLimit        = 1000
+	MaximumLimit        = 10000
+	MaximumMetrics      = 32
+	MaximumDimensions   = 16
+	MaximumFilters      = 32
+	MaximumFilterValues = 100
 )
 
 var physicalNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$]*$`)
+var decimalValuePattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?$`)
 
 type manifestIndex struct {
 	datasets      map[string]model.Dataset
@@ -45,11 +51,11 @@ func BuildLogical(manifest model.SemanticManifest, bundle model.PolicyBundle, co
 	if query.Kind != model.KindSemanticQuery {
 		return model.LogicalPlan{}, problem("invalid_kind", "kind", "must be %q", model.KindSemanticQuery)
 	}
-	if query.ManifestFingerprint != manifest.Fingerprint {
-		return model.LogicalPlan{}, problem("manifest_mismatch", "manifest_fingerprint", "does not match compiled manifest")
-	}
 	if len(query.Metrics) == 0 {
 		return model.LogicalPlan{}, problem("required", "metrics", "must not be empty")
+	}
+	if err := validateRequestBudget(query); err != nil {
+		return model.LogicalPlan{}, err
 	}
 	if err := rejectDuplicates(query.Metrics, "metrics"); err != nil {
 		return model.LogicalPlan{}, err
@@ -57,7 +63,7 @@ func BuildLogical(manifest model.SemanticManifest, bundle model.PolicyBundle, co
 	if err := rejectDuplicates(query.GroupBy, "group_by"); err != nil {
 		return model.LogicalPlan{}, err
 	}
-	if _, err := policy.Authorize(context, bundle, query); err != nil {
+	if _, err := policy.Authorize(context, bundle, manifest.Fingerprint, query); err != nil {
 		return model.LogicalPlan{}, err
 	}
 
@@ -70,6 +76,9 @@ func BuildLogical(manifest model.SemanticManifest, bundle model.PolicyBundle, co
 		}
 		if metric.Verification.Status != model.VerificationVerified {
 			return model.LogicalPlan{}, problem("metric_not_verified", fmt.Sprintf("metrics[%d]", i), "metric %q is not verified", name)
+		}
+		if metric.Deprecated {
+			return model.LogicalPlan{}, problem("metric_deprecated", fmt.Sprintf("metrics[%d]", i), "metric %q is deprecated", name)
 		}
 		if rootEntity == "" {
 			rootEntity = metric.Entity
@@ -146,6 +155,24 @@ func BuildLogical(manifest model.SemanticManifest, bundle model.PolicyBundle, co
 	return plan, nil
 }
 
+func validateRequestBudget(query model.SemanticQuery) error {
+	if len(query.Metrics) > MaximumMetrics {
+		return problem("budget_exceeded", "metrics", "must contain at most %d metrics", MaximumMetrics)
+	}
+	if len(requestedDimensions(query)) > MaximumDimensions {
+		return problem("budget_exceeded", "dimensions", "must reference at most %d dimensions", MaximumDimensions)
+	}
+	if len(query.Filters) > MaximumFilters {
+		return problem("budget_exceeded", "filters", "must contain at most %d filters", MaximumFilters)
+	}
+	for i, filter := range query.Filters {
+		if len(filter.Values) > MaximumFilterValues {
+			return problem("budget_exceeded", fmt.Sprintf("filters[%d].values", i), "must contain at most %d values", MaximumFilterValues)
+		}
+	}
+	return nil
+}
+
 func BuildPhysical(manifest model.SemanticManifest, logical model.LogicalPlan, binding model.SourceBinding, capabilities model.EngineCapabilities) (model.PhysicalPlan, error) {
 	if err := compiler.VerifyManifest(manifest); err != nil {
 		return model.PhysicalPlan{}, err
@@ -163,9 +190,10 @@ func BuildPhysical(manifest model.SemanticManifest, logical model.LogicalPlan, b
 	if binding.APIVersion != model.APIVersion || binding.Kind != model.KindSourceBinding {
 		return model.PhysicalPlan{}, problem("invalid_binding", "binding", "invalid source binding contract")
 	}
-	if binding.ManifestFingerprint != manifest.Fingerprint {
+	if binding.ManifestFingerprint != "" && binding.ManifestFingerprint != manifest.Fingerprint {
 		return model.PhysicalPlan{}, problem("manifest_mismatch", "binding.manifest_fingerprint", "does not match manifest")
 	}
+	binding.ManifestFingerprint = manifest.Fingerprint
 	if strings.TrimSpace(binding.Engine) == "" || strings.TrimSpace(capabilities.Engine) == "" || binding.Engine != capabilities.Engine {
 		return model.PhysicalPlan{}, problem("capability_mismatch", "engine", "binding and capabilities must name the same engine")
 	}
@@ -184,6 +212,11 @@ func BuildPhysical(manifest model.SemanticManifest, logical model.LogicalPlan, b
 		for _, operation := range expressionOperations(metric.Expression) {
 			if !slices.Contains(capabilities.ExpressionOps, operation) {
 				return model.PhysicalPlan{}, problem("capability_missing", "metrics", "engine does not support expression operation %s", operation)
+			}
+		}
+		for _, operator := range expressionFilterOperators(metric.Expression) {
+			if !slices.Contains(capabilities.MetricFilterOperators, operator) {
+				return model.PhysicalPlan{}, problem("capability_missing", "metrics", "engine does not support metric filter operator %s", operator)
 			}
 		}
 	}
@@ -212,7 +245,9 @@ func BuildPhysical(manifest model.SemanticManifest, logical model.LogicalPlan, b
 			return model.PhysicalPlan{}, problem("binding_missing", "binding.datasets", "field %s.%s is not bound", entity.Dataset, dimension.Field)
 		}
 		physicalDimensions = append(physicalDimensions, model.PhysicalDimension{
-			Name: dimension.Name, Output: dimension.Output, Resource: datasetBinding.Resource, Column: column, Type: dimension.Type,
+			Name: dimension.Name, Output: dimension.Output, Entity: dimension.Entity,
+			Resource: datasetBinding.Resource, Column: column, Type: dimension.Type,
+			DataType: dimension.DataType,
 		})
 	}
 	physicalJoins := make([]model.PhysicalJoin, 0, len(logical.Joins))
@@ -227,7 +262,7 @@ func BuildPhysical(manifest model.SemanticManifest, logical model.LogicalPlan, b
 			return model.PhysicalPlan{}, problem("binding_missing", "binding.datasets", "join %q fields are not fully bound", join.Name)
 		}
 		physicalJoins = append(physicalJoins, model.PhysicalJoin{
-			Name: join.Name, Cardinality: join.Cardinality,
+			Name: join.Name, Cardinality: join.Cardinality, FromEntity: join.FromEntity, ToEntity: join.ToEntity,
 			FromResource: fromBinding.Resource, FromColumn: fromColumn,
 			ToResource: toBinding.Resource, ToColumn: toColumn,
 		})
@@ -241,7 +276,7 @@ func BuildPhysical(manifest model.SemanticManifest, logical model.LogicalPlan, b
 		PolicyFingerprint:   logical.PolicyFingerprint,
 		BindingFingerprint:  bindingFingerprint,
 		Engine:              binding.Engine,
-		Root:                model.PhysicalDataset{Name: rootEntity.Dataset, Resource: rootBinding.Resource},
+		Root:                model.PhysicalDataset{Name: rootEntity.Dataset, Entity: logical.RootEntity, Resource: rootBinding.Resource},
 		Metrics:             logical.Metrics,
 		MetricFields:        metricFields,
 		Dimensions:          physicalDimensions,
@@ -259,6 +294,21 @@ func BuildPhysical(manifest model.SemanticManifest, logical model.LogicalPlan, b
 	}
 	plan.Fingerprint = fingerprint
 	return plan, nil
+}
+
+// VerifyPhysical detects mutation between planning and engine execution.
+func VerifyPhysical(plan model.PhysicalPlan) error {
+	if plan.APIVersion != model.APIVersion || plan.Kind != model.KindPhysicalPlan || plan.Fingerprint == "" {
+		return problem("invalid_physical_plan", "physical_plan", "plan is not a compiled MetricSpire artifact")
+	}
+	fingerprint, err := fingerprintWithoutField(plan)
+	if err != nil {
+		return fmt.Errorf("verify physical plan fingerprint: %w", err)
+	}
+	if fingerprint != plan.Fingerprint {
+		return problem("fingerprint_mismatch", "physical_plan.fingerprint", "physical plan content does not match fingerprint")
+	}
+	return nil
 }
 
 func indexManifest(manifest model.SemanticManifest) manifestIndex {
@@ -303,7 +353,8 @@ func validateFilters(index manifestIndex, filters []model.Filter) error {
 			return problem("duplicate_value", path+".dimension", "dimension %q has multiple filters", filter.Dimension)
 		}
 		seen[filter.Dimension] = struct{}{}
-		if _, exists := index.dimensions[filter.Dimension]; !exists {
+		dimension, exists := index.dimensions[filter.Dimension]
+		if !exists {
 			return problem("unknown_reference", path+".dimension", "dimension %q does not exist", filter.Dimension)
 		}
 		if filter.Operator != model.FilterEqual && filter.Operator != model.FilterIn {
@@ -315,6 +366,45 @@ func validateFilters(index manifestIndex, filters []model.Filter) error {
 		if err := rejectDuplicates(filter.Values, path+".values"); err != nil {
 			return err
 		}
+		entity := index.entities[dimension.Entity]
+		field, _ := datasetField(index.datasets[entity.Dataset], dimension.Field)
+		for valueIndex, value := range filter.Values {
+			if err := validateScalarValue(value, field.DataType); err != nil {
+				return problem("invalid_filter", fmt.Sprintf("%s.values[%d]", path, valueIndex), "%v", err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateScalarValue(value string, dataType model.DataType) error {
+	switch dataType {
+	case model.DataTypeString:
+		if strings.ContainsAny(value, "\x00\r\n") {
+			return fmt.Errorf("string contains a control character")
+		}
+	case model.DataTypeInteger:
+		if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+			return fmt.Errorf("%q is not an integer", value)
+		}
+	case model.DataTypeDecimal:
+		if !decimalValuePattern.MatchString(value) {
+			return fmt.Errorf("%q is not a decimal", value)
+		}
+	case model.DataTypeBoolean:
+		if _, err := strconv.ParseBool(value); err != nil {
+			return fmt.Errorf("%q is not a boolean", value)
+		}
+	case model.DataTypeDate:
+		if _, err := time.Parse(time.DateOnly, value); err != nil {
+			return fmt.Errorf("%q is not an ISO date", value)
+		}
+	case model.DataTypeTimestamp:
+		if _, err := time.Parse(time.RFC3339Nano, value); err != nil {
+			return fmt.Errorf("%q is not an RFC3339 timestamp", value)
+		}
+	default:
+		return fmt.Errorf("unsupported data type %q", dataType)
 	}
 	return nil
 }
@@ -456,6 +546,9 @@ func planMetrics(index manifestIndex, outputs []string) ([]model.PlannedMetric, 
 		if metric.Verification.Status != model.VerificationVerified {
 			return problem("metric_not_verified", "metrics", "dependency metric %q is not verified", name)
 		}
+		if metric.Deprecated {
+			return problem("metric_deprecated", "metrics", "dependency metric %q is deprecated", name)
+		}
 		dependencies := metricDependencies(metric.Expression)
 		for _, dependency := range dependencies {
 			if err := add(dependency); err != nil {
@@ -483,16 +576,29 @@ func planMetrics(index manifestIndex, outputs []string) ([]model.PlannedMetric, 
 }
 
 func planDimensions(index manifestIndex, query model.SemanticQuery) ([]model.PlannedDimension, []string) {
-	names := requestedDimensions(query)
 	outputs := make(map[string]bool, len(query.GroupBy))
+	names := append([]string(nil), query.GroupBy...)
 	for _, name := range query.GroupBy {
 		outputs[name] = true
 	}
+	auxiliary := make([]string, 0)
+	for _, name := range requestedDimensions(query) {
+		if !outputs[name] {
+			auxiliary = append(auxiliary, name)
+		}
+	}
+	slices.Sort(auxiliary)
+	names = append(names, auxiliary...)
 	result := make([]model.PlannedDimension, 0, len(names))
 	entities := make(map[string]struct{})
 	for _, name := range names {
 		dimension := index.dimensions[name]
-		result = append(result, model.PlannedDimension{Name: name, Output: outputs[name], Entity: dimension.Entity, Field: dimension.Field, Type: dimension.Type})
+		entity := index.entities[dimension.Entity]
+		field, _ := datasetField(index.datasets[entity.Dataset], dimension.Field)
+		result = append(result, model.PlannedDimension{
+			Name: name, Output: outputs[name], Entity: dimension.Entity, Field: dimension.Field,
+			Type: dimension.Type, DataType: field.DataType,
+		})
 		entities[dimension.Entity] = struct{}{}
 	}
 	targets := make([]string, 0, len(entities))
@@ -659,6 +765,26 @@ func expressionOperations(expression model.Expression) []model.ExpressionOp {
 	return result
 }
 
+func expressionFilterOperators(expression model.Expression) []model.MetricFilterOperator {
+	set := make(map[model.MetricFilterOperator]struct{})
+	var walk func(model.Expression)
+	walk = func(value model.Expression) {
+		for _, filter := range value.Filters {
+			set[filter.Operator] = struct{}{}
+		}
+		for _, argument := range value.Args {
+			walk(argument)
+		}
+	}
+	walk(expression)
+	result := make([]model.MetricFilterOperator, 0, len(set))
+	for operator := range set {
+		result = append(result, operator)
+	}
+	slices.Sort(result)
+	return result
+}
+
 func normalizeAndValidateBinding(binding model.SourceBinding, manifest model.SemanticManifest, required []string) (model.SourceBinding, map[string]model.DatasetBinding, error) {
 	if !regexp.MustCompile(`^[a-z][a-z0-9_]*$`).MatchString(binding.Metadata.Name) || binding.Metadata.Version == "" {
 		return model.SourceBinding{}, nil, problem("invalid_binding", "binding.metadata", "name and version are required")
@@ -721,6 +847,9 @@ func bindMetricFields(metrics []model.PlannedMetric, index manifestIndex, bindin
 		if expression.Field != "" {
 			logicalFields[expression.Field] = struct{}{}
 		}
+		for _, filter := range expression.Filters {
+			logicalFields[filter.Field] = struct{}{}
+		}
 		for _, argument := range expression.Args {
 			collect(argument)
 		}
@@ -751,7 +880,13 @@ func bindMetricFields(metrics []model.PlannedMetric, index manifestIndex, bindin
 		if !exists {
 			return nil, problem("binding_missing", "expression.field", "field %s.%s is not bound", entity.Dataset, fieldName)
 		}
-		result = append(result, model.PhysicalField{Entity: entityName, Field: fieldName, Resource: binding.Resource, Column: column})
+		semanticField, exists := datasetField(index.datasets[entity.Dataset], fieldName)
+		if !exists {
+			return nil, problem("unknown_reference", "expression.field", "field %s.%s does not exist", entity.Dataset, fieldName)
+		}
+		result = append(result, model.PhysicalField{
+			Entity: entityName, Field: fieldName, Resource: binding.Resource, Column: column, DataType: semanticField.DataType,
+		})
 	}
 	return result, nil
 }
@@ -791,6 +926,15 @@ func boundColumn(binding model.DatasetBinding, name string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func datasetField(dataset model.Dataset, name string) (model.Field, bool) {
+	for _, field := range dataset.Fields {
+		if field.Name == name {
+			return field, true
+		}
+	}
+	return model.Field{}, false
 }
 
 func fingerprintWithoutField(value any) (string, error) {

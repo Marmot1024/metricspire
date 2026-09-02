@@ -4,17 +4,19 @@ package compiler
 import (
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/marmot1024/metricspire/internal/canonical"
 	"github.com/marmot1024/metricspire/internal/model"
 )
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+var decimalPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?$`)
 
 type catalog struct {
 	datasets      map[string]model.Dataset
@@ -233,9 +235,11 @@ func normalizeSpec(spec *model.SemanticSpec) {
 		slices.Sort(spec.Dimensions[i].TimeGranularities)
 	}
 	for i := range spec.Metrics {
+		slices.Sort(spec.Metrics[i].Tags)
 		slices.Sort(spec.Metrics[i].AllowedDimensions)
 		slices.Sort(spec.Metrics[i].Verification.Evidence)
 		slices.Sort(spec.Metrics[i].Verification.OpenQuestions)
+		normalizeExpression(&spec.Metrics[i].Expression)
 	}
 	sort.Slice(spec.Datasets, func(i, j int) bool { return spec.Datasets[i].Name < spec.Datasets[j].Name })
 	sort.Slice(spec.Entities, func(i, j int) bool { return spec.Entities[i].Name < spec.Entities[j].Name })
@@ -383,8 +387,16 @@ func validateSpec(spec model.SemanticSpec) (catalog, error) {
 		if metric.ValueType != model.DataTypeInteger && metric.ValueType != model.DataTypeDecimal {
 			return result, problem("invalid_metric", path+".value_type", "metric value type must be integer or decimal")
 		}
-		if metric.Verification.Status != model.VerificationDraft && metric.Verification.Status != model.VerificationVerified {
-			return result, problem("invalid_metric", path+".verification.status", "must be draft or verified")
+		if metric.Verification.Status != model.VerificationUnverified && metric.Verification.Status != model.VerificationVerified {
+			return result, problem("invalid_metric", path+".verification.status", "must be unverified or verified")
+		}
+		if err := rejectDuplicates(metric.Tags, path+".tags"); err != nil {
+			return result, err
+		}
+		for tagIndex, tag := range metric.Tags {
+			if strings.TrimSpace(tag) == "" {
+				return result, problem("invalid_metric", fmt.Sprintf("%s.tags[%d]", path, tagIndex), "tag must not be empty")
+			}
 		}
 		if err := rejectDuplicates(metric.AllowedDimensions, path+".allowed_dimensions"); err != nil {
 			return result, err
@@ -416,19 +428,29 @@ func validateSpec(spec model.SemanticSpec) (catalog, error) {
 		if err := validateExpression(metric.Expression, metric, result, dependencies, path+".expression"); err != nil {
 			return result, err
 		}
+		expressionType, err := inferExpressionType(metric.Expression, result)
+		if err != nil {
+			return result, problem("invalid_expression", path+".expression", "%v", err)
+		}
+		if expressionType != metric.ValueType {
+			return result, problem(
+				"invalid_metric", path+".value_type",
+				"declares %q but expression produces %q", metric.ValueType, expressionType,
+			)
+		}
 		switch metric.Kind {
 		case model.MetricAggregate:
 			if len(dependencies) != 0 {
 				return result, problem("invalid_metric", path+".expression", "aggregate metrics cannot reference other metrics")
 			}
-			if !expressionContains(metric.Expression, model.OpSum) {
-				return result, problem("invalid_metric", path+".expression", "aggregate metrics must contain sum")
+			if !expressionContainsAggregate(metric.Expression) {
+				return result, problem("invalid_metric", path+".expression", "aggregate metrics must contain a supported aggregate")
 			}
 		case model.MetricRatio:
 			if metric.Expression.Op != model.OpDivide || len(dependencies) != 0 {
 				return result, problem("invalid_metric", path+".expression", "ratio metrics must divide field-based expressions")
 			}
-			if !expressionContains(metric.Expression.Args[0], model.OpSum) || !expressionContains(metric.Expression.Args[1], model.OpSum) {
+			if !expressionContainsAggregate(metric.Expression.Args[0]) || !expressionContainsAggregate(metric.Expression.Args[1]) {
 				return result, problem("invalid_metric", path+".expression", "ratio numerator and denominator must each contain an aggregate")
 			}
 		case model.MetricDerived:
@@ -451,12 +473,54 @@ func validateSpec(spec model.SemanticSpec) (catalog, error) {
 	return result, nil
 }
 
-func expressionContains(expression model.Expression, operation model.ExpressionOp) bool {
-	if expression.Op == operation {
+func inferExpressionType(expression model.Expression, index catalog) (model.DataType, error) {
+	switch expression.Op {
+	case model.OpCount, model.OpCountDistinct:
+		return model.DataTypeInteger, nil
+	case model.OpAverage, model.OpDivide, model.OpLiteral:
+		return model.DataTypeDecimal, nil
+	case model.OpSum, model.OpMinimum, model.OpMaximum:
+		entityName, fieldName, _ := strings.Cut(expression.Field, ".")
+		entity, exists := index.entities[entityName]
+		if !exists {
+			return "", fmt.Errorf("expression field entity %q does not exist", entityName)
+		}
+		field, exists := lookupField(index.datasets[entity.Dataset], fieldName)
+		if !exists {
+			return "", fmt.Errorf("expression field %q does not exist", expression.Field)
+		}
+		return field.DataType, nil
+	case model.OpMetric:
+		metric, exists := index.metrics[expression.Metric]
+		if !exists {
+			return "", fmt.Errorf("metric %q does not exist", expression.Metric)
+		}
+		return metric.ValueType, nil
+	case model.OpAdd, model.OpSubtract, model.OpMultiply:
+		left, err := inferExpressionType(expression.Args[0], index)
+		if err != nil {
+			return "", err
+		}
+		right, err := inferExpressionType(expression.Args[1], index)
+		if err != nil {
+			return "", err
+		}
+		if left == model.DataTypeDecimal || right == model.DataTypeDecimal {
+			return model.DataTypeDecimal, nil
+		}
+		return model.DataTypeInteger, nil
+	default:
+		return "", fmt.Errorf("unsupported operation %q", expression.Op)
+	}
+}
+
+func expressionContainsAggregate(expression model.Expression) bool {
+	switch expression.Op {
+	case model.OpSum, model.OpCount, model.OpCountDistinct, model.OpAverage, model.OpMinimum, model.OpMaximum:
 		return true
 	}
 	for _, argument := range expression.Args {
-		if expressionContains(argument, operation) {
+		if expressionContainsAggregate(argument) {
 			return true
 		}
 	}
@@ -468,9 +532,9 @@ func validateExpression(expression model.Expression, metric model.Metric, index 
 		return problem("required", path+".op", "must not be empty")
 	}
 	switch expression.Op {
-	case model.OpSum:
+	case model.OpSum, model.OpCount, model.OpCountDistinct, model.OpAverage, model.OpMinimum, model.OpMaximum:
 		if expression.Field == "" || expression.Metric != "" || expression.Value != "" || len(expression.Args) != 0 {
-			return problem("invalid_expression", path, "sum requires only field")
+			return problem("invalid_expression", path, "%s requires a field and optional constrained filters", expression.Op)
 		}
 		entityName, fieldName, ok := strings.Cut(expression.Field, ".")
 		if !ok || entityName != metric.Entity {
@@ -478,11 +542,23 @@ func validateExpression(expression model.Expression, metric model.Metric, index 
 		}
 		entity := index.entities[entityName]
 		field, exists := lookupField(index.datasets[entity.Dataset], fieldName)
-		if !exists || (field.DataType != model.DataTypeInteger && field.DataType != model.DataTypeDecimal) {
-			return problem("invalid_expression", path+".field", "sum field must exist and be numeric")
+		if !exists {
+			return problem("invalid_expression", path+".field", "aggregate field must exist")
+		}
+		if expression.Op != model.OpCount && expression.Op != model.OpCountDistinct && field.DataType != model.DataTypeInteger && field.DataType != model.DataTypeDecimal {
+			return problem("invalid_expression", path+".field", "%s field must be numeric", expression.Op)
+		}
+		if (expression.Op == model.OpCount || expression.Op == model.OpCountDistinct) && metric.ValueType != model.DataTypeInteger {
+			return problem("invalid_metric", path, "%s metric value_type must be integer", expression.Op)
+		}
+		if expression.Op == model.OpAverage && metric.ValueType != model.DataTypeDecimal {
+			return problem("invalid_metric", path, "avg metric value_type must be decimal")
+		}
+		if err := validateMetricFilters(expression.Filters, metric, index, path+".filters"); err != nil {
+			return err
 		}
 	case model.OpMetric:
-		if expression.Metric == "" || expression.Field != "" || expression.Value != "" || len(expression.Args) != 0 {
+		if expression.Metric == "" || expression.Field != "" || expression.Value != "" || len(expression.Args) != 0 || len(expression.Filters) != 0 {
 			return problem("invalid_expression", path, "metric reference requires only metric")
 		}
 		dependency, exists := index.metrics[expression.Metric]
@@ -494,14 +570,14 @@ func validateExpression(expression model.Expression, metric model.Metric, index 
 		}
 		dependencies[expression.Metric] = struct{}{}
 	case model.OpLiteral:
-		if expression.Value == "" || expression.Field != "" || expression.Metric != "" || len(expression.Args) != 0 {
+		if expression.Value == "" || expression.Field != "" || expression.Metric != "" || len(expression.Args) != 0 || len(expression.Filters) != 0 {
 			return problem("invalid_expression", path, "literal requires only a decimal string value")
 		}
-		if _, ok := new(big.Rat).SetString(expression.Value); !ok {
-			return problem("invalid_expression", path+".value", "must be an exact decimal or rational string")
+		if !decimalPattern.MatchString(expression.Value) {
+			return problem("invalid_expression", path+".value", "must be an exact decimal string")
 		}
 	case model.OpAdd, model.OpSubtract, model.OpMultiply, model.OpDivide:
-		if expression.Field != "" || expression.Metric != "" || expression.Value != "" || len(expression.Args) != 2 {
+		if expression.Field != "" || expression.Metric != "" || expression.Value != "" || len(expression.Args) != 2 || len(expression.Filters) != 0 {
 			return problem("invalid_expression", path, "%s requires exactly two args", expression.Op)
 		}
 		for i, argument := range expression.Args {
@@ -511,6 +587,99 @@ func validateExpression(expression model.Expression, metric model.Metric, index 
 		}
 	default:
 		return problem("invalid_expression", path+".op", "unsupported operation %q", expression.Op)
+	}
+	return nil
+}
+
+func normalizeExpression(expression *model.Expression) {
+	for i := range expression.Args {
+		normalizeExpression(&expression.Args[i])
+	}
+	for i := range expression.Filters {
+		slices.Sort(expression.Filters[i].Values)
+	}
+	sort.Slice(expression.Filters, func(i, j int) bool {
+		if expression.Filters[i].Field != expression.Filters[j].Field {
+			return expression.Filters[i].Field < expression.Filters[j].Field
+		}
+		return expression.Filters[i].Operator < expression.Filters[j].Operator
+	})
+}
+
+func validateMetricFilters(filters []model.MetricFilter, metric model.Metric, index catalog, path string) error {
+	seen := make(map[string]struct{}, len(filters))
+	for i, filter := range filters {
+		filterPath := fmt.Sprintf("%s[%d]", path, i)
+		entityName, fieldName, ok := strings.Cut(filter.Field, ".")
+		if !ok || entityName != metric.Entity {
+			return problem("invalid_expression", filterPath+".field", "filter field must be qualified by metric entity %q", metric.Entity)
+		}
+		entity := index.entities[entityName]
+		field, exists := lookupField(index.datasets[entity.Dataset], fieldName)
+		if !exists {
+			return problem("unknown_reference", filterPath+".field", "field %q does not exist", filter.Field)
+		}
+		key := filter.Field + "\x00" + string(filter.Operator)
+		if _, exists := seen[key]; exists {
+			return problem("duplicate_value", filterPath, "filter %s %s is duplicated", filter.Field, filter.Operator)
+		}
+		seen[key] = struct{}{}
+		switch filter.Operator {
+		case model.MetricFilterEqual, model.MetricFilterNotEqual:
+			if len(filter.Values) != 1 {
+				return problem("invalid_expression", filterPath+".values", "%s requires one value", filter.Operator)
+			}
+		case model.MetricFilterIn, model.MetricFilterNotIn:
+			if len(filter.Values) == 0 {
+				return problem("invalid_expression", filterPath+".values", "%s requires at least one value", filter.Operator)
+			}
+		case model.MetricFilterIsNull, model.MetricFilterIsNotNull:
+			if len(filter.Values) != 0 {
+				return problem("invalid_expression", filterPath+".values", "%s does not accept values", filter.Operator)
+			}
+		default:
+			return problem("invalid_expression", filterPath+".operator", "unsupported filter operator %q", filter.Operator)
+		}
+		if err := rejectDuplicates(filter.Values, filterPath+".values"); err != nil {
+			return err
+		}
+		for valueIndex, value := range filter.Values {
+			if err := validateScalar(value, field.DataType); err != nil {
+				return problem("invalid_expression", fmt.Sprintf("%s.values[%d]", filterPath, valueIndex), "%v", err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateScalar(value string, dataType model.DataType) error {
+	switch dataType {
+	case model.DataTypeString:
+		if strings.ContainsAny(value, "\x00\r\n") {
+			return fmt.Errorf("string contains a control character")
+		}
+	case model.DataTypeInteger:
+		if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+			return fmt.Errorf("%q is not an integer", value)
+		}
+	case model.DataTypeDecimal:
+		if !decimalPattern.MatchString(value) {
+			return fmt.Errorf("%q is not a decimal", value)
+		}
+	case model.DataTypeBoolean:
+		if _, err := strconv.ParseBool(value); err != nil {
+			return fmt.Errorf("%q is not a boolean", value)
+		}
+	case model.DataTypeDate:
+		if _, err := time.Parse(time.DateOnly, value); err != nil {
+			return fmt.Errorf("%q is not an ISO date", value)
+		}
+	case model.DataTypeTimestamp:
+		if _, err := time.Parse(time.RFC3339Nano, value); err != nil {
+			return fmt.Errorf("%q is not an RFC3339 timestamp", value)
+		}
+	default:
+		return fmt.Errorf("unsupported data type %q", dataType)
 	}
 	return nil
 }

@@ -59,7 +59,9 @@ spec:
       to_field: customer_id
   metrics:
     - name: gross_revenue
+      display_name: Gross revenue
       description: Sum of gross order amount before refunds.
+      owner: data-platform
       entity: orders
       kind: aggregate
       value_type: decimal
@@ -73,6 +75,9 @@ spec:
         status: verified
         evidence: [fixture_reconciliation]
     - name: order_count
+      display_name: Order count
+      description: Number of orders represented by the order facts.
+      owner: data-platform
       entity: orders
       kind: aggregate
       value_type: integer
@@ -86,6 +91,9 @@ spec:
         status: verified
         evidence: [fixture_reconciliation]
     - name: refund_rate
+      display_name: Refund rate
+      description: Refunded amount divided by gross revenue.
+      owner: data-platform
       entity: orders
       kind: ratio
       value_type: decimal
@@ -103,6 +111,9 @@ spec:
         status: verified
         evidence: [fixture_reconciliation]
     - name: average_order_value
+      display_name: Average order value
+      description: Gross revenue divided by order count.
+      owner: data-platform
       entity: orders
       kind: derived
       value_type: decimal

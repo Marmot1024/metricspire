@@ -21,7 +21,7 @@ func TestContractRegistryIsValidJSONAndContainsPublicContracts(t *testing.T) {
 	}
 	for _, name := range []string{
 		"SemanticModel", "SemanticManifest", "SourceBinding", "PolicySource", "PolicyBundle",
-		"SemanticQuery", "RequestContext", "EngineCapabilities", "LogicalPlan", "PhysicalPlan", "ExecutionJob", "Problem",
+		"SemanticQuery", "RequestContext", "EngineCapabilities", "LogicalPlan", "PhysicalPlan", "ExecutionJob", "ExecutionSnapshot", "TypedResult", "Problem",
 	} {
 		if len(schema.Definitions[name]) == 0 {
 			t.Errorf("contract registry is missing %s", name)

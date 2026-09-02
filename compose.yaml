@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: metricspire
+      POSTGRES_USER: metricspire
+      POSTGRES_PASSWORD: metricspire_dev_only
+    ports:
+      - "${METRICSPIRE_POSTGRES_PORT:-54329}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metricspire -d metricspire"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - metricspire_postgres:/var/lib/postgresql/data
+
+volumes:
+  metricspire_postgres:

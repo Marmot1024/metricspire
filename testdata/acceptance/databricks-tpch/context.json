@@ -1,0 +1,6 @@
+{
+  "tenant": "acceptance",
+  "principal": "phase2-local-developer",
+  "roles": ["analyst"],
+  "request_id": "phase2-databricks-tpch"
+}

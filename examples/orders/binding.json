@@ -5,7 +5,7 @@
     "name": "demo_binding",
     "version": "1.0.0"
   },
-  "manifest_fingerprint": "sha256:4955d7e8d35d0f6f70fa24bc9f518e92bea43128cb218664b7e746e49e7f9a78",
+  "manifest_fingerprint": "sha256:1c9428c79d43a9387afe6e783ff4a97ae16204403afc517a20f99391c5b7e7d4",
   "engine": "fixture",
   "datasets": [
     {

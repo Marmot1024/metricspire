@@ -112,7 +112,11 @@ const CardinalityManyToOne Cardinality = "many_to_one"
 
 type Metric struct {
 	Name              string       `json:"name" yaml:"name"`
+	DisplayName       string       `json:"display_name,omitempty" yaml:"display_name,omitempty"`
 	Description       string       `json:"description,omitempty" yaml:"description,omitempty"`
+	Owner             string       `json:"owner,omitempty" yaml:"owner,omitempty"`
+	Tags              []string     `json:"tags,omitempty" yaml:"tags,omitempty"`
+	Deprecated        bool         `json:"deprecated,omitempty" yaml:"deprecated,omitempty"`
 	Entity            string       `json:"entity" yaml:"entity"`
 	Kind              MetricKind   `json:"kind" yaml:"kind"`
 	ValueType         DataType     `json:"value_type" yaml:"value_type"`
@@ -132,23 +136,48 @@ const (
 )
 
 type Expression struct {
-	Op     ExpressionOp `json:"op" yaml:"op"`
-	Field  string       `json:"field,omitempty" yaml:"field,omitempty"`
-	Metric string       `json:"metric,omitempty" yaml:"metric,omitempty"`
-	Value  string       `json:"value,omitempty" yaml:"value,omitempty"`
-	Args   []Expression `json:"args,omitempty" yaml:"args,omitempty"`
+	Op      ExpressionOp   `json:"op" yaml:"op"`
+	Field   string         `json:"field,omitempty" yaml:"field,omitempty"`
+	Metric  string         `json:"metric,omitempty" yaml:"metric,omitempty"`
+	Value   string         `json:"value,omitempty" yaml:"value,omitempty"`
+	Args    []Expression   `json:"args,omitempty" yaml:"args,omitempty"`
+	Filters []MetricFilter `json:"filters,omitempty" yaml:"filters,omitempty"`
 }
 
 type ExpressionOp string
 
 const (
-	OpSum      ExpressionOp = "sum"
-	OpMetric   ExpressionOp = "metric"
-	OpLiteral  ExpressionOp = "literal"
-	OpAdd      ExpressionOp = "add"
-	OpSubtract ExpressionOp = "subtract"
-	OpMultiply ExpressionOp = "multiply"
-	OpDivide   ExpressionOp = "divide"
+	OpSum           ExpressionOp = "sum"
+	OpCount         ExpressionOp = "count"
+	OpCountDistinct ExpressionOp = "count_distinct"
+	OpAverage       ExpressionOp = "avg"
+	OpMinimum       ExpressionOp = "min"
+	OpMaximum       ExpressionOp = "max"
+	OpMetric        ExpressionOp = "metric"
+	OpLiteral       ExpressionOp = "literal"
+	OpAdd           ExpressionOp = "add"
+	OpSubtract      ExpressionOp = "subtract"
+	OpMultiply      ExpressionOp = "multiply"
+	OpDivide        ExpressionOp = "divide"
+)
+
+// MetricFilter is a constrained predicate attached to an aggregate expression.
+// It deliberately accepts field names and literal values, never SQL fragments.
+type MetricFilter struct {
+	Field    string               `json:"field" yaml:"field"`
+	Operator MetricFilterOperator `json:"operator" yaml:"operator"`
+	Values   []string             `json:"values,omitempty" yaml:"values,omitempty"`
+}
+
+type MetricFilterOperator string
+
+const (
+	MetricFilterEqual     MetricFilterOperator = "eq"
+	MetricFilterNotEqual  MetricFilterOperator = "neq"
+	MetricFilterIn        MetricFilterOperator = "in"
+	MetricFilterNotIn     MetricFilterOperator = "not_in"
+	MetricFilterIsNull    MetricFilterOperator = "is_null"
+	MetricFilterIsNotNull MetricFilterOperator = "is_not_null"
 )
 
 type Verification struct {
@@ -160,15 +189,15 @@ type Verification struct {
 type VerificationStatus string
 
 const (
-	VerificationDraft    VerificationStatus = "draft"
-	VerificationVerified VerificationStatus = "verified"
+	VerificationUnverified VerificationStatus = "unverified"
+	VerificationVerified   VerificationStatus = "verified"
 )
 
 type SourceBinding struct {
 	APIVersion          string           `json:"api_version" yaml:"api_version"`
 	Kind                string           `json:"kind" yaml:"kind"`
 	Metadata            Metadata         `json:"metadata" yaml:"metadata"`
-	ManifestFingerprint string           `json:"manifest_fingerprint" yaml:"manifest_fingerprint"`
+	ManifestFingerprint string           `json:"manifest_fingerprint,omitempty" yaml:"manifest_fingerprint,omitempty"`
 	Engine              string           `json:"engine" yaml:"engine"`
 	Datasets            []DatasetBinding `json:"datasets" yaml:"datasets"`
 }
@@ -244,16 +273,15 @@ type RequestContext struct {
 }
 
 type SemanticQuery struct {
-	APIVersion          string        `json:"api_version" yaml:"api_version"`
-	Kind                string        `json:"kind" yaml:"kind"`
-	ManifestFingerprint string        `json:"manifest_fingerprint" yaml:"manifest_fingerprint"`
-	Metrics             []string      `json:"metrics" yaml:"metrics"`
-	GroupBy             []string      `json:"group_by,omitempty" yaml:"group_by,omitempty"`
-	TimeRange           *TimeRange    `json:"time_range,omitempty" yaml:"time_range,omitempty"`
-	TimeGrouping        *TimeGrouping `json:"time_grouping,omitempty" yaml:"time_grouping,omitempty"`
-	Filters             []Filter      `json:"filters,omitempty" yaml:"filters,omitempty"`
-	OrderBy             []OrderBy     `json:"order_by,omitempty" yaml:"order_by,omitempty"`
-	Limit               int           `json:"limit,omitempty" yaml:"limit,omitempty"`
+	APIVersion   string        `json:"api_version" yaml:"api_version"`
+	Kind         string        `json:"kind" yaml:"kind"`
+	Metrics      []string      `json:"metrics" yaml:"metrics"`
+	GroupBy      []string      `json:"group_by,omitempty" yaml:"group_by,omitempty"`
+	TimeRange    *TimeRange    `json:"time_range,omitempty" yaml:"time_range,omitempty"`
+	TimeGrouping *TimeGrouping `json:"time_grouping,omitempty" yaml:"time_grouping,omitempty"`
+	Filters      []Filter      `json:"filters,omitempty" yaml:"filters,omitempty"`
+	OrderBy      []OrderBy     `json:"order_by,omitempty" yaml:"order_by,omitempty"`
+	Limit        int           `json:"limit,omitempty" yaml:"limit,omitempty"`
 }
 
 type TimeRange struct {
@@ -331,11 +359,12 @@ type PlannedMetric struct {
 }
 
 type PlannedDimension struct {
-	Name   string        `json:"name"`
-	Output bool          `json:"output"`
-	Entity string        `json:"entity"`
-	Field  string        `json:"field"`
-	Type   DimensionType `json:"type"`
+	Name     string        `json:"name"`
+	Output   bool          `json:"output"`
+	Entity   string        `json:"entity"`
+	Field    string        `json:"field"`
+	Type     DimensionType `json:"type"`
+	DataType DataType      `json:"data_type"`
 }
 
 type PlannedJoin struct {
@@ -355,11 +384,12 @@ type Lineage struct {
 }
 
 type EngineCapabilities struct {
-	Engine            string            `json:"engine" yaml:"engine"`
-	ExpressionOps     []ExpressionOp    `json:"expression_ops" yaml:"expression_ops"`
-	JoinCardinalities []Cardinality     `json:"join_cardinalities" yaml:"join_cardinalities"`
-	TimeGranularities []TimeGranularity `json:"time_granularities" yaml:"time_granularities"`
-	MaxJoins          int               `json:"max_joins" yaml:"max_joins"`
+	Engine                string                 `json:"engine" yaml:"engine"`
+	ExpressionOps         []ExpressionOp         `json:"expression_ops" yaml:"expression_ops"`
+	MetricFilterOperators []MetricFilterOperator `json:"metric_filter_operators,omitempty" yaml:"metric_filter_operators,omitempty"`
+	JoinCardinalities     []Cardinality          `json:"join_cardinalities" yaml:"join_cardinalities"`
+	TimeGranularities     []TimeGranularity      `json:"time_granularities" yaml:"time_granularities"`
+	MaxJoins              int                    `json:"max_joins" yaml:"max_joins"`
 }
 
 type PhysicalPlan struct {
@@ -386,6 +416,7 @@ type PhysicalPlan struct {
 
 type PhysicalDataset struct {
 	Name     string      `json:"name"`
+	Entity   string      `json:"entity"`
 	Resource ResourceRef `json:"resource"`
 }
 
@@ -394,19 +425,24 @@ type PhysicalField struct {
 	Field    string      `json:"field"`
 	Resource ResourceRef `json:"resource"`
 	Column   string      `json:"column"`
+	DataType DataType    `json:"data_type"`
 }
 
 type PhysicalDimension struct {
 	Name     string        `json:"name"`
 	Output   bool          `json:"output"`
+	Entity   string        `json:"entity"`
 	Resource ResourceRef   `json:"resource"`
 	Column   string        `json:"column"`
 	Type     DimensionType `json:"type"`
+	DataType DataType      `json:"data_type"`
 }
 
 type PhysicalJoin struct {
 	Name         string      `json:"name"`
 	Cardinality  Cardinality `json:"cardinality"`
+	FromEntity   string      `json:"from_entity"`
+	ToEntity     string      `json:"to_entity"`
 	FromResource ResourceRef `json:"from_resource"`
 	FromColumn   string      `json:"from_column"`
 	ToResource   ResourceRef `json:"to_resource"`
@@ -427,10 +463,31 @@ type ExecutionJob struct {
 	ID                  string     `json:"id"`
 	Status              JobStatus  `json:"status"`
 	PhysicalFingerprint string     `json:"physical_fingerprint"`
+	RowLimit            int64      `json:"row_limit"`
 	SubmittedAt         time.Time  `json:"submitted_at"`
 	StartedAt           *time.Time `json:"started_at,omitempty"`
 	FinishedAt          *time.Time `json:"finished_at,omitempty"`
 	Error               *Problem   `json:"error,omitempty"`
+}
+
+type ExecutionSnapshot struct {
+	Job    ExecutionJob `json:"job"`
+	Result *TypedResult `json:"result,omitempty"`
+}
+
+// TypedResult keeps Databricks' exact schema alongside decoded scalar rows.
+// Decimal, date, and timestamp values remain strings to avoid precision or
+// timezone loss at the service boundary.
+type TypedResult struct {
+	Columns   []ResultColumn `json:"columns"`
+	Rows      [][]any        `json:"rows"`
+	Truncated bool           `json:"truncated"`
+}
+
+type ResultColumn struct {
+	Name     string `json:"name"`
+	TypeName string `json:"type_name"`
+	TypeText string `json:"type_text"`
 }
 
 type Problem struct {

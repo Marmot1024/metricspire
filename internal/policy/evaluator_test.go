@@ -10,7 +10,7 @@ import (
 func TestAuthorizeFailsClosedAndHonorsExplicitDeny(t *testing.T) {
 	t.Parallel()
 	query := model.SemanticQuery{
-		ManifestFingerprint: "manifest", Metrics: []string{"revenue"}, GroupBy: []string{"region"},
+		Metrics: []string{"revenue"}, GroupBy: []string{"region"},
 	}
 	context := model.RequestContext{Tenant: "demo", Principal: "alice", Roles: []string{"analyst"}, RequestID: "r1"}
 	base := model.PolicyBundle{
@@ -19,7 +19,7 @@ func TestAuthorizeFailsClosedAndHonorsExplicitDeny(t *testing.T) {
 	}
 
 	t.Run("allow", func(t *testing.T) {
-		decision, err := Authorize(context, base, query)
+		decision, err := Authorize(context, base, "manifest", query)
 		if err != nil || !decision.Allowed {
 			t.Fatalf("Authorize() = %#v, %v", decision, err)
 		}
@@ -27,19 +27,19 @@ func TestAuthorizeFailsClosedAndHonorsExplicitDeny(t *testing.T) {
 	t.Run("no matching rule", func(t *testing.T) {
 		candidate := base
 		candidate.Rules = nil
-		_, err := Authorize(context, candidate, query)
+		_, err := Authorize(context, candidate, "manifest", query)
 		assertDenied(t, err)
 	})
 	t.Run("tenant mismatch", func(t *testing.T) {
 		candidate := context
 		candidate.Tenant = "other"
-		_, err := Authorize(candidate, base, query)
+		_, err := Authorize(candidate, base, "manifest", query)
 		assertDenied(t, err)
 	})
 	t.Run("incomplete trusted context", func(t *testing.T) {
 		candidate := context
 		candidate.RequestID = ""
-		_, err := Authorize(candidate, base, query)
+		_, err := Authorize(candidate, base, "manifest", query)
 		assertDenied(t, err)
 	})
 	t.Run("explicit deny wins", func(t *testing.T) {
@@ -47,7 +47,7 @@ func TestAuthorizeFailsClosedAndHonorsExplicitDeny(t *testing.T) {
 		candidate.Rules = append(candidate.Rules, model.PolicyRule{
 			Name: "deny_region", Effect: model.EffectDeny, Principals: []string{"alice"}, Metrics: []string{"other"}, Dimensions: []string{"region"},
 		})
-		_, err := Authorize(context, candidate, query)
+		_, err := Authorize(context, candidate, "manifest", query)
 		assertDenied(t, err)
 	})
 }

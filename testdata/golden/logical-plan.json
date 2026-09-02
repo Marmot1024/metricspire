@@ -1,10 +1,10 @@
 {
   "api_version": "metricspire.io/v1alpha1",
   "kind": "LogicalPlan",
-  "fingerprint": "sha256:bbe57573d498be67e62ec7ff53c1889f1c8a863ca7643f533f9929a6014c2bea",
-  "manifest_fingerprint": "sha256:4955d7e8d35d0f6f70fa24bc9f518e92bea43128cb218664b7e746e49e7f9a78",
-  "policy_fingerprint": "sha256:273ce477ecd1be8fa50edd6b5a03798b514deecc8deabd558e26761820897512",
-  "query_fingerprint": "sha256:87440ce20503026230349ca396713a3b4a7ca7252bade917270f58aa019cce8e",
+  "fingerprint": "sha256:1d41c8847224cfa46d43e625b3d41cce7aea8d1e5bbb162ce127235e9a34b799",
+  "manifest_fingerprint": "sha256:1c9428c79d43a9387afe6e783ff4a97ae16204403afc517a20f99391c5b7e7d4",
+  "policy_fingerprint": "sha256:413cd5982862629cbb92c8a19c3ddaa167332c721e0e277b95110cc7f157578a",
+  "query_fingerprint": "sha256:d733eae7ad69b7bfb24bc06d2c8e4dbb46391d33b01e7c4e4935d18c41c0aa67",
   "root_entity": "orders",
   "metrics": [
     {
@@ -76,25 +76,28 @@
   ],
   "dimensions": [
     {
-      "name": "customer_region",
-      "output": false,
-      "entity": "customers",
-      "field": "region",
-      "type": "categorical"
+      "name": "order_date",
+      "output": true,
+      "entity": "orders",
+      "field": "order_ts",
+      "type": "time",
+      "data_type": "timestamp"
     },
     {
       "name": "customer_segment",
       "output": true,
       "entity": "customers",
       "field": "segment",
-      "type": "categorical"
+      "type": "categorical",
+      "data_type": "string"
     },
     {
-      "name": "order_date",
-      "output": true,
-      "entity": "orders",
-      "field": "order_ts",
-      "type": "time"
+      "name": "customer_region",
+      "output": false,
+      "entity": "customers",
+      "field": "region",
+      "type": "categorical",
+      "data_type": "string"
     }
   ],
   "joins": [

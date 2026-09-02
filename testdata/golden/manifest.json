@@ -5,7 +5,7 @@
     "name": "commerce",
     "version": "1.0.0"
   },
-  "fingerprint": "sha256:4955d7e8d35d0f6f70fa24bc9f518e92bea43128cb218664b7e746e49e7f9a78",
+  "fingerprint": "sha256:1c9428c79d43a9387afe6e783ff4a97ae16204403afc517a20f99391c5b7e7d4",
   "definitions": {
     "datasets": [
       {
@@ -107,6 +107,9 @@
     "metrics": [
       {
         "name": "average_order_value",
+        "display_name": "Average order value",
+        "description": "Gross revenue divided by order count.",
+        "owner": "data-platform",
         "entity": "orders",
         "kind": "derived",
         "value_type": "decimal",
@@ -139,7 +142,9 @@
       },
       {
         "name": "gross_revenue",
+        "display_name": "Gross revenue",
         "description": "Sum of gross order amount before refunds.",
+        "owner": "data-platform",
         "entity": "orders",
         "kind": "aggregate",
         "value_type": "decimal",
@@ -163,6 +168,9 @@
       },
       {
         "name": "order_count",
+        "display_name": "Order count",
+        "description": "Number of orders represented by the order facts.",
+        "owner": "data-platform",
         "entity": "orders",
         "kind": "aggregate",
         "value_type": "integer",
@@ -186,6 +194,9 @@
       },
       {
         "name": "refund_rate",
+        "display_name": "Refund rate",
+        "description": "Refunded amount divided by gross revenue.",
+        "owner": "data-platform",
         "entity": "orders",
         "kind": "ratio",
         "value_type": "decimal",

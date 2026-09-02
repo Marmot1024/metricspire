@@ -14,15 +14,15 @@ type Decision struct {
 	MatchedRules []string
 }
 
-func Authorize(context model.RequestContext, bundle model.PolicyBundle, query model.SemanticQuery) (Decision, error) {
+func Authorize(context model.RequestContext, bundle model.PolicyBundle, manifestFingerprint string, query model.SemanticQuery) (Decision, error) {
 	if strings.TrimSpace(context.Tenant) == "" || strings.TrimSpace(context.Principal) == "" || strings.TrimSpace(context.RequestID) == "" {
 		return Decision{}, denied("trusted request context is incomplete")
 	}
 	if context.Tenant != bundle.Tenant {
 		return Decision{}, denied("tenant does not match policy bundle")
 	}
-	if query.ManifestFingerprint != bundle.ManifestFingerprint {
-		return Decision{}, denied("query manifest does not match policy bundle")
+	if manifestFingerprint == "" || manifestFingerprint != bundle.ManifestFingerprint {
+		return Decision{}, denied("active manifest does not match policy bundle")
 	}
 
 	dimensions := requestedDimensions(query)

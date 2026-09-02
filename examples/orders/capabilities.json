@@ -1,6 +1,7 @@
 {
   "engine": "fixture",
-  "expression_ops": ["sum", "metric", "literal", "add", "subtract", "multiply", "divide"],
+  "expression_ops": ["sum", "count", "count_distinct", "avg", "min", "max", "metric", "literal", "add", "subtract", "multiply", "divide"],
+  "metric_filter_operators": ["eq", "neq", "in", "not_in", "is_null", "is_not_null"],
   "join_cardinalities": ["many_to_one"],
   "time_granularities": ["day", "week", "month"],
   "max_joins": 4

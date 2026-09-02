@@ -1,0 +1,37 @@
+{
+  "columns": [
+    {
+      "name": "customer_segment",
+      "type_name": "STRING",
+      "type_text": "STRING"
+    },
+    {
+      "name": "order_status",
+      "type_name": "STRING",
+      "type_text": "STRING"
+    },
+    {
+      "name": "gross_revenue",
+      "type_name": "DECIMAL",
+      "type_text": "DECIMAL(28,2)"
+    },
+    {
+      "name": "order_count",
+      "type_name": "LONG",
+      "type_text": "BIGINT"
+    },
+    {
+      "name": "average_order_value",
+      "type_name": "DECIMAL",
+      "type_text": "DECIMAL(38,12)"
+    }
+  ],
+  "rows": [
+    ["BUILDING", "F", "228570.52", 1, "228570.520000000000"],
+    ["BUILDING", "O", "203010.51", 1, "203010.510000000000"],
+    ["AUTOMOBILE", "F", "151840.11", 1, "151840.110000000000"],
+    ["MACHINERY", "O", "75004.81", 1, "75004.810000000000"],
+    ["AUTOMOBILE", "O", "35015.50", 1, "35015.500000000000"]
+  ],
+  "truncated": false
+}

@@ -5,8 +5,8 @@
     "name": "demo_access",
     "version": "1.0.0"
   },
-  "fingerprint": "sha256:273ce477ecd1be8fa50edd6b5a03798b514deecc8deabd558e26761820897512",
-  "manifest_fingerprint": "sha256:4955d7e8d35d0f6f70fa24bc9f518e92bea43128cb218664b7e746e49e7f9a78",
+  "fingerprint": "sha256:413cd5982862629cbb92c8a19c3ddaa167332c721e0e277b95110cc7f157578a",
+  "manifest_fingerprint": "sha256:1c9428c79d43a9387afe6e783ff4a97ae16204403afc517a20f99391c5b7e7d4",
   "tenant": "demo",
   "rules": [
     {

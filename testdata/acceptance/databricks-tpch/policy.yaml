@@ -1,0 +1,12 @@
+api_version: metricspire.io/v1alpha1
+kind: PolicySource
+metadata:
+  name: tpch_acceptance_access
+  version: 1.0.0
+tenant: acceptance
+rules:
+  - name: local_analyst_reads_acceptance_metrics
+    effect: allow
+    roles: [analyst]
+    metrics: ['*']
+    dimensions: ['*']

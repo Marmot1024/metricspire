@@ -1,14 +1,15 @@
 {
   "api_version": "metricspire.io/v1alpha1",
   "kind": "PhysicalPlan",
-  "fingerprint": "sha256:ca41d64a41e704f3a2e26dbc2467e40d9597d8ed0b5e3f24c90bb15e01aae597",
-  "logical_fingerprint": "sha256:bbe57573d498be67e62ec7ff53c1889f1c8a863ca7643f533f9929a6014c2bea",
-  "manifest_fingerprint": "sha256:4955d7e8d35d0f6f70fa24bc9f518e92bea43128cb218664b7e746e49e7f9a78",
-  "policy_fingerprint": "sha256:273ce477ecd1be8fa50edd6b5a03798b514deecc8deabd558e26761820897512",
-  "binding_fingerprint": "sha256:f7567b4a841ec71a63fc33dfbceba28a6348bcaa1b08065c7b425cfa71557199",
+  "fingerprint": "sha256:a4540798ce87d5b1eec4fa21e595010b6b9faeddaa89ad3accd04bb8bbdcd662",
+  "logical_fingerprint": "sha256:1d41c8847224cfa46d43e625b3d41cce7aea8d1e5bbb162ce127235e9a34b799",
+  "manifest_fingerprint": "sha256:1c9428c79d43a9387afe6e783ff4a97ae16204403afc517a20f99391c5b7e7d4",
+  "policy_fingerprint": "sha256:413cd5982862629cbb92c8a19c3ddaa167332c721e0e277b95110cc7f157578a",
+  "binding_fingerprint": "sha256:773701d0aa3d589c94881d4c3dd38a8b43543fb002fda8369020e771cdbefc25",
   "engine": "fixture",
   "root": {
     "name": "orders",
+    "entity": "orders",
     "resource": {
       "kind": "table",
       "catalog": "demo",
@@ -94,7 +95,8 @@
         "schema": "public",
         "table": "orders"
       },
-      "column": "gross_amount"
+      "column": "gross_amount",
+      "data_type": "decimal"
     },
     {
       "entity": "orders",
@@ -105,7 +107,8 @@
         "schema": "public",
         "table": "orders"
       },
-      "column": "order_count"
+      "column": "order_count",
+      "data_type": "integer"
     },
     {
       "entity": "orders",
@@ -116,37 +119,15 @@
         "schema": "public",
         "table": "orders"
       },
-      "column": "refunded_amount"
+      "column": "refunded_amount",
+      "data_type": "decimal"
     }
   ],
   "dimensions": [
     {
-      "name": "customer_region",
-      "output": false,
-      "resource": {
-        "kind": "table",
-        "catalog": "demo",
-        "schema": "public",
-        "table": "customers"
-      },
-      "column": "region",
-      "type": "categorical"
-    },
-    {
-      "name": "customer_segment",
-      "output": true,
-      "resource": {
-        "kind": "table",
-        "catalog": "demo",
-        "schema": "public",
-        "table": "customers"
-      },
-      "column": "segment",
-      "type": "categorical"
-    },
-    {
       "name": "order_date",
       "output": true,
+      "entity": "orders",
       "resource": {
         "kind": "table",
         "catalog": "demo",
@@ -154,13 +135,44 @@
         "table": "orders"
       },
       "column": "order_ts",
-      "type": "time"
+      "type": "time",
+      "data_type": "timestamp"
+    },
+    {
+      "name": "customer_segment",
+      "output": true,
+      "entity": "customers",
+      "resource": {
+        "kind": "table",
+        "catalog": "demo",
+        "schema": "public",
+        "table": "customers"
+      },
+      "column": "segment",
+      "type": "categorical",
+      "data_type": "string"
+    },
+    {
+      "name": "customer_region",
+      "output": false,
+      "entity": "customers",
+      "resource": {
+        "kind": "table",
+        "catalog": "demo",
+        "schema": "public",
+        "table": "customers"
+      },
+      "column": "region",
+      "type": "categorical",
+      "data_type": "string"
     }
   ],
   "joins": [
     {
       "name": "orders_customer",
       "cardinality": "many_to_one",
+      "from_entity": "orders",
+      "to_entity": "customers",
       "from_resource": {
         "kind": "table",
         "catalog": "demo",

@@ -2,5 +2,13 @@
 /dist/
 /coverage.out
 *.test
+*.log
+.env
+.env.*
+!.env.example
+.databrickscfg
+.pgpass
+*.pem
+*.key
 .DS_Store
 .idea/

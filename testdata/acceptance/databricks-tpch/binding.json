@@ -1,0 +1,40 @@
+{
+  "api_version": "metricspire.io/v1alpha1",
+  "kind": "SourceBinding",
+  "metadata": {
+    "name": "databricks_samples_tpch",
+    "version": "1.0.0"
+  },
+  "engine": "databricks_sql",
+  "datasets": [
+    {
+      "name": "orders",
+      "resource": {
+        "kind": "table",
+        "catalog": "samples",
+        "schema": "tpch",
+        "table": "orders"
+      },
+      "fields": [
+        {"name": "order_id", "column": "o_orderkey"},
+        {"name": "customer_id", "column": "o_custkey"},
+        {"name": "order_status", "column": "o_orderstatus"},
+        {"name": "total_price", "column": "o_totalprice"},
+        {"name": "order_date", "column": "o_orderdate"}
+      ]
+    },
+    {
+      "name": "customers",
+      "resource": {
+        "kind": "table",
+        "catalog": "samples",
+        "schema": "tpch",
+        "table": "customer"
+      },
+      "fields": [
+        {"name": "customer_id", "column": "c_custkey"},
+        {"name": "market_segment", "column": "c_mktsegment"}
+      ]
+    }
+  ]
+}

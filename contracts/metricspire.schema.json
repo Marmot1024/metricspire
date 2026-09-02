@@ -14,6 +14,8 @@
     {"$ref": "#/$defs/LogicalPlan"},
     {"$ref": "#/$defs/PhysicalPlan"},
     {"$ref": "#/$defs/ExecutionJob"},
+    {"$ref": "#/$defs/ExecutionSnapshot"},
+    {"$ref": "#/$defs/TypedResult"},
     {"$ref": "#/$defs/Problem"}
   ],
   "$defs": {
@@ -90,6 +92,16 @@
         "to_field": {"$ref": "#/$defs/Name"}
       }
     },
+    "MetricFilter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "operator"],
+      "properties": {
+        "field": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"},
+        "operator": {"enum": ["eq", "neq", "in", "not_in", "is_null", "is_not_null"]},
+        "values": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
     "Expression": {
       "oneOf": [
         {
@@ -97,8 +109,9 @@
           "additionalProperties": false,
           "required": ["op", "field"],
           "properties": {
-            "op": {"const": "sum"},
-            "field": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"}
+            "op": {"enum": ["sum", "count", "count_distinct", "avg", "min", "max"]},
+            "field": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"},
+            "filters": {"type": "array", "items": {"$ref": "#/$defs/MetricFilter"}}
           }
         },
         {
@@ -140,7 +153,7 @@
       "additionalProperties": false,
       "required": ["status"],
       "properties": {
-        "status": {"enum": ["draft", "verified"]},
+        "status": {"enum": ["unverified", "verified"]},
         "evidence": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
         "open_questions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
       }
@@ -151,7 +164,11 @@
       "required": ["name", "entity", "kind", "value_type", "expression", "allowed_dimensions", "verification"],
       "properties": {
         "name": {"$ref": "#/$defs/Name"},
+        "display_name": {"type": "string"},
         "description": {"type": "string"},
+        "owner": {"type": "string"},
+        "tags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "deprecated": {"type": "boolean"},
         "entity": {"$ref": "#/$defs/Name"},
         "kind": {"enum": ["aggregate", "ratio", "derived"]},
         "value_type": {"enum": ["integer", "decimal"]},
@@ -243,7 +260,7 @@
     "SourceBinding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["api_version", "kind", "metadata", "manifest_fingerprint", "engine", "datasets"],
+      "required": ["api_version", "kind", "metadata", "engine", "datasets"],
       "properties": {
         "api_version": {"$ref": "#/$defs/APIVersion"},
         "kind": {"const": "SourceBinding"},
@@ -343,7 +360,7 @@
       "properties": {
         "dimension": {"$ref": "#/$defs/Name"},
         "operator": {"enum": ["eq", "in"]},
-        "values": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}
+        "values": {"type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true, "items": {"type": "string"}}
       }
     },
     "OrderBy": {
@@ -358,16 +375,15 @@
     "SemanticQuery": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["api_version", "kind", "manifest_fingerprint", "metrics"],
+      "required": ["api_version", "kind", "metrics"],
       "properties": {
         "api_version": {"$ref": "#/$defs/APIVersion"},
         "kind": {"const": "SemanticQuery"},
-        "manifest_fingerprint": {"$ref": "#/$defs/Fingerprint"},
-        "metrics": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/Name"}},
-        "group_by": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/Name"}},
+        "metrics": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/Name"}},
+        "group_by": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/Name"}},
         "time_range": {"$ref": "#/$defs/TimeRange"},
         "time_grouping": {"$ref": "#/$defs/TimeGrouping"},
-        "filters": {"type": "array", "items": {"$ref": "#/$defs/Filter"}},
+        "filters": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/Filter"}},
         "order_by": {"type": "array", "items": {"$ref": "#/$defs/OrderBy"}},
         "limit": {"type": "integer", "minimum": 1, "maximum": 10000}
       }
@@ -381,7 +397,12 @@
         "expression_ops": {
           "type": "array",
           "uniqueItems": true,
-          "items": {"enum": ["sum", "metric", "literal", "add", "subtract", "multiply", "divide"]}
+          "items": {"enum": ["sum", "count", "count_distinct", "avg", "min", "max", "metric", "literal", "add", "subtract", "multiply", "divide"]}
+        },
+        "metric_filter_operators": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["eq", "neq", "in", "not_in", "is_null", "is_not_null"]}
         },
         "join_cardinalities": {
           "type": "array",
@@ -413,13 +434,14 @@
     "PlannedDimension": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "output", "entity", "field", "type"],
+      "required": ["name", "output", "entity", "field", "type", "data_type"],
       "properties": {
         "name": {"$ref": "#/$defs/Name"},
         "output": {"type": "boolean"},
         "entity": {"$ref": "#/$defs/Name"},
         "field": {"$ref": "#/$defs/Name"},
-        "type": {"enum": ["categorical", "time"]}
+        "type": {"enum": ["categorical", "time"]},
+        "data_type": {"$ref": "#/$defs/DataType"}
       }
     },
     "PlannedJoin": {
@@ -472,33 +494,38 @@
     "PhysicalDimension": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "output", "resource", "column", "type"],
+      "required": ["name", "output", "entity", "resource", "column", "type", "data_type"],
       "properties": {
         "name": {"$ref": "#/$defs/Name"},
         "output": {"type": "boolean"},
+        "entity": {"$ref": "#/$defs/Name"},
         "resource": {"$ref": "#/$defs/ResourceRef"},
         "column": {"type": "string", "minLength": 1},
-        "type": {"enum": ["categorical", "time"]}
+        "type": {"enum": ["categorical", "time"]},
+        "data_type": {"$ref": "#/$defs/DataType"}
       }
     },
     "PhysicalField": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["entity", "field", "resource", "column"],
+      "required": ["entity", "field", "resource", "column", "data_type"],
       "properties": {
         "entity": {"$ref": "#/$defs/Name"},
         "field": {"$ref": "#/$defs/Name"},
         "resource": {"$ref": "#/$defs/ResourceRef"},
-        "column": {"type": "string", "minLength": 1}
+        "column": {"type": "string", "minLength": 1},
+        "data_type": {"$ref": "#/$defs/DataType"}
       }
     },
     "PhysicalJoin": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "cardinality", "from_resource", "from_column", "to_resource", "to_column"],
+      "required": ["name", "cardinality", "from_entity", "to_entity", "from_resource", "from_column", "to_resource", "to_column"],
       "properties": {
         "name": {"$ref": "#/$defs/Name"},
         "cardinality": {"const": "many_to_one"},
+        "from_entity": {"$ref": "#/$defs/Name"},
+        "to_entity": {"$ref": "#/$defs/Name"},
         "from_resource": {"$ref": "#/$defs/ResourceRef"},
         "from_column": {"type": "string", "minLength": 1},
         "to_resource": {"$ref": "#/$defs/ResourceRef"},
@@ -521,9 +548,10 @@
         "root": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["name", "resource"],
+          "required": ["name", "entity", "resource"],
           "properties": {
             "name": {"$ref": "#/$defs/Name"},
+            "entity": {"$ref": "#/$defs/Name"},
             "resource": {"$ref": "#/$defs/ResourceRef"}
           }
         },
@@ -552,15 +580,45 @@
     "ExecutionJob": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "status", "physical_fingerprint", "submitted_at"],
+      "required": ["id", "status", "physical_fingerprint", "row_limit", "submitted_at"],
       "properties": {
         "id": {"type": "string", "minLength": 1},
         "status": {"enum": ["pending", "running", "succeeded", "failed", "cancelled"]},
         "physical_fingerprint": {"$ref": "#/$defs/Fingerprint"},
+        "row_limit": {"type": "integer", "minimum": 1, "maximum": 10000},
         "submitted_at": {"type": "string", "format": "date-time"},
         "started_at": {"type": "string", "format": "date-time"},
         "finished_at": {"type": "string", "format": "date-time"},
         "error": {"$ref": "#/$defs/Problem"}
+      }
+    },
+    "ResultColumn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type_name", "type_text"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "type_name": {"type": "string", "minLength": 1},
+        "type_text": {"type": "string", "minLength": 1}
+      }
+    },
+    "TypedResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["columns", "rows", "truncated"],
+      "properties": {
+        "columns": {"type": "array", "items": {"$ref": "#/$defs/ResultColumn"}},
+        "rows": {"type": "array", "items": {"type": "array"}},
+        "truncated": {"type": "boolean"}
+      }
+    },
+    "ExecutionSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["job"],
+      "properties": {
+        "job": {"$ref": "#/$defs/ExecutionJob"},
+        "result": {"$ref": "#/$defs/TypedResult"}
       }
     }
   }
