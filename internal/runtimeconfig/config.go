@@ -37,7 +37,7 @@ type HTTPConfig struct {
 type OIDCConfig struct {
 	IssuerURL                    string `json:"issuer_url" yaml:"issuer_url"`
 	ClientID                     string `json:"client_id" yaml:"client_id"`
-	BearerAudience               string `json:"bearer_audience,omitempty" yaml:"bearer_audience,omitempty"`
+	BearerAudience               string `json:"bearer_audience" yaml:"bearer_audience"`
 	SessionTTL                   string `json:"session_ttl,omitempty" yaml:"session_ttl,omitempty"`
 	TenantClaim                  string `json:"tenant_claim,omitempty" yaml:"tenant_claim,omitempty"`
 	RolesClaim                   string `json:"roles_claim,omitempty" yaml:"roles_claim,omitempty"`
@@ -96,6 +96,9 @@ func (config Config) Validate() error {
 	}
 	if strings.TrimSpace(config.OIDC.ClientID) == "" {
 		return errors.New("oidc.client_id is required")
+	}
+	if strings.TrimSpace(config.OIDC.BearerAudience) == "" {
+		return errors.New("oidc.bearer_audience is required and must identify the API resource")
 	}
 	sessionTTL, err := ParseDuration(config.OIDC.SessionTTL, 8*time.Hour)
 	if err != nil || sessionTTL < time.Minute || sessionTTL > 24*time.Hour {

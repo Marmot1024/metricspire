@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,7 +118,7 @@ func TestOIDCWebCallbackRejectsStateMismatch(t *testing.T) {
 	nonce := ""
 	issuer := newWebIssuer(t, privateKey, &nonce)
 	authenticator, err := oidcauth.NewWeb(context.Background(), oidcauth.WebConfig{
-		OIDC:        oidcauth.Config{IssuerURL: issuer.url, ClientID: "metricspire", HTTPClient: issuer.client},
+		OIDC:        oidcauth.Config{IssuerURL: issuer.url, ClientID: "metricspire", BearerAudience: "metricspire-api", HTTPClient: issuer.client},
 		RedirectURL: "https://app.test/auth/callback", SessionKey: []byte("0123456789abcdef0123456789abcdef"),
 	})
 	if err != nil {
@@ -143,12 +144,22 @@ func TestOIDCWebRejectsInsecureCookieModeForHTTPS(t *testing.T) {
 	nonce := ""
 	issuer := newWebIssuer(t, privateKey, &nonce)
 	_, err = oidcauth.NewWeb(context.Background(), oidcauth.WebConfig{
-		OIDC:        oidcauth.Config{IssuerURL: issuer.url, ClientID: "metricspire", HTTPClient: issuer.client},
+		OIDC:        oidcauth.Config{IssuerURL: issuer.url, ClientID: "metricspire", BearerAudience: "metricspire-api", HTTPClient: issuer.client},
 		RedirectURL: "https://app.test/auth/callback", SessionKey: []byte("0123456789abcdef0123456789abcdef"),
 		InsecureCookies: true,
 	})
 	if err == nil {
 		t.Fatal("HTTPS redirect accepted insecure cookies")
+	}
+}
+
+func TestOIDCWebRequiresDedicatedBearerAudience(t *testing.T) {
+	_, err := oidcauth.NewWeb(context.Background(), oidcauth.WebConfig{
+		OIDC:        oidcauth.Config{IssuerURL: "https://issuer.example", ClientID: "browser-client"},
+		RedirectURL: "https://app.test/auth/callback", SessionKey: []byte("0123456789abcdef0123456789abcdef"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "bearer audience") {
+		t.Fatalf("missing bearer audience error = %v", err)
 	}
 }
 

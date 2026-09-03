@@ -29,14 +29,14 @@ func TestOIDCAuthenticatorVerifiesDiscoveryJWKSAndClaims(t *testing.T) {
 	}
 	issuer := newIssuer(t, &privateKey.PublicKey)
 	authenticator, err := oidcauth.New(context.Background(), oidcauth.Config{
-		IssuerURL: issuer.url, ClientID: "metricspire", HTTPClient: issuer.client,
+		IssuerURL: issuer.url, ClientID: "metricspire", BearerAudience: "metricspire-api", HTTPClient: issuer.client,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
 	token := signToken(t, privateKey, map[string]any{
-		"iss": issuer.url, "aud": "metricspire", "sub": "user-123", "tenant": "demo",
+		"iss": issuer.url, "aud": "metricspire-api", "sub": "user-123", "tenant": "demo",
 		"roles":       []string{"analyst", "analyst"},
 		"permissions": []string{"query:execute", "unknown:ignored"},
 		"iat":         now.Unix(), "exp": now.Add(time.Minute).Unix(),
@@ -60,7 +60,7 @@ func TestOIDCAuthenticatorRejectsInvalidAudienceExpiredAndMissingTenant(t *testi
 	}
 	issuer := newIssuer(t, &privateKey.PublicKey)
 	authenticator, err := oidcauth.New(context.Background(), oidcauth.Config{
-		IssuerURL: issuer.url, ClientID: "metricspire", HTTPClient: issuer.client,
+		IssuerURL: issuer.url, ClientID: "metricspire", BearerAudience: "metricspire-api", HTTPClient: issuer.client,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -68,8 +68,8 @@ func TestOIDCAuthenticatorRejectsInvalidAudienceExpiredAndMissingTenant(t *testi
 	now := time.Now()
 	tests := []map[string]any{
 		{"iss": issuer.url, "aud": "other", "sub": "user", "tenant": "demo", "exp": now.Add(time.Minute).Unix()},
-		{"iss": issuer.url, "aud": "metricspire", "sub": "user", "tenant": "demo", "exp": now.Add(-time.Minute).Unix()},
-		{"iss": issuer.url, "aud": "metricspire", "sub": "user", "exp": now.Add(time.Minute).Unix()},
+		{"iss": issuer.url, "aud": "metricspire-api", "sub": "user", "tenant": "demo", "exp": now.Add(-time.Minute).Unix()},
+		{"iss": issuer.url, "aud": "metricspire-api", "sub": "user", "exp": now.Add(time.Minute).Unix()},
 	}
 	for _, claims := range tests {
 		request := httptest.NewRequest(http.MethodGet, "https://metricspire.test/", nil)
@@ -112,11 +112,17 @@ func TestOIDCBearerAudienceIsIndependentFromBrowserClient(t *testing.T) {
 }
 
 func TestOIDCAuthenticatorRequiresHTTPSOutsideTests(t *testing.T) {
-	if _, err := oidcauth.New(context.Background(), oidcauth.Config{IssuerURL: "http://issuer.example", ClientID: "client"}); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+	if _, err := oidcauth.New(context.Background(), oidcauth.Config{IssuerURL: "http://issuer.example", BearerAudience: "api"}); err == nil || !strings.Contains(err.Error(), "HTTPS") {
 		t.Fatalf("HTTP issuer error = %v", err)
 	}
-	if _, err := oidcauth.New(context.Background(), oidcauth.Config{IssuerURL: "http://issuer.example", ClientID: "client", AllowHTTP: true}); err == nil || !strings.Contains(err.Error(), "loopback") {
+	if _, err := oidcauth.New(context.Background(), oidcauth.Config{IssuerURL: "http://issuer.example", BearerAudience: "api", AllowHTTP: true}); err == nil || !strings.Contains(err.Error(), "loopback") {
 		t.Fatalf("non-loopback development issuer error = %v", err)
+	}
+}
+
+func TestOIDCAuthenticatorRequiresDedicatedBearerAudience(t *testing.T) {
+	if _, err := oidcauth.New(context.Background(), oidcauth.Config{IssuerURL: "https://issuer.example", ClientID: "browser-client"}); err == nil || !strings.Contains(err.Error(), "bearer audience") {
+		t.Fatalf("missing bearer audience error = %v", err)
 	}
 }
 

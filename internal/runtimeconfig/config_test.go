@@ -10,7 +10,7 @@ func TestRuntimeConfigRequiresHTTPSAndUniqueTrustedRoutes(t *testing.T) {
 	valid := runtimeconfig.Config{
 		APIVersion: runtimeconfig.APIVersion, Kind: runtimeconfig.Kind,
 		HTTP:     runtimeconfig.HTTPConfig{Address: "127.0.0.1:8080", PublicURL: "https://metrics.example.com"},
-		OIDC:     runtimeconfig.OIDCConfig{IssuerURL: "https://identity.example.com", ClientID: "metricspire"},
+		OIDC:     runtimeconfig.OIDCConfig{IssuerURL: "https://identity.example.com", ClientID: "metricspire", BearerAudience: "metricspire-api"},
 		Policies: []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: "commerce", Tenant: "demo", Path: "policy.yaml"}},
 		Bindings: []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: "commerce", Path: "binding.yaml"}},
 	}
@@ -31,5 +31,10 @@ func TestRuntimeConfigRequiresHTTPSAndUniqueTrustedRoutes(t *testing.T) {
 	invalidSession.OIDC.SessionTTL = "25h"
 	if err := invalidSession.Validate(); err == nil {
 		t.Fatal("OIDC session longer than 24 hours was accepted")
+	}
+	missingAudience := valid
+	missingAudience.OIDC.BearerAudience = ""
+	if err := missingAudience.Validate(); err == nil {
+		t.Fatal("runtime config without API bearer audience was accepted")
 	}
 }

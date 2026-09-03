@@ -68,6 +68,9 @@ func NewWeb(ctx context.Context, config WebConfig) (*WebAuthenticator, error) {
 	if strings.TrimSpace(config.OIDC.ClientID) == "" {
 		return nil, errors.New("OIDC client ID is required")
 	}
+	if strings.TrimSpace(config.OIDC.BearerAudience) == "" {
+		return nil, errors.New("OIDC bearer audience is required")
+	}
 	provider, err := discover(ctx, config.OIDC)
 	if err != nil {
 		return nil, err
@@ -108,7 +111,7 @@ func NewWeb(ctx context.Context, config WebConfig) (*WebAuthenticator, error) {
 		return nil, errors.New("OIDC post-login path must be an absolute local path")
 	}
 	bearer, err := newWithVerifier(config.OIDC, remoteVerifier{
-		verifier: provider.Verifier(&oidc.Config{ClientID: bearerAudience(config.OIDC)}),
+		verifier: provider.Verifier(&oidc.Config{ClientID: strings.TrimSpace(config.OIDC.BearerAudience)}),
 	})
 	if err != nil {
 		return nil, err

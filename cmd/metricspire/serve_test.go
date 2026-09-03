@@ -108,7 +108,7 @@ func TestServeStartsOIDCLoginAndStopsGracefullyWithPostgres(t *testing.T) {
 			ControlTimeout: "2s", QueryTimeout: "2s",
 		},
 		OIDC: runtimeconfig.OIDCConfig{
-			IssuerURL: issuer.URL, ClientID: "metricspire-test", DevelopmentAllowInsecureHTTP: true,
+			IssuerURL: issuer.URL, ClientID: "metricspire-test", BearerAudience: "metricspire-api", DevelopmentAllowInsecureHTTP: true,
 		},
 		Policies: []runtimeconfig.PolicyRoute{{
 			Namespace: "acceptance", ModelName: "tpch_orders", Tenant: "acceptance",

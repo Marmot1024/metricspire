@@ -42,7 +42,7 @@ type Authenticator struct {
 }
 
 func New(ctx context.Context, config Config) (*Authenticator, error) {
-	audience := bearerAudience(config)
+	audience := strings.TrimSpace(config.BearerAudience)
 	if audience == "" {
 		return nil, errors.New("OIDC bearer audience is required")
 	}
@@ -75,13 +75,6 @@ func discover(ctx context.Context, config Config) (*oidc.Provider, error) {
 		return nil, fmt.Errorf("discover OIDC provider: %w", err)
 	}
 	return provider, nil
-}
-
-func bearerAudience(config Config) string {
-	if audience := strings.TrimSpace(config.BearerAudience); audience != "" {
-		return audience
-	}
-	return strings.TrimSpace(config.ClientID)
 }
 
 func isLoopbackHost(host string) bool {
