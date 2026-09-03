@@ -217,15 +217,25 @@ func TestHTTPManagementUsesAuthenticatedActorAndReturnsReleaseSummaries(t *testi
 	if draft.Revision != 2 || draft.UpdatedBy != "manager@example.com" {
 		t.Fatalf("saved draft = %#v", draft)
 	}
+	request := httptest.NewRequest(http.MethodGet, modelPath("draft"), nil)
+	request.Header.Set("Authorization", "Bearer manage")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	response = recorder.Result()
+	var loaded catalog.Draft
+	decodeResponse(t, response, &loaded)
+	if response.StatusCode != http.StatusOK || loaded.Revision != draft.Revision || loaded.Source.Metadata.Version != source.Metadata.Version {
+		t.Fatalf("loaded draft = %#v, status = %d", loaded, response.StatusCode)
+	}
 
 	response = performJSON(handler, http.MethodPost, modelPath("publish"), "manage", httpapi.PublishRequest{ExpectedRevision: 2, Note: "second"})
 	if response.StatusCode != http.StatusCreated {
 		t.Fatalf("publish status = %d, body = %s", response.StatusCode, readBody(t, response))
 	}
 
-	request := httptest.NewRequest(http.MethodGet, modelPath("releases"), nil)
+	request = httptest.NewRequest(http.MethodGet, modelPath("releases"), nil)
 	request.Header.Set("Authorization", "Bearer manage")
-	recorder := httptest.NewRecorder()
+	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	response = recorder.Result()
 	if response.StatusCode != http.StatusOK {
@@ -235,6 +245,18 @@ func TestHTTPManagementUsesAuthenticatedActorAndReturnsReleaseSummaries(t *testi
 	decodeResponse(t, response, &releases)
 	if len(releases) != 2 || !releases[1].Active {
 		t.Fatalf("release summaries = %#v", releases)
+	}
+
+	response = performJSON(handler, http.MethodPost, modelPath("rollback"), "manage", httpapi.RollbackRequest{
+		ReleaseID: releases[0].ID, Note: "rollback from HTTP test",
+	})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("rollback status = %d, body = %s", response.StatusCode, readBody(t, response))
+	}
+	var rolledBack catalog.Release
+	decodeResponse(t, response, &rolledBack)
+	if rolledBack.ID != releases[0].ID {
+		t.Fatalf("rolled-back release = %#v", rolledBack)
 	}
 }
 
@@ -317,7 +339,8 @@ func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
 		t.Fatalf("UI response = %d %#v", response.StatusCode, response.Header)
 	}
 	body := readRawBody(t, response)
-	if !strings.Contains(body, "指标目录与受治理查询") || !strings.Contains(body, "/assets/app.js") {
+	if !strings.Contains(body, "指标目录与受治理查询") || !strings.Contains(body, "/assets/app.js") ||
+		!strings.Contains(body, "cancel-job-button") || !strings.Contains(body, "data-management=\"rollback\"") {
 		t.Fatalf("UI body = %q", body)
 	}
 
@@ -325,7 +348,10 @@ func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
 	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	response = recorder.Result()
-	if response.StatusCode != http.StatusOK || !strings.Contains(readRawBody(t, response), "/api/v1/catalog/search") {
+	script := readRawBody(t, response)
+	if response.StatusCode != http.StatusOK || !strings.Contains(script, "/api/v1/catalog/search") ||
+		!strings.Contains(script, "operation === \"load\"") || !strings.Contains(script, "operation === \"rollback\"") ||
+		!strings.Contains(script, "/cancel") {
 		t.Fatal("UI JavaScript does not call the product API")
 	}
 }

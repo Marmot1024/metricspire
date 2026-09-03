@@ -2,6 +2,7 @@
 
 const byID = (id) => document.getElementById(id);
 const show = (target, value) => { target.textContent = JSON.stringify(value, null, 2); };
+let activeJobID = null;
 
 byID("logout-button").addEventListener("click", async () => {
   await fetch("/auth/logout", {method: "POST", credentials: "same-origin"});
@@ -42,7 +43,11 @@ for (const button of document.querySelectorAll("[data-operation]")) {
       const body = JSON.parse(byID("query").value);
       const result = await requestJSON(modelPath(operation), {method: "POST", body: JSON.stringify(body)});
       show(output, result);
-      if (operation === "query") pollJob(result.job.id, output);
+      if (operation === "query") {
+        activeJobID = result.job.id;
+        byID("cancel-job-button").disabled = false;
+        pollJob(activeJobID, output);
+      }
     } catch (error) { show(output, error); }
   });
 }
@@ -53,16 +58,35 @@ async function pollJob(id, output) {
     try {
       const result = await requestJSON(`/api/v1/jobs/${encodeURIComponent(id)}`);
       show(output, result);
-      if (["succeeded", "failed", "cancelled"].includes(result.job.status)) return;
-    } catch (error) { show(output, error); return; }
+      if (["succeeded", "failed", "cancelled"].includes(result.job.status)) break;
+    } catch (error) { show(output, error); break; }
+  }
+  if (activeJobID === id) {
+    activeJobID = null;
+    byID("cancel-job-button").disabled = true;
   }
 }
+
+byID("cancel-job-button").addEventListener("click", async () => {
+  if (!activeJobID) return;
+  const output = byID("query-output");
+  try {
+    show(output, await requestJSON(`/api/v1/jobs/${encodeURIComponent(activeJobID)}/cancel`, {method: "POST"}));
+  } catch (error) { show(output, error); }
+});
 
 for (const button of document.querySelectorAll("[data-management]")) {
   button.addEventListener("click", async () => {
     const output = byID("management-output");
     const operation = button.dataset.management;
     try {
+      if (operation === "load") {
+        const draft = await requestJSON(modelPath("draft"), {headers: {}});
+        byID("source").value = JSON.stringify(draft.source, null, 2);
+        byID("revision").value = String(draft.revision);
+        show(output, draft);
+        return;
+      }
       if (operation === "releases") {
         show(output, await requestJSON(modelPath("releases"), {headers: {}}));
         return;
@@ -76,6 +100,9 @@ for (const button of document.querySelectorAll("[data-management]")) {
         body = {expected_revision: revision, source: JSON.parse(byID("source").value)};
       }
       if (operation === "publish") body = {expected_revision: revision, note: "published from UI"};
+      if (operation === "rollback") {
+        body = {release_id: byID("release-id").value.trim(), note: "rolled back from UI"};
+      }
       show(output, await requestJSON(modelPath(operation), {method, body: JSON.stringify(body)}));
     } catch (error) { show(output, error); }
   });

@@ -39,7 +39,7 @@ All paths are under `/api/v1`.
 | `query:execute` | `GET /jobs/{job}` | read a job owned by the same tenant and principal |
 | `query:execute` | `POST /jobs/{job}/cancel` | cancel an owned pending/running job |
 
-The minimal UI is served at `/` and calls these endpoints. It contains no parallel authorization, planning, or execution logic.
+The minimal UI is served at `/` and calls these endpoints. It exposes catalog search, explain/plan/query, current-job cancellation, draft load/save/validation, publication, release listing, and rollback. It contains no parallel authorization, planning, or execution logic.
 
 ## Errors and limits
 
@@ -67,7 +67,7 @@ A disposable local PostgreSQL 17 instance proved migration 002 idempotency, cata
 
 On 2026-09-03, two read-only `DESCRIBE DETAIL` statements in the separate Databricks staging workspace confirmed that `samples.tpch.orders` and `samples.tpch.customer` exist as Delta tables for the fixed acceptance binding. The fixed real-acceptance harness then passed publication v1, a parameterized read-only query, publication v2, a second query, rollback to v1, a third query, golden-result reconciliation, and release-event checks through the same catalog and query application services used by Phase 3. No production-workspace request, business-data query, DDL, or DML was issued. This closes the real engine/application prerequisite, but it is not the remaining HTTP/UI query acceptance.
 
-The opt-in `TestPhase3RealHTTPAcceptance` then passed the UI root, HTTP draft and publication, policy-filtered catalog search, physical planning, asynchronous query job, golden typed result, and durable start/success audit against that staging fixture. It deliberately uses a fixed test principal, so it proves the HTTP-to-real-engine path without pretending to prove enterprise OIDC. It is disabled in the default suite and cannot contact Databricks unless its explicit real-acceptance switch and environment are provided.
+The opt-in `TestPhase3RealHTTPAcceptance` then passed the UI root, HTTP draft and publication v1, policy-filtered catalog search, physical planning, asynchronous query and golden typed result, publication v2, release listing, rollback to v1, a second query through the restored active release, and durable start/success audit for both jobs. It deliberately uses a fixed test principal, so it proves the HTTP-to-real-engine path without pretending to prove enterprise OIDC. It is disabled in the default suite and cannot contact Databricks unless its explicit real-acceptance switch and environment are provided.
 
 `metricspire serve --config` is the deployment entry point. It loads strict non-secret runtime configuration, requires environment-provided PostgreSQL/session/OIDC/Databricks secrets, refuses non-Databricks bindings in the current single-adapter release, and does not auto-migrate or query on startup.
 

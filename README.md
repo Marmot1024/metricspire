@@ -23,7 +23,7 @@ MetricSpire is an open-source semantic metrics layer and governed data API. It c
 - rejects unsupported engine capabilities before submitting a query.
 - exposes separate management and query permissions through a strict HTTP API with Problem responses, body/deadline limits, security headers, asynchronous job status/cancellation, and fail-closed query audit;
 - verifies generic OIDC issuer/audience/signature/expiry claims and supports Authorization Code + PKCE browser login with encrypted, HTTP-only sessions;
-- serves a dependency-free minimal UI that calls the same HTTP API rather than duplicating application logic.
+- serves a dependency-free minimal UI for catalog search, explain/plan/query, job cancellation, draft load/save/validation, publication, release listing, and rollback; every action calls the same HTTP API rather than duplicating application logic.
 
 ## Core flow
 

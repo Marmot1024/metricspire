@@ -14,4 +14,5 @@ textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-siz
 button { border: 0; border-radius: 8px; background: #1f6b43; color: white; padding: 10px 16px; font-weight: 700; cursor: pointer; }
 .button { display: inline-block; border-radius: 8px; background: #1f6b43; color: white; padding: 10px 16px; font-weight: 700; text-decoration: none; }
 button:hover { background: #155333; }
+button:disabled { background: #809087; cursor: not-allowed; }
 pre { overflow: auto; max-height: 420px; padding: 16px; border-radius: 10px; background: #101813; color: #d7f5df; font-size: .8rem; }

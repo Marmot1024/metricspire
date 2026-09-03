@@ -38,6 +38,7 @@
         <button data-operation="explain" type="button">Explain</button>
         <button data-operation="plan" type="button">Plan</button>
         <button data-operation="query" type="button">Query</button>
+        <button id="cancel-job-button" type="button" disabled>Cancel current job</button>
       </div>
       <pre id="query-output" aria-live="polite">尚未执行</pre>
     </section>
@@ -49,10 +50,13 @@
       <textarea id="source" rows="10" spellcheck="false">{}</textarea>
       <div class="row">
         <label>Expected revision <input id="revision" type="number" min="0" value="0"></label>
+        <label>Release ID <input id="release-id" autocomplete="off" placeholder="release_..."></label>
+        <button data-management="load" type="button">Load draft</button>
         <button data-management="validate" type="button">Validate</button>
         <button data-management="draft" type="button">Save draft</button>
         <button data-management="publish" type="button">Publish</button>
         <button data-management="releases" type="button">List releases</button>
+        <button data-management="rollback" type="button">Rollback</button>
       </div>
       <pre id="management-output" aria-live="polite">尚未操作</pre>
     </section>

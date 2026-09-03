@@ -167,19 +167,54 @@ func TestPhase3RealHTTPAcceptance(t *testing.T) {
 		t.Fatalf("HTTP query job = %#v", finished)
 	}
 	assertExpectedRealResult(t, finished.Result, expected)
-
-	var started, succeeded int
-	if err := store.Pool().QueryRow(ctx, `
+	assertAudit := func(jobID string) {
+		t.Helper()
+		var started, succeeded int
+		if err := store.Pool().QueryRow(ctx, `
 SELECT
   count(*) FILTER (WHERE event_kind = 'query_started'),
   count(*) FILTER (WHERE event_kind = 'query_succeeded')
 FROM metricspire_query_audit
-WHERE job_id = $1`, finished.Job.ID).Scan(&started, &succeeded); err != nil {
-		t.Fatal(err)
+	WHERE job_id = $1`, jobID).Scan(&started, &succeeded); err != nil {
+			t.Fatal(err)
+		}
+		if started != 1 || succeeded != 1 {
+			t.Fatalf("HTTP query audit counts for %s: started=%d succeeded=%d", jobID, started, succeeded)
+		}
 	}
-	if started != 1 || succeeded != 1 {
-		t.Fatalf("HTTP query audit counts: started=%d succeeded=%d", started, succeeded)
+	assertAudit(finished.Job.ID)
+
+	source.Metadata.Version = "1.1.0"
+	source.Spec.Metrics[0].Description = "Real Phase 3 HTTP acceptance wording revision."
+	var secondDraft catalog.Draft
+	phase3HTTPJSON(t, server.Client(), http.MethodPut, server.URL+modelPath+"/draft",
+		httpapi.SaveDraftRequest{ExpectedRevision: draft.Revision, Source: source}, http.StatusOK, &secondDraft)
+	var secondRelease catalog.Release
+	phase3HTTPJSON(t, server.Client(), http.MethodPost, server.URL+modelPath+"/publish",
+		httpapi.PublishRequest{ExpectedRevision: secondDraft.Revision, Note: "real Phase 3 HTTP acceptance v2"}, http.StatusCreated, &secondRelease)
+	if secondRelease.ID == release.ID {
+		t.Fatal("second HTTP publication reused the first immutable release ID")
 	}
+	var releases []httpapi.ReleaseSummary
+	phase3HTTPJSON(t, server.Client(), http.MethodGet, server.URL+modelPath+"/releases", nil, http.StatusOK, &releases)
+	if len(releases) != 2 || !releases[1].Active || releases[1].ID != secondRelease.ID {
+		t.Fatalf("HTTP release summaries = %#v", releases)
+	}
+	var rolledBack catalog.Release
+	phase3HTTPJSON(t, server.Client(), http.MethodPost, server.URL+modelPath+"/rollback",
+		httpapi.RollbackRequest{ReleaseID: release.ID, Note: "real Phase 3 HTTP acceptance rollback"}, http.StatusOK, &rolledBack)
+	if rolledBack.ID != release.ID {
+		t.Fatalf("HTTP rollback release = %#v", rolledBack)
+	}
+
+	var afterRollback application.QueryJobSnapshot
+	phase3HTTPJSON(t, server.Client(), http.MethodPost, server.URL+modelPath+"/query", query, http.StatusAccepted, &afterRollback)
+	rolledBackResult := awaitPhase3HTTPJob(t, ctx, server.Client(), server.URL, afterRollback.Job.ID)
+	if rolledBackResult.Job.Status != model.JobSucceeded || rolledBackResult.ReleaseID != release.ID {
+		t.Fatalf("HTTP query after rollback = %#v", rolledBackResult)
+	}
+	assertExpectedRealResult(t, rolledBackResult.Result, expected)
+	assertAudit(rolledBackResult.Job.ID)
 }
 
 func readPhase3Fixture(t *testing.T, environmentName string, target any) {
