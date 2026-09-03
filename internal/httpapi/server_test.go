@@ -367,6 +367,32 @@ func TestRuntimeServerHasDefensiveNetworkTimeouts(t *testing.T) {
 	}
 }
 
+func TestHTTPHealthEndpointsAreUnauthenticatedAndReadinessFailsClosed(t *testing.T) {
+	handler, _, _ := newTestServer(t, httpapi.Config{RequestID: func() string { return "req_health" }})
+	for path, wantStatus := range map[string]int{"/health/live": http.StatusOK, "/health/ready": http.StatusOK} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != wantStatus || !strings.Contains(recorder.Body.String(), "status") {
+			t.Fatalf("GET %s = %d %q", path, recorder.Code, recorder.Body.String())
+		}
+	}
+
+	failing, _, _ := newTestServerWithEngineAndReadiness(t, httpapi.Config{RequestID: func() string { return "req_not_ready" }}, nil, nil,
+		httpapi.ReadinessFunc(func(context.Context) error { return errors.New("database address must stay private") }))
+	request := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	recorder := httptest.NewRecorder()
+	failing.ServeHTTP(recorder, request)
+	response := recorder.Result()
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("failed readiness status = %d", response.StatusCode)
+	}
+	body := readRawBody(t, response)
+	if strings.Contains(body, "database address") || !strings.Contains(body, "not_ready") {
+		t.Fatalf("failed readiness body = %q", body)
+	}
+}
+
 type observedResolvers struct {
 	lastScope    application.QueryScope
 	bindingCalls int
@@ -377,6 +403,10 @@ func newTestServer(t *testing.T, config httpapi.Config) (http.Handler, *fakeEngi
 }
 
 func newTestServerWithEngine(t *testing.T, config httpapi.Config, engine *fakeEngine, recorder audit.Recorder) (http.Handler, *fakeEngine, *observedResolvers) {
+	return newTestServerWithEngineAndReadiness(t, config, engine, recorder, nil)
+}
+
+func newTestServerWithEngineAndReadiness(t *testing.T, config httpapi.Config, engine *fakeEngine, recorder audit.Recorder, readiness httpapi.ReadinessChecker) (http.Handler, *fakeEngine, *observedResolvers) {
 	t.Helper()
 	repository := catalog.NewMemoryRepository()
 	management, err := catalog.NewService(repository)
@@ -446,8 +476,12 @@ func newTestServerWithEngine(t *testing.T, config httpapi.Config, engine *fakeEn
 			return httpapi.Principal{}, httpapi.ErrUnauthenticated
 		}
 	})
+	if readiness == nil {
+		readiness = httpapi.ReadinessFunc(func(context.Context) error { return nil })
+	}
 	server, err := httpapi.NewServer(config, httpapi.Dependencies{
-		Authenticator: authenticator, Management: management, Catalog: repository, CatalogSearch: catalogSearch, Queries: queries, Jobs: jobs,
+		Authenticator: authenticator, Readiness: readiness,
+		Management: management, Catalog: repository, CatalogSearch: catalogSearch, Queries: queries, Jobs: jobs,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)

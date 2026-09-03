@@ -41,6 +41,8 @@ All paths are under `/api/v1`.
 
 The minimal UI is served at `/` and calls these endpoints. It exposes catalog search, explain/plan/query, current-job cancellation, draft load/save/validation, publication, release listing, and rollback. It contains no parallel authorization, planning, or execution logic.
 
+`GET /health/live` and `GET /health/ready` are unauthenticated deployment probes outside `/api/v1`. Readiness checks only PostgreSQL and returns a generic `503 not_ready` on failure; neither probe contacts Databricks or exposes configuration details.
+
 ## Errors and limits
 
 - JSON requests require `Content-Type: application/json`, reject duplicate/unknown fields, and default to a 1 MiB body limit.

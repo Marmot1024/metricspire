@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+.env.*
+bin
+dist
+docs
+examples
+testdata
+**/*_test.go
+*.key
+*.pem
+*.p12
+*.pfx

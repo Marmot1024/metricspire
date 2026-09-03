@@ -54,6 +54,14 @@ func (function AuthenticatorFunc) Authenticate(ctx context.Context, request *htt
 	return function(ctx, request)
 }
 
+type ReadinessChecker interface {
+	Ready(context.Context) error
+}
+
+type ReadinessFunc func(context.Context) error
+
+func (function ReadinessFunc) Ready(ctx context.Context) error { return function(ctx) }
+
 type ManagementService interface {
 	SaveDraft(context.Context, catalog.SaveDraftInput) (catalog.Draft, error)
 	Publish(context.Context, string, string, int64, string, string) (catalog.Release, error)
@@ -85,6 +93,7 @@ type JobService interface {
 type Dependencies struct {
 	Authenticator Authenticator
 	AuthEndpoints http.Handler
+	Readiness     ReadinessChecker
 	Management    ManagementService
 	Catalog       CatalogReader
 	CatalogSearch CatalogSearcher

@@ -153,6 +153,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		QueryTimeout: queryTimeout, AllowedOrigin: config.HTTP.PublicURL,
 	}, httpapi.Dependencies{
 		Authenticator: authenticator, AuthEndpoints: authenticator,
+		Readiness:  store,
 		Management: management, Catalog: store, CatalogSearch: catalogSearch,
 		Queries: queries, Jobs: jobs,
 	}, logger)

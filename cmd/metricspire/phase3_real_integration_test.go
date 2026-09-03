@@ -121,7 +121,7 @@ func TestPhase3RealHTTPAcceptance(t *testing.T) {
 		Authenticator: httpapi.AuthenticatorFunc(func(context.Context, *http.Request) (httpapi.Principal, error) {
 			return principal, nil
 		}),
-		Management: management, Catalog: store, CatalogSearch: catalogSearch, Queries: queries, Jobs: jobs,
+		Readiness: store, Management: management, Catalog: store, CatalogSearch: catalogSearch, Queries: queries, Jobs: jobs,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)

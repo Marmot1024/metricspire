@@ -38,8 +38,8 @@ type Server struct {
 }
 
 func NewServer(config Config, dependencies Dependencies, logger *slog.Logger) (*Server, error) {
-	if dependencies.Authenticator == nil || dependencies.Management == nil || dependencies.Catalog == nil || dependencies.CatalogSearch == nil || dependencies.Queries == nil || dependencies.Jobs == nil {
-		return nil, errors.New("authenticator, management service, catalog reader, catalog searcher, query service, and job service are required")
+	if dependencies.Authenticator == nil || dependencies.Readiness == nil || dependencies.Management == nil || dependencies.Catalog == nil || dependencies.CatalogSearch == nil || dependencies.Queries == nil || dependencies.Jobs == nil {
+		return nil, errors.New("authenticator, readiness checker, management service, catalog reader, catalog searcher, query service, and job service are required")
 	}
 	if config.MaxBodyBytes == 0 {
 		config.MaxBodyBytes = DefaultMaxBodyBytes
@@ -65,6 +65,8 @@ func NewServer(config Config, dependencies Dependencies, logger *slog.Logger) (*
 }
 
 func (server *Server) routes() {
+	server.mux.HandleFunc("/health/live", server.handleLiveness)
+	server.mux.HandleFunc("/health/ready", server.handleReadiness)
 	if server.deps.AuthEndpoints != nil {
 		server.mux.Handle("/auth/", server.deps.AuthEndpoints)
 	}
@@ -82,6 +84,28 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("/assets/app.js", server.handleUIAsset)
 	server.mux.HandleFunc("/assets/app.css", server.handleUIAsset)
 	server.mux.HandleFunc("/", server.handleRoot)
+}
+
+func (server *Server) handleLiveness(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		server.methodNotAllowed(response, request, http.MethodGet)
+		return
+	}
+	_ = writeJSON(response, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (server *Server) handleReadiness(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		server.methodNotAllowed(response, request, http.MethodGet)
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), server.config.ControlTimeout)
+	defer cancel()
+	if err := server.deps.Readiness.Ready(ctx); err != nil {
+		server.writeProblem(response, request, http.StatusServiceUnavailable, "not_ready", "Service unavailable", "the control plane is not ready", "")
+		return
+	}
+	_ = writeJSON(response, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 func (server *Server) handleCatalogSearch(response http.ResponseWriter, request *http.Request) {

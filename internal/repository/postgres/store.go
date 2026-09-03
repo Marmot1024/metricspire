@@ -48,6 +48,12 @@ func New(pool *pgxpool.Pool) (*Store, error) {
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 func (s *Store) Close()              { s.pool.Close() }
+func (s *Store) Ready(ctx context.Context) error {
+	if err := s.pool.Ping(ctx); err != nil {
+		return fmt.Errorf("ping PostgreSQL: %w", err)
+	}
+	return nil
+}
 
 func (s *Store) Record(ctx context.Context, event audit.QueryEvent) error {
 	if err := event.Validate(); err != nil {

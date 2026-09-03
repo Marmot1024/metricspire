@@ -98,6 +98,10 @@ go run ./cmd/metricspire release-list \
 
 Run `metricspire migrate` explicitly before starting the service. `serve` never migrates PostgreSQL on startup and never creates analytical tables. The current Databricks adapter emits bounded, parameterized `SELECT` statements only.
 
+The repository also provides a multi-stage OCI [`Dockerfile`](Dockerfile). The runtime image is a static binary plus CA certificates and license notices, runs as numeric non-root user `65532`, and contains no shell or credentials. Mount a reviewed runtime configuration and its policy/binding files read-only under `/etc/metricspire`; inject secret environment variables through the deployment platform. Run `metricspire migrate` as a separate one-shot deployment step before starting replicas.
+
+Unauthenticated `GET /health/live` reports process liveness. `GET /health/ready` pings only the PostgreSQL control plane and returns a generic `503 not_ready` without connection details when unavailable; it never queries Databricks. These endpoints are intended for platform probes, not as acceptance evidence.
+
 ## Contracts and guarantees
 
 The `v1alpha1` schema registry is [`contracts/metricspire.schema.json`](contracts/metricspire.schema.json). The Go implementation additionally checks references, cycles, types, time semantics, join cardinality, policy, budgets, fingerprints, and engine capabilities.

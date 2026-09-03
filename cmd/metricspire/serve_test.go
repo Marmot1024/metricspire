@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -176,6 +177,17 @@ func TestServeStartsOIDCLoginAndStopsGracefullyWithPostgres(t *testing.T) {
 	_ = response.Body.Close()
 	if readErr != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(data), "MetricSpire") {
 		t.Fatalf("root response = %d %q, %v", response.StatusCode, data, readErr)
+	}
+	for _, path := range []string{"/health/live", "/health/ready"} {
+		response, err = http.Get(baseURL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, readErr = io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if readErr != nil || response.StatusCode != http.StatusOK || !bytes.Contains(data, []byte("status")) {
+			t.Fatalf("%s response = %d %q, %v", path, response.StatusCode, data, readErr)
+		}
 	}
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err = client.Get(baseURL + "/auth/login")
