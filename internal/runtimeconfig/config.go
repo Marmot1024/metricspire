@@ -15,15 +15,24 @@ import (
 const (
 	APIVersion = "metricspire.io/v1alpha1"
 	Kind       = "RuntimeConfig"
+
+	AuthenticationOIDC           = "oidc"
+	AuthenticationDatabricksApps = "databricks_apps"
 )
 
 type Config struct {
-	APIVersion string         `json:"api_version" yaml:"api_version"`
-	Kind       string         `json:"kind" yaml:"kind"`
-	HTTP       HTTPConfig     `json:"http" yaml:"http"`
-	OIDC       OIDCConfig     `json:"oidc" yaml:"oidc"`
-	Policies   []PolicyRoute  `json:"policies" yaml:"policies"`
-	Bindings   []BindingRoute `json:"bindings" yaml:"bindings"`
+	APIVersion     string               `json:"api_version" yaml:"api_version"`
+	Kind           string               `json:"kind" yaml:"kind"`
+	HTTP           HTTPConfig           `json:"http" yaml:"http"`
+	Authentication AuthenticationConfig `json:"authentication" yaml:"authentication"`
+	Policies       []PolicyRoute        `json:"policies" yaml:"policies"`
+	Bindings       []BindingRoute       `json:"bindings" yaml:"bindings"`
+}
+
+type AuthenticationConfig struct {
+	Provider       string                `json:"provider" yaml:"provider"`
+	OIDC           *OIDCConfig           `json:"oidc,omitempty" yaml:"oidc,omitempty"`
+	DatabricksApps *DatabricksAppsConfig `json:"databricks_apps,omitempty" yaml:"databricks_apps,omitempty"`
 }
 
 type HTTPConfig struct {
@@ -43,6 +52,14 @@ type OIDCConfig struct {
 	RolesClaim                   string `json:"roles_claim,omitempty" yaml:"roles_claim,omitempty"`
 	PermissionsClaim             string `json:"permissions_claim,omitempty" yaml:"permissions_claim,omitempty"`
 	DevelopmentAllowInsecureHTTP bool   `json:"development_allow_insecure_http,omitempty" yaml:"development_allow_insecure_http,omitempty"`
+}
+
+type DatabricksAppsConfig struct {
+	ExpectedAppName     string `json:"expected_app_name" yaml:"expected_app_name"`
+	ExpectedWorkspaceID string `json:"expected_workspace_id" yaml:"expected_workspace_id"`
+	Tenant              string `json:"tenant" yaml:"tenant"`
+	QueryRole           string `json:"query_role" yaml:"query_role"`
+	PublisherGroupID    string `json:"publisher_group_id" yaml:"publisher_group_id"`
 }
 
 type PolicyRoute struct {
@@ -80,29 +97,14 @@ func (config Config) Validate() error {
 	if err != nil || publicURL.Host == "" || publicURL.User != nil || publicURL.RawQuery != "" || publicURL.Fragment != "" || publicURL.Path != "" {
 		return errors.New("http.public_url must be an absolute origin without path, query, or fragment")
 	}
+	allowHTTP := config.Authentication.OIDC != nil && config.Authentication.OIDC.DevelopmentAllowInsecureHTTP
 	if publicURL.Scheme != "https" {
-		if !config.OIDC.DevelopmentAllowInsecureHTTP || publicURL.Scheme != "http" || !isLoopbackHost(publicURL.Hostname()) {
+		if !allowHTTP || publicURL.Scheme != "http" || !isLoopbackHost(publicURL.Hostname()) {
 			return errors.New("http.public_url must use HTTPS; HTTP is allowed only for explicit loopback development")
 		}
 	}
-	issuerURL, err := url.Parse(strings.TrimSpace(config.OIDC.IssuerURL))
-	if err != nil || issuerURL.Host == "" || issuerURL.User != nil || issuerURL.RawQuery != "" || issuerURL.Fragment != "" {
-		return errors.New("oidc.issuer_url is invalid")
-	}
-	if issuerURL.Scheme != "https" {
-		if !config.OIDC.DevelopmentAllowInsecureHTTP || issuerURL.Scheme != "http" || !isLoopbackHost(issuerURL.Hostname()) {
-			return errors.New("oidc.issuer_url must use HTTPS; HTTP is allowed only for explicit loopback development")
-		}
-	}
-	if strings.TrimSpace(config.OIDC.ClientID) == "" {
-		return errors.New("oidc.client_id is required")
-	}
-	if strings.TrimSpace(config.OIDC.BearerAudience) == "" {
-		return errors.New("oidc.bearer_audience is required and must identify the API resource")
-	}
-	sessionTTL, err := ParseDuration(config.OIDC.SessionTTL, 8*time.Hour)
-	if err != nil || sessionTTL < time.Minute || sessionTTL > 24*time.Hour {
-		return errors.New("oidc.session_ttl must be between one minute and 24 hours")
+	if err := config.validateAuthentication(); err != nil {
+		return err
 	}
 	if config.HTTP.MaxBodyBytes < 0 {
 		return errors.New("http.max_body_bytes cannot be negative")
@@ -137,6 +139,59 @@ func (config Config) Validate() error {
 			return fmt.Errorf("duplicate binding route for %s/%s", route.Namespace, route.ModelName)
 		}
 		seenBindings[key] = struct{}{}
+	}
+	return nil
+}
+
+func (config Config) validateAuthentication() error {
+	switch strings.TrimSpace(config.Authentication.Provider) {
+	case AuthenticationOIDC:
+		if config.Authentication.OIDC == nil || config.Authentication.DatabricksApps != nil {
+			return errors.New("authentication.provider oidc requires only authentication.oidc")
+		}
+		return validateOIDC(*config.Authentication.OIDC)
+	case AuthenticationDatabricksApps:
+		if config.Authentication.DatabricksApps == nil || config.Authentication.OIDC != nil {
+			return errors.New("authentication.provider databricks_apps requires only authentication.databricks_apps")
+		}
+		return validateDatabricksApps(*config.Authentication.DatabricksApps)
+	default:
+		return errors.New("authentication.provider must be oidc or databricks_apps")
+	}
+}
+
+func validateOIDC(config OIDCConfig) error {
+	issuerURL, err := url.Parse(strings.TrimSpace(config.IssuerURL))
+	if err != nil || issuerURL.Host == "" || issuerURL.User != nil || issuerURL.RawQuery != "" || issuerURL.Fragment != "" {
+		return errors.New("oidc.issuer_url is invalid")
+	}
+	if issuerURL.Scheme != "https" {
+		if !config.DevelopmentAllowInsecureHTTP || issuerURL.Scheme != "http" || !isLoopbackHost(issuerURL.Hostname()) {
+			return errors.New("oidc.issuer_url must use HTTPS; HTTP is allowed only for loopback development")
+		}
+	}
+	if strings.TrimSpace(config.ClientID) == "" {
+		return errors.New("oidc.client_id is required")
+	}
+	if strings.TrimSpace(config.BearerAudience) == "" {
+		return errors.New("oidc.bearer_audience is required and must identify the API resource")
+	}
+	sessionTTL, err := ParseDuration(config.SessionTTL, 8*time.Hour)
+	if err != nil || sessionTTL < time.Minute || sessionTTL > 24*time.Hour {
+		return errors.New("oidc.session_ttl must be between one minute and 24 hours")
+	}
+	return nil
+}
+
+func validateDatabricksApps(config DatabricksAppsConfig) error {
+	if empty(config.ExpectedAppName, config.ExpectedWorkspaceID, config.Tenant, config.QueryRole, config.PublisherGroupID) {
+		return errors.New("databricks_apps expected_app_name, expected_workspace_id, tenant, query_role, and publisher_group_id are required")
+	}
+	if config.QueryRole != strings.TrimSpace(config.QueryRole) || len(config.QueryRole) > 128 {
+		return errors.New("databricks_apps query_role must be a bounded string without surrounding whitespace")
+	}
+	if config.PublisherGroupID != strings.TrimSpace(config.PublisherGroupID) || len(config.PublisherGroupID) > 256 {
+		return errors.New("databricks_apps publisher_group_id must be a bounded string without surrounding whitespace")
 	}
 	return nil
 }

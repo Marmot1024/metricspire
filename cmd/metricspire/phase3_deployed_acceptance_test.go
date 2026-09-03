@@ -18,6 +18,7 @@ import (
 	"github.com/marmot1024/metricspire/internal/httpapi"
 	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/marmot1024/metricspire/internal/repository/postgres"
+	"github.com/marmot1024/metricspire/internal/runtimeconfig"
 )
 
 // TestPhase3DeployedAcceptance is the final non-interactive Phase 3 staging
@@ -45,9 +46,17 @@ func TestPhase3DeployedAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	authProfile, err := deployedAuthProfile(os.Getenv("METRICSPIRE_DEPLOYED_AUTH_PROFILE"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	manageToken := strings.TrimSpace(os.Getenv("METRICSPIRE_DEPLOYED_MANAGE_TOKEN"))
 	queryToken := strings.TrimSpace(os.Getenv("METRICSPIRE_DEPLOYED_QUERY_TOKEN"))
-	if manageToken == queryToken {
+	singlePublisher := os.Getenv("METRICSPIRE_DEPLOYED_SINGLE_PUBLISHER_ACCEPTANCE") == "staging-read-only"
+	if singlePublisher && authProfile != runtimeconfig.AuthenticationDatabricksApps {
+		t.Fatal("single-publisher deployed acceptance is supported only by the Databricks Apps profile")
+	}
+	if manageToken == queryToken && !singlePublisher {
 		t.Fatal("deployed manage and query tokens must represent separate least-privilege principals")
 	}
 	namespace := strings.TrimSpace(os.Getenv("METRICSPIRE_DEPLOYED_NAMESPACE"))
@@ -67,15 +76,25 @@ func TestPhase3DeployedAcceptance(t *testing.T) {
 		Timeout:       30 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	deployedHealth(t, client, baseURL+"/health/live", "ok")
-	deployedHealth(t, client, baseURL+"/health/ready", "ready")
-	deployedRootAndLogin(t, client, baseURL)
+	ingressToken := ""
+	if authProfile == runtimeconfig.AuthenticationDatabricksApps {
+		ingressToken = queryToken
+	}
+	deployedHealth(t, client, baseURL+"/health/live", ingressToken, "ok")
+	deployedHealth(t, client, baseURL+"/health/ready", ingressToken, "ready")
+	deployedRootAndLogin(t, client, baseURL, ingressToken, authProfile)
 
 	modelPath := fmt.Sprintf("/api/v1/namespaces/%s/models/%s", url.PathEscape(namespace), url.PathEscape(modelName))
 	catalogPath := "/api/v1/catalog/search?namespace=" + url.QueryEscape(namespace) + "&q=" + url.QueryEscape(source.Spec.Metrics[0].Name) + "&limit=10"
-	deployedHTTPJSON(t, client, http.MethodGet, baseURL+catalogPath, "", nil, http.StatusUnauthorized, nil)
-	deployedHTTPJSON(t, client, http.MethodGet, baseURL+modelPath+"/draft", queryToken, nil, http.StatusForbidden, nil)
-	deployedHTTPJSON(t, client, http.MethodGet, baseURL+catalogPath, manageToken, nil, http.StatusForbidden, nil)
+	if authProfile == runtimeconfig.AuthenticationOIDC {
+		deployedHTTPJSON(t, client, http.MethodGet, baseURL+catalogPath, "", nil, http.StatusUnauthorized, nil)
+	}
+	if !singlePublisher {
+		deployedHTTPJSON(t, client, http.MethodGet, baseURL+modelPath+"/draft", queryToken, nil, http.StatusForbidden, nil)
+	}
+	if authProfile == runtimeconfig.AuthenticationOIDC {
+		deployedHTTPJSON(t, client, http.MethodGet, baseURL+catalogPath, manageToken, nil, http.StatusForbidden, nil)
+	}
 
 	var draft catalog.Draft
 	deployedHTTPJSON(t, client, http.MethodPut, baseURL+modelPath+"/draft", manageToken,
@@ -154,6 +173,18 @@ func TestDeployedBaseURLRequiresHTTPSOrigin(t *testing.T) {
 	}
 }
 
+func TestDeployedAuthProfileDefaultsToOIDCAndRejectsUnknownValues(t *testing.T) {
+	if profile, err := deployedAuthProfile(""); err != nil || profile != runtimeconfig.AuthenticationOIDC {
+		t.Fatalf("default deployed auth profile = %q, %v", profile, err)
+	}
+	if profile, err := deployedAuthProfile(runtimeconfig.AuthenticationDatabricksApps); err != nil || profile != runtimeconfig.AuthenticationDatabricksApps {
+		t.Fatalf("Databricks Apps deployed auth profile = %q, %v", profile, err)
+	}
+	if _, err := deployedAuthProfile("unknown"); err == nil {
+		t.Fatal("unknown deployed auth profile was accepted")
+	}
+}
+
 func requireDeployedPhase3Environment(t *testing.T, names ...string) {
 	t.Helper()
 	missing := make([]string, 0)
@@ -175,18 +206,36 @@ func deployedBaseURL(value string) (string, error) {
 	return strings.TrimSuffix(parsed.String(), "/"), nil
 }
 
-func deployedHealth(t *testing.T, client *http.Client, endpoint, want string) {
+func deployedAuthProfile(value string) (string, error) {
+	profile := strings.TrimSpace(value)
+	if profile == "" {
+		return runtimeconfig.AuthenticationOIDC, nil
+	}
+	if profile != runtimeconfig.AuthenticationOIDC && profile != runtimeconfig.AuthenticationDatabricksApps {
+		return "", fmt.Errorf("METRICSPIRE_DEPLOYED_AUTH_PROFILE must be oidc or databricks_apps")
+	}
+	return profile, nil
+}
+
+func deployedHealth(t *testing.T, client *http.Client, endpoint, token, want string) {
 	t.Helper()
 	var status map[string]string
-	deployedHTTPJSON(t, client, http.MethodGet, endpoint, "", nil, http.StatusOK, &status)
+	deployedHTTPJSON(t, client, http.MethodGet, endpoint, token, nil, http.StatusOK, &status)
 	if status["status"] != want {
 		t.Fatalf("deployed health %s = %#v", endpoint, status)
 	}
 }
 
-func deployedRootAndLogin(t *testing.T, client *http.Client, baseURL string) {
+func deployedRootAndLogin(t *testing.T, client *http.Client, baseURL, token, authProfile string) {
 	t.Helper()
-	response, err := client.Get(baseURL + "/")
+	request, err := http.NewRequest(http.MethodGet, baseURL+"/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,12 +245,25 @@ func deployedRootAndLogin(t *testing.T, client *http.Client, baseURL string) {
 	if readErr != nil || response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("MetricSpire")) {
 		t.Fatalf("deployed UI = %d %q, %v", response.StatusCode, body, readErr)
 	}
-	response, err = client.Get(baseURL + "/auth/login")
+	request, err = http.NewRequest(http.MethodGet, baseURL+"/auth/login", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err = client.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertDeployedSecurityHeaders(t, response)
 	_ = response.Body.Close()
+	if authProfile == runtimeconfig.AuthenticationDatabricksApps {
+		if response.StatusCode != http.StatusNotFound {
+			t.Fatalf("Databricks Apps profile exposed a service login endpoint: status = %d", response.StatusCode)
+		}
+		return
+	}
 	destination, parseErr := url.Parse(response.Header.Get("Location"))
 	if response.StatusCode != http.StatusFound || parseErr != nil || destination.Scheme != "https" || destination.Host == "" {
 		t.Fatalf("deployed OIDC login redirect = %d %q", response.StatusCode, response.Header.Get("Location"))

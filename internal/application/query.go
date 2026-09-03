@@ -10,6 +10,7 @@ import (
 	"github.com/marmot1024/metricspire/internal/audit"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/compiler"
+	"github.com/marmot1024/metricspire/internal/executionauth"
 	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/marmot1024/metricspire/internal/planner"
 )
@@ -142,7 +143,11 @@ func (s *QueryService) PlanActive(ctx context.Context, input QueryInput) (PlanOu
 // The caller cannot select an unpublished release, policy, binding, engine, or
 // stale manifest fingerprint through SemanticQuery.
 func (s *QueryService) ExecuteActive(ctx context.Context, input QueryInput) (QueryOutput, error) {
-	planned, err := s.PlanActive(ctx, input)
+	// The user-authorized engine token must reach only the analytical engine.
+	// Control-plane, policy, planning, and audit dependencies receive an
+	// explicitly masked context that retains cancellation and deadlines.
+	controlContext := executionauth.WithoutAccessToken(ctx)
+	planned, err := s.PlanActive(controlContext, input)
 	if err != nil {
 		return QueryOutput{}, err
 	}
@@ -155,7 +160,7 @@ func (s *QueryService) ExecuteActive(ctx context.Context, input QueryInput) (Que
 	started := baseEvent
 	started.Kind = audit.EventQueryStarted
 	started.OccurredAt = s.now().UTC()
-	if err := s.audit.Record(ctx, started); err != nil {
+	if err := s.audit.Record(controlContext, started); err != nil {
 		return QueryOutput{}, fmt.Errorf("%w: record query start: %v", audit.ErrUnavailable, err)
 	}
 	execution, err := s.engine.Execute(ctx, planned.Physical)
@@ -174,7 +179,7 @@ func (s *QueryService) ExecuteActive(ctx context.Context, input QueryInput) (Que
 		finished.Kind = audit.EventQueryFailed
 		finished.ErrorCode = errorCode(err)
 	}
-	auditContext, cancelAudit := context.WithTimeout(context.WithoutCancel(ctx), auditCompletionTimeout)
+	auditContext, cancelAudit := context.WithTimeout(context.WithoutCancel(controlContext), auditCompletionTimeout)
 	defer cancelAudit()
 	if auditErr := s.audit.Record(auditContext, finished); auditErr != nil {
 		return QueryOutput{Release: planned.Release, Logical: planned.Logical, Physical: planned.Physical, Execution: execution}, fmt.Errorf("%w: record query completion: %v", audit.ErrUnavailable, auditErr)

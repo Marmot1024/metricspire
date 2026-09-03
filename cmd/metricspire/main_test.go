@@ -32,6 +32,7 @@ func TestVersionAndUnknownCommand(t *testing.T) {
 
 func TestCLIPhase2RejectsMissingOperationalInputsBeforeConnecting(t *testing.T) {
 	t.Setenv("METRICSPIRE_DATABASE_URL", "")
+	t.Setenv("METRICSPIRE_LAKEBASE_ENDPOINT", "")
 	t.Setenv("DATABRICKS_HOST", "")
 	t.Setenv("DATABRICKS_SQL_WAREHOUSE_ID", "")
 	t.Setenv("DATABRICKS_CLIENT_ID", "")

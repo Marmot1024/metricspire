@@ -21,7 +21,7 @@ import (
 func TestLoadServeEnvironmentRejectsMissingAndPartialSecrets(t *testing.T) {
 	values := map[string]string{}
 	getenv := func(name string) string { return values[name] }
-	if _, err := loadServeEnvironment(getenv); err == nil || !strings.Contains(err.Error(), "METRICSPIRE_DATABASE_URL") {
+	if _, err := loadServeEnvironment(getenv, runtimeconfig.AuthenticationOIDC); err == nil || !strings.Contains(err.Error(), "METRICSPIRE_DATABASE_URL") {
 		t.Fatalf("missing database URL error = %v", err)
 	}
 	values["METRICSPIRE_DATABASE_URL"] = "postgres://localhost/metricspire"
@@ -29,16 +29,55 @@ func TestLoadServeEnvironmentRejectsMissingAndPartialSecrets(t *testing.T) {
 	values["DATABRICKS_HOST"] = "https://workspace.example"
 	values["DATABRICKS_SQL_WAREHOUSE_ID"] = "warehouse"
 	values["DATABRICKS_CLIENT_ID"] = "client"
-	if _, err := loadServeEnvironment(getenv); err == nil || !strings.Contains(err.Error(), "must both be set") {
+	if _, err := loadServeEnvironment(getenv, runtimeconfig.AuthenticationOIDC); err == nil || !strings.Contains(err.Error(), "must both be set") {
 		t.Fatalf("partial Databricks OAuth error = %v", err)
 	}
 	values["DATABRICKS_CLIENT_SECRET"] = "secret"
-	environment, err := loadServeEnvironment(getenv)
+	environment, err := loadServeEnvironment(getenv, runtimeconfig.AuthenticationOIDC)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(environment.sessionKey) != 32 || environment.databricksHost == "" || environment.warehouseID == "" {
 		t.Fatalf("serve environment = %#v", environment)
+	}
+}
+
+func TestLoadServeEnvironmentForAppsDoesNotAcceptOrRequireServiceCredentialFallback(t *testing.T) {
+	values := map[string]string{
+		"METRICSPIRE_DATABASE_URL": "postgres://localhost/metricspire",
+		"DATABRICKS_HOST":          "https://workspace.example", "DATABRICKS_SQL_WAREHOUSE_ID": "warehouse",
+	}
+	environment, err := loadServeEnvironment(func(name string) string { return values[name] }, runtimeconfig.AuthenticationDatabricksApps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(environment.sessionKey) != 0 || environment.databricksHost == "" || environment.warehouseID == "" {
+		t.Fatalf("Apps serve environment = %#v", environment)
+	}
+}
+
+func TestLoadServeEnvironmentForAppsAcceptsExactlyOneLakebaseConfiguration(t *testing.T) {
+	values := map[string]string{
+		"METRICSPIRE_LAKEBASE_ENDPOINT": "projects/project-1/branches/production/endpoints/primary",
+		"DATABRICKS_HOST":               "https://workspace.example",
+		"DATABRICKS_SQL_WAREHOUSE_ID":   "warehouse",
+	}
+	getenv := func(name string) string { return values[name] }
+	environment, err := loadServeEnvironment(getenv, runtimeconfig.AuthenticationDatabricksApps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if environment.databaseURL != "" || environment.databricksHost == "" {
+		t.Fatalf("Apps Lakebase environment = %#v", environment)
+	}
+	values["METRICSPIRE_DATABASE_URL"] = "postgres://localhost/metricspire"
+	if _, err := loadServeEnvironment(getenv, runtimeconfig.AuthenticationDatabricksApps); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("ambiguous Apps database configuration error = %v", err)
+	}
+	delete(values, "METRICSPIRE_DATABASE_URL")
+	delete(values, "METRICSPIRE_LAKEBASE_ENDPOINT")
+	if _, err := loadServeEnvironment(getenv, runtimeconfig.AuthenticationDatabricksApps); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("missing Apps database configuration error = %v", err)
 	}
 }
 
@@ -101,8 +140,20 @@ func TestRuntimeExampleLoadsDatabricksTrustedRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(policies) != 1 || len(bindings) != 1 || policies[0].Tenant != "acceptance" ||
-		bindings[0].Binding.Engine != "databricks_sql" || config.OIDC.BearerAudience != "metricspire-api" {
+		bindings[0].Binding.Engine != "databricks_sql" || config.Authentication.OIDC == nil || config.Authentication.OIDC.BearerAudience != "metricspire-api" {
 		t.Fatalf("trusted routes = %#v %#v", policies, bindings)
+	}
+}
+
+func TestDatabricksAppsRuntimeExampleLoadsFailClosedProfile(t *testing.T) {
+	config, err := runtimeconfig.Load(filepath.Join("..", "..", "examples", "runtime.databricks-apps.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apps := config.Authentication.DatabricksApps
+	if config.Authentication.Provider != runtimeconfig.AuthenticationDatabricksApps || apps == nil ||
+		apps.ExpectedAppName == "" || apps.ExpectedWorkspaceID == "" || apps.QueryRole != "analyst" || apps.PublisherGroupID == "" {
+		t.Fatalf("Databricks Apps runtime example = %#v", config.Authentication)
 	}
 }
 
@@ -136,8 +187,11 @@ func TestServeStartsOIDCLoginAndStopsGracefullyWithPostgres(t *testing.T) {
 			Address: "127.0.0.1:0", PublicURL: "http://127.0.0.1:3000",
 			ControlTimeout: "2s", QueryTimeout: "2s",
 		},
-		OIDC: runtimeconfig.OIDCConfig{
-			IssuerURL: issuer.URL, ClientID: "metricspire-test", BearerAudience: "metricspire-api", DevelopmentAllowInsecureHTTP: true,
+		Authentication: runtimeconfig.AuthenticationConfig{
+			Provider: runtimeconfig.AuthenticationOIDC,
+			OIDC: &runtimeconfig.OIDCConfig{
+				IssuerURL: issuer.URL, ClientID: "metricspire-test", BearerAudience: "metricspire-api", DevelopmentAllowInsecureHTTP: true,
+			},
 		},
 		Policies: []runtimeconfig.PolicyRoute{{
 			Namespace: "acceptance", ModelName: "tpch_orders", Tenant: "acceptance",

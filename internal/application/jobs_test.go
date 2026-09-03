@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/marmot1024/metricspire/internal/application"
+	"github.com/marmot1024/metricspire/internal/executionauth"
 	"github.com/marmot1024/metricspire/internal/model"
 )
 
@@ -19,7 +20,7 @@ func TestJobManagerCancelsAndIsolatesJobsByPrincipal(t *testing.T) {
 	}
 	defer manager.Close()
 	input := trustedJobInput()
-	submitted, err := manager.Submit(input)
+	submitted, err := manager.Submit(context.Background(), input)
 	if err != nil || submitted.Job.Status != model.JobPending {
 		t.Fatalf("Submit() = %#v, %v", submitted, err)
 	}
@@ -46,7 +47,7 @@ func TestJobManagerEnforcesServerTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer manager.Close()
-	submitted, err := manager.Submit(trustedJobInput())
+	submitted, err := manager.Submit(context.Background(), trustedJobInput())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +63,7 @@ func TestJobManagerCloseWaitsForCancellationAndRejectsNewJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	submitted, err := manager.Submit(trustedJobInput())
+	submitted, err := manager.Submit(context.Background(), trustedJobInput())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,7 @@ func TestJobManagerCloseWaitsForCancellationAndRejectsNewJobs(t *testing.T) {
 	if err != nil || finished.Job.Status != model.JobCancelled {
 		t.Fatalf("job after Close = %#v, %v", finished, err)
 	}
-	if _, err := manager.Submit(trustedJobInput()); err == nil {
+	if _, err := manager.Submit(context.Background(), trustedJobInput()); err == nil {
 		t.Fatal("closed job manager accepted a new job")
 	}
 }
@@ -83,7 +84,7 @@ func TestJobManagerDoesNotExposeEngineErrorDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer manager.Close()
-	submitted, err := manager.Submit(trustedJobInput())
+	submitted, err := manager.Submit(context.Background(), trustedJobInput())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +95,34 @@ func TestJobManagerDoesNotExposeEngineErrorDetails(t *testing.T) {
 	}
 }
 
+func TestJobManagerPropagatesOnlyRequestExecutionToken(t *testing.T) {
+	executor := &tokenExecutor{observed: make(chan string, 1)}
+	manager, err := application.NewJobManager(context.Background(), executor, time.Second, 10, func() string { return "job_token" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	submission := context.WithValue(context.Background(), unrelatedJobKey{}, "do-not-copy")
+	submission, err = executionauth.WithAccessToken(submission, "short-lived-user-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Submit(submission, trustedJobInput()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case observed := <-executor.observed:
+		if observed != "short-lived-user-token" {
+			t.Fatalf("execution token = %q", observed)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("executor did not observe request token")
+	}
+	if executor.unrelated != nil {
+		t.Fatalf("unrelated request value leaked into job context: %#v", executor.unrelated)
+	}
+}
+
 type blockingExecutor struct {
 	started chan struct{}
 	input   application.QueryInput
@@ -101,8 +130,22 @@ type blockingExecutor struct {
 
 type problemExecutor struct{}
 
+type tokenExecutor struct {
+	observed  chan string
+	unrelated any
+}
+
+type unrelatedJobKey struct{}
+
 func (problemExecutor) ExecuteActive(context.Context, application.QueryInput) (application.QueryOutput, error) {
 	return application.QueryOutput{}, &model.Problem{Code: "engine_bad_request", Message: "SELECT * FROM secret_table"}
+}
+
+func (executor *tokenExecutor) ExecuteActive(ctx context.Context, _ application.QueryInput) (application.QueryOutput, error) {
+	token, _ := executionauth.AccessToken(ctx)
+	executor.unrelated = ctx.Value(unrelatedJobKey{})
+	executor.observed <- token
+	return application.QueryOutput{}, nil
 }
 
 func (executor *blockingExecutor) ExecuteActive(ctx context.Context, input application.QueryInput) (application.QueryOutput, error) {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/marmot1024/metricspire/internal/audit"
 	"github.com/marmot1024/metricspire/internal/catalog"
+	"github.com/marmot1024/metricspire/internal/executionauth"
 	"github.com/marmot1024/metricspire/internal/model"
 )
 
@@ -67,13 +68,17 @@ func NewJobManager(parent context.Context, executor ActiveQueryExecutor, timeout
 	}, nil
 }
 
-func (manager *JobManager) Submit(input QueryInput) (QueryJobSnapshot, error) {
+func (manager *JobManager) Submit(submissionContext context.Context, input QueryInput) (QueryJobSnapshot, error) {
+	if submissionContext == nil {
+		return QueryJobSnapshot{}, errors.New("job submission context is required")
+	}
 	if input.Context.Tenant == "" || input.Context.Principal == "" || input.Context.RequestID == "" {
 		return QueryJobSnapshot{}, errors.New("trusted request context is incomplete")
 	}
 	now := time.Now().UTC()
 	id := manager.newID()
-	ctx, cancel := context.WithTimeout(manager.parent, manager.timeout)
+	jobParent := executionauth.PropagateAccessToken(manager.parent, submissionContext)
+	ctx, cancel := context.WithTimeout(jobParent, manager.timeout)
 	job := &managedJob{
 		tenant: input.Context.Tenant, principal: input.Context.Principal, cancel: cancel,
 		snapshot: QueryJobSnapshot{Job: model.ExecutionJob{ID: id, Status: model.JobPending, SubmittedAt: now}},
@@ -103,6 +108,7 @@ func (manager *JobManager) Submit(input QueryInput) (QueryJobSnapshot, error) {
 	manager.mu.Unlock()
 	go func() {
 		defer manager.wait.Done()
+		defer cancel()
 		manager.run(ctx, id, input)
 	}()
 	return snapshot, nil
@@ -130,7 +136,9 @@ func (manager *JobManager) Cancel(tenant, principal, id string) (QueryJobSnapsho
 		manager.mu.Unlock()
 		return snapshot, ErrJobFinished
 	}
-	job.cancel()
+	if job.cancel != nil {
+		job.cancel()
+	}
 	snapshot := cloneJob(job.snapshot)
 	manager.mu.Unlock()
 	return snapshot, nil
@@ -145,7 +153,9 @@ func (manager *JobManager) Close() {
 	}
 	manager.closed = true
 	for _, job := range manager.jobs {
-		job.cancel()
+		if job.cancel != nil {
+			job.cancel()
+		}
 	}
 	manager.mu.Unlock()
 	manager.wait.Wait()
@@ -172,6 +182,9 @@ func (manager *JobManager) run(ctx context.Context, id string, input QueryInput)
 		return
 	}
 	job.snapshot.Job.FinishedAt = &finished
+	// Release the cancel closure once the job is terminal. In Apps user-
+	// authorization mode it closes over the short-lived execution token.
+	job.cancel = nil
 	job.snapshot.Job.PhysicalFingerprint = output.Physical.Fingerprint
 	job.snapshot.Job.RowLimit = int64(output.Physical.Limit)
 	job.snapshot.ReleaseID = output.Release.ID
@@ -231,6 +244,12 @@ func jobProblem(err error) model.Problem {
 
 func publicJobProblem(problem model.Problem) model.Problem {
 	code := problem.Code
+	if code == "engine_http_error" {
+		// The Databricks adapter constructs this message only from an HTTP
+		// status and a strictly bounded uppercase error code. Preserve that
+		// operational signal without exposing the upstream response body.
+		return model.Problem{Code: code, Message: problem.Message}
+	}
 	if strings.HasPrefix(code, "engine_") || code == "invalid_engine_response" ||
 		code == "result_truncated" || code == "result_unavailable" || code == "invalid_physical_plan" ||
 		code == "invalid_identifier" || code == "unsupported_resource" || code == "metric_cycle" {

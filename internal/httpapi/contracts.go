@@ -85,20 +85,34 @@ type QueryService interface {
 }
 
 type JobService interface {
-	Submit(application.QueryInput) (application.QueryJobSnapshot, error)
+	Submit(context.Context, application.QueryInput) (application.QueryJobSnapshot, error)
 	Get(string, string, string) (application.QueryJobSnapshot, error)
 	Cancel(string, string, string) (application.QueryJobSnapshot, error)
 }
 
+// ExecutionCredentialProvider adds a short-lived analytical-engine credential
+// to the context of an authenticated query request. Explain and plan never call
+// it because they do not execute against the analytical engine.
+type ExecutionCredentialProvider interface {
+	AddToContext(context.Context, *http.Request, Principal) (context.Context, error)
+}
+
+type ExecutionCredentialFunc func(context.Context, *http.Request, Principal) (context.Context, error)
+
+func (function ExecutionCredentialFunc) AddToContext(ctx context.Context, request *http.Request, principal Principal) (context.Context, error) {
+	return function(ctx, request, principal)
+}
+
 type Dependencies struct {
-	Authenticator Authenticator
-	AuthEndpoints http.Handler
-	Readiness     ReadinessChecker
-	Management    ManagementService
-	Catalog       CatalogReader
-	CatalogSearch CatalogSearcher
-	Queries       QueryService
-	Jobs          JobService
+	Authenticator       Authenticator
+	AuthEndpoints       http.Handler
+	Readiness           ReadinessChecker
+	Management          ManagementService
+	Catalog             CatalogReader
+	CatalogSearch       CatalogSearcher
+	Queries             QueryService
+	Jobs                JobService
+	ExecutionCredential ExecutionCredentialProvider
 }
 
 type Config struct {

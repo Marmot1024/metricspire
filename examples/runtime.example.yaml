@@ -6,14 +6,16 @@ http:
   max_body_bytes: 1048576
   control_timeout: 15s
   query_timeout: 2m
-oidc:
-  issuer_url: https://identity.example.com
-  client_id: metricspire
-  bearer_audience: metricspire-api
-  session_ttl: 8h
-  tenant_claim: tenant
-  roles_claim: roles
-  permissions_claim: permissions
+authentication:
+  provider: oidc
+  oidc:
+    issuer_url: https://identity.example.com
+    client_id: metricspire
+    bearer_audience: metricspire-api
+    session_ttl: 8h
+    tenant_claim: tenant
+    roles_claim: roles
+    permissions_claim: permissions
 policies:
   - namespace: acceptance
     model_name: tpch_orders

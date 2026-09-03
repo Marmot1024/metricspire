@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"sort"
 
 	"github.com/jackc/pgx/v5"
@@ -16,6 +17,31 @@ import (
 var migrationFiles embed.FS
 
 const migrationLockID int64 = 6449131086483401
+
+var schemaNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
+
+func ValidateSchemaName(name string) error {
+	if !schemaNamePattern.MatchString(name) {
+		return fmt.Errorf("postgres schema must match %s", schemaNamePattern.String())
+	}
+	return nil
+}
+
+// EnsureSchema creates the explicitly configured application schema. Lakebase
+// App resources grant CREATE on the database, but intentionally do not grant
+// CREATE on the shared public schema.
+func EnsureSchema(ctx context.Context, pool *pgxpool.Pool, name string) error {
+	if pool == nil {
+		return fmt.Errorf("postgres pool is required")
+	}
+	if err := ValidateSchemaName(name); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS `+pgx.Identifier{name}.Sanitize()); err != nil {
+		return fmt.Errorf("create postgres schema: %w", err)
+	}
+	return nil
+}
 
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if pool == nil {

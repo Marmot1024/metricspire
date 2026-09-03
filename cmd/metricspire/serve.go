@@ -21,12 +21,12 @@ import (
 
 	"github.com/marmot1024/metricspire/internal/adapter/databricks"
 	"github.com/marmot1024/metricspire/internal/application"
+	"github.com/marmot1024/metricspire/internal/auth/appsauth"
 	"github.com/marmot1024/metricspire/internal/auth/oidcauth"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
 	"github.com/marmot1024/metricspire/internal/httpapi"
 	"github.com/marmot1024/metricspire/internal/model"
-	"github.com/marmot1024/metricspire/internal/repository/postgres"
 	"github.com/marmot1024/metricspire/internal/runtimeconfig"
 )
 
@@ -63,7 +63,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	if err != nil {
 		return err
 	}
-	environment, err := loadServeEnvironment(os.Getenv)
+	environment, err := loadServeEnvironment(os.Getenv, config.Authentication.Provider)
 	if err != nil {
 		return err
 	}
@@ -75,10 +75,6 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	if err != nil {
 		return fmt.Errorf("parse query timeout: %w", err)
 	}
-	sessionTTL, err := runtimeconfig.ParseDuration(config.OIDC.SessionTTL, 8*time.Hour)
-	if err != nil {
-		return fmt.Errorf("parse OIDC session TTL: %w", err)
-	}
 	policies, bindings, err := loadTrustedRoutes(filepath.Dir(*configPath), config)
 	if err != nil {
 		return err
@@ -89,7 +85,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	initializationContext, cancelInitialization := context.WithTimeout(ctx, startupTimeout)
 	defer cancelInitialization()
 
-	store, err := postgres.Open(initializationContext, environment.databaseURL)
+	store, err := openStore(initializationContext, environment.databaseURL)
 	if err != nil {
 		return err
 	}
@@ -110,13 +106,16 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	if err != nil {
 		return err
 	}
-	tokenSource, err := databricksTokenSource(environment.databricksHost)
-	if err != nil {
-		return err
+	clientConfig := databricks.ClientConfig{Host: environment.databricksHost, WarehouseID: environment.warehouseID}
+	if config.Authentication.Provider == runtimeconfig.AuthenticationDatabricksApps {
+		clientConfig.RequireRequestToken = true
+	} else {
+		clientConfig.TokenSource, err = databricksTokenSource(environment.databricksHost)
+		if err != nil {
+			return err
+		}
 	}
-	databricksClient, err := databricks.NewClient(databricks.ClientConfig{
-		Host: environment.databricksHost, WarehouseID: environment.warehouseID, TokenSource: tokenSource,
-	})
+	databricksClient, err := databricks.NewClient(clientConfig)
 	if err != nil {
 		return err
 	}
@@ -134,21 +133,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	}
 	defer jobs.Close()
 
-	oidcConfig := oidcauth.Config{
-		IssuerURL: config.OIDC.IssuerURL, ClientID: config.OIDC.ClientID, BearerAudience: config.OIDC.BearerAudience,
-		TenantClaim: config.OIDC.TenantClaim, RolesClaim: config.OIDC.RolesClaim,
-		PermissionsClaim: config.OIDC.PermissionsClaim,
-		AllowHTTP:        config.OIDC.DevelopmentAllowInsecureHTTP,
-	}
-	publicURL, err := url.Parse(config.HTTP.PublicURL)
-	if err != nil {
-		return err
-	}
-	authenticator, err := oidcauth.NewWeb(initializationContext, oidcauth.WebConfig{
-		OIDC: oidcConfig, ClientSecret: environment.oidcClientSecret,
-		RedirectURL: strings.TrimSuffix(config.HTTP.PublicURL, "/") + "/auth/callback",
-		SessionKey:  environment.sessionKey, SessionTTL: sessionTTL, InsecureCookies: publicURL.Scheme == "http",
-	})
+	authenticator, authEndpoints, executionCredential, err := buildServeAuthentication(initializationContext, config, environment, os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -157,10 +142,10 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		MaxBodyBytes: config.HTTP.MaxBodyBytes, ControlTimeout: controlTimeout,
 		QueryTimeout: queryTimeout, AllowedOrigin: config.HTTP.PublicURL,
 	}, httpapi.Dependencies{
-		Authenticator: authenticator, AuthEndpoints: authenticator,
+		Authenticator: authenticator, AuthEndpoints: authEndpoints,
 		Readiness:  store,
 		Management: management, Catalog: store, CatalogSearch: catalogSearch,
-		Queries: queries, Jobs: jobs,
+		Queries: queries, Jobs: jobs, ExecutionCredential: executionCredential,
 	}, logger)
 	if err != nil {
 		return err
@@ -201,6 +186,58 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	}
 }
 
+func buildServeAuthentication(ctx context.Context, config runtimeconfig.Config, environment serveEnvironment, getenv func(string) string) (httpapi.Authenticator, http.Handler, httpapi.ExecutionCredentialProvider, error) {
+	switch config.Authentication.Provider {
+	case runtimeconfig.AuthenticationOIDC:
+		if config.Authentication.OIDC == nil {
+			return nil, nil, nil, errors.New("OIDC authentication configuration is required")
+		}
+		configured := *config.Authentication.OIDC
+		sessionTTL, err := runtimeconfig.ParseDuration(configured.SessionTTL, 8*time.Hour)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("parse OIDC session TTL: %w", err)
+		}
+		publicURL, err := url.Parse(config.HTTP.PublicURL)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		authenticator, err := oidcauth.NewWeb(ctx, oidcauth.WebConfig{
+			OIDC: oidcauth.Config{
+				IssuerURL: configured.IssuerURL, ClientID: configured.ClientID, BearerAudience: configured.BearerAudience,
+				TenantClaim: configured.TenantClaim, RolesClaim: configured.RolesClaim,
+				PermissionsClaim: configured.PermissionsClaim, AllowHTTP: configured.DevelopmentAllowInsecureHTTP,
+			},
+			ClientSecret: environment.oidcClientSecret,
+			RedirectURL:  strings.TrimSuffix(config.HTTP.PublicURL, "/") + "/auth/callback",
+			SessionKey:   environment.sessionKey, SessionTTL: sessionTTL, InsecureCookies: publicURL.Scheme == "http",
+		})
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return authenticator, authenticator, nil, nil
+	case runtimeconfig.AuthenticationDatabricksApps:
+		if config.Authentication.DatabricksApps == nil {
+			return nil, nil, nil, errors.New("Databricks Apps authentication configuration is required")
+		}
+		runtime, err := appsauth.RuntimeFromEnvironment(getenv)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		configured := *config.Authentication.DatabricksApps
+		authenticator, err := appsauth.New(appsauth.Config{
+			ExpectedAppName: configured.ExpectedAppName, ExpectedWorkspaceID: configured.ExpectedWorkspaceID,
+			ExpectedPublicURL: config.HTTP.PublicURL, Tenant: configured.Tenant,
+			QueryRole: configured.QueryRole, PublisherGroupID: configured.PublisherGroupID,
+		}, runtime, nil)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return authenticator, nil, authenticator, nil
+	default:
+		return nil, nil, nil, errors.New("unsupported authentication provider")
+	}
+}
+
 func resolveHTTPAddress(configured, override string) (string, error) {
 	address := strings.TrimSpace(configured)
 	if strings.TrimSpace(override) != "" {
@@ -212,28 +249,45 @@ func resolveHTTPAddress(configured, override string) (string, error) {
 	return address, nil
 }
 
-func loadServeEnvironment(getenv func(string) string) (serveEnvironment, error) {
+func loadServeEnvironment(getenv func(string) string, authenticationProvider string) (serveEnvironment, error) {
 	databaseURL := strings.TrimSpace(getenv("METRICSPIRE_DATABASE_URL"))
-	if databaseURL == "" {
-		return serveEnvironment{}, errors.New("METRICSPIRE_DATABASE_URL is required")
-	}
-	sessionKey, err := decodeSessionKey(getenv("METRICSPIRE_SESSION_KEY"))
-	if err != nil {
-		return serveEnvironment{}, err
+	lakebaseEndpoint := strings.TrimSpace(getenv("METRICSPIRE_LAKEBASE_ENDPOINT"))
+	switch authenticationProvider {
+	case runtimeconfig.AuthenticationOIDC:
+		if lakebaseEndpoint != "" {
+			return serveEnvironment{}, errors.New("METRICSPIRE_LAKEBASE_ENDPOINT is supported only by the Databricks Apps authentication profile")
+		}
+		if databaseURL == "" {
+			return serveEnvironment{}, errors.New("METRICSPIRE_DATABASE_URL is required")
+		}
+	case runtimeconfig.AuthenticationDatabricksApps:
+		if (databaseURL == "") == (lakebaseEndpoint == "") {
+			return serveEnvironment{}, errors.New("exactly one of METRICSPIRE_DATABASE_URL or METRICSPIRE_LAKEBASE_ENDPOINT is required")
+		}
+	default:
+		return serveEnvironment{}, errors.New("unsupported authentication provider")
 	}
 	host := strings.TrimSpace(getenv("DATABRICKS_HOST"))
 	warehouseID := strings.TrimSpace(getenv("DATABRICKS_SQL_WAREHOUSE_ID"))
 	if host == "" || warehouseID == "" {
 		return serveEnvironment{}, errors.New("DATABRICKS_HOST and DATABRICKS_SQL_WAREHOUSE_ID are required")
 	}
-	clientID := strings.TrimSpace(getenv("DATABRICKS_CLIENT_ID"))
-	clientSecret := strings.TrimSpace(getenv("DATABRICKS_CLIENT_SECRET"))
-	staticToken := strings.TrimSpace(getenv("DATABRICKS_TOKEN"))
-	if (clientID == "") != (clientSecret == "") {
-		return serveEnvironment{}, errors.New("DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET must both be set")
-	}
-	if clientID == "" && staticToken == "" {
-		return serveEnvironment{}, errors.New("Databricks authentication requires OAuth M2M environment variables or DATABRICKS_TOKEN")
+	var sessionKey []byte
+	if authenticationProvider == runtimeconfig.AuthenticationOIDC {
+		var err error
+		sessionKey, err = decodeSessionKey(getenv("METRICSPIRE_SESSION_KEY"))
+		if err != nil {
+			return serveEnvironment{}, err
+		}
+		clientID := strings.TrimSpace(getenv("DATABRICKS_CLIENT_ID"))
+		clientSecret := strings.TrimSpace(getenv("DATABRICKS_CLIENT_SECRET"))
+		staticToken := strings.TrimSpace(getenv("DATABRICKS_TOKEN"))
+		if (clientID == "") != (clientSecret == "") {
+			return serveEnvironment{}, errors.New("DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET must both be set")
+		}
+		if clientID == "" && staticToken == "" {
+			return serveEnvironment{}, errors.New("Databricks authentication requires OAuth M2M environment variables or DATABRICKS_TOKEN")
+		}
 	}
 	return serveEnvironment{
 		databaseURL: databaseURL, sessionKey: sessionKey,

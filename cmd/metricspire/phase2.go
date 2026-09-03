@@ -7,11 +7,15 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/marmot1024/metricspire/internal/adapter/databricks"
+	"github.com/marmot1024/metricspire/internal/adapter/lakebase"
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/audit"
 	"github.com/marmot1024/metricspire/internal/catalog"
@@ -51,6 +55,7 @@ func runMigrate(parent context.Context, arguments []string, stdout, stderr io.Wr
 	flags := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	databaseURL := flags.String("database-url", os.Getenv("METRICSPIRE_DATABASE_URL"), "PostgreSQL URL (or METRICSPIRE_DATABASE_URL)")
+	schema := flags.String("schema", os.Getenv("METRICSPIRE_DATABASE_SCHEMA"), "dedicated PostgreSQL schema (or METRICSPIRE_DATABASE_SCHEMA)")
 	timeout := flags.Duration("timeout", defaultCommandTimeout, "operation timeout")
 	if err := parseNoPositionals(flags, arguments); err != nil {
 		return err
@@ -65,6 +70,11 @@ func runMigrate(parent context.Context, arguments []string, stdout, stderr io.Wr
 		return err
 	}
 	defer store.Close()
+	if strings.TrimSpace(*schema) != "" {
+		if err := postgres.EnsureSchema(ctx, store.Pool(), strings.TrimSpace(*schema)); err != nil {
+			return err
+		}
+	}
 	if err := postgres.Migrate(ctx, store.Pool()); err != nil {
 		return err
 	}
@@ -417,10 +427,92 @@ func commandContext(parent context.Context, timeout time.Duration) (context.Cont
 }
 
 func openStore(ctx context.Context, databaseURL string) (*postgres.Store, error) {
-	if strings.TrimSpace(databaseURL) == "" {
-		return nil, errors.New("--database-url or METRICSPIRE_DATABASE_URL is required")
+	configuration, err := loadStoreConfiguration(databaseURL, os.Getenv)
+	if err != nil {
+		return nil, err
 	}
-	return postgres.Open(ctx, databaseURL)
+	if configuration.passwordProvider != nil {
+		return postgres.OpenWithPasswordProvider(ctx, configuration.databaseURL, configuration.passwordProvider)
+	}
+	return postgres.Open(ctx, configuration.databaseURL)
+}
+
+type storeConfiguration struct {
+	databaseURL      string
+	passwordProvider postgres.PasswordProvider
+}
+
+func loadStoreConfiguration(databaseURL string, getenv func(string) string) (storeConfiguration, error) {
+	databaseURL = strings.TrimSpace(databaseURL)
+	endpoint := strings.TrimSpace(getenv("METRICSPIRE_LAKEBASE_ENDPOINT"))
+	if endpoint == "" {
+		if databaseURL == "" {
+			return storeConfiguration{}, errors.New("--database-url or METRICSPIRE_DATABASE_URL is required")
+		}
+		return storeConfiguration{databaseURL: databaseURL}, nil
+	}
+	if databaseURL != "" {
+		return storeConfiguration{}, errors.New("METRICSPIRE_DATABASE_URL and METRICSPIRE_LAKEBASE_ENDPOINT are mutually exclusive")
+	}
+
+	host := strings.TrimSpace(getenv("DATABRICKS_HOST"))
+	clientID := strings.TrimSpace(getenv("DATABRICKS_CLIENT_ID"))
+	clientSecret := strings.TrimSpace(getenv("DATABRICKS_CLIENT_SECRET"))
+	if host == "" || clientID == "" || clientSecret == "" {
+		return storeConfiguration{}, errors.New("Lakebase requires DATABRICKS_HOST, DATABRICKS_CLIENT_ID, and DATABRICKS_CLIENT_SECRET")
+	}
+	databaseURL, err := lakebaseDatabaseURL(getenv)
+	if err != nil {
+		return storeConfiguration{}, err
+	}
+	tokens, err := databricks.NewOAuthM2MTokenSource(databricks.OAuthM2MConfig{
+		Host: host, ClientID: clientID, ClientSecret: clientSecret,
+	})
+	if err != nil {
+		return storeConfiguration{}, err
+	}
+	provider, err := lakebase.NewCredentialProvider(lakebase.CredentialConfig{
+		Host: host, Endpoint: endpoint, Tokens: tokens,
+	})
+	if err != nil {
+		return storeConfiguration{}, err
+	}
+	return storeConfiguration{databaseURL: databaseURL, passwordProvider: provider}, nil
+}
+
+func lakebaseDatabaseURL(getenv func(string) string) (string, error) {
+	host := strings.TrimSpace(getenv("PGHOST"))
+	portText := strings.TrimSpace(getenv("PGPORT"))
+	database := strings.TrimSpace(getenv("PGDATABASE"))
+	user := strings.TrimSpace(getenv("PGUSER"))
+	sslMode := strings.TrimSpace(getenv("PGSSLMODE"))
+	if host == "" || portText == "" || database == "" || user == "" || sslMode == "" {
+		return "", errors.New("Lakebase requires PGHOST, PGPORT, PGDATABASE, PGUSER, and PGSSLMODE")
+	}
+	if strings.ContainsAny(host, "/\\?#@") || strings.ContainsAny(host, " \t\r\n") {
+		return "", errors.New("PGHOST must be a hostname without a scheme or path")
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return "", errors.New("PGPORT must be an integer between 1 and 65535")
+	}
+	switch sslMode {
+	case "require", "verify-ca", "verify-full":
+	default:
+		return "", errors.New("PGSSLMODE must be require, verify-ca, or verify-full for Lakebase")
+	}
+	query := url.Values{"sslmode": {sslMode}}
+	if schema := strings.TrimSpace(getenv("METRICSPIRE_DATABASE_SCHEMA")); schema != "" {
+		if err := postgres.ValidateSchemaName(schema); err != nil {
+			return "", err
+		}
+		query.Set("search_path", schema)
+	}
+	parsed := &url.URL{
+		Scheme: "postgres", User: url.User(user), Host: net.JoinHostPort(host, portText), Path: "/" + database,
+		RawQuery: query.Encode(),
+	}
+	return parsed.String(), nil
 }
 
 func requireCatalogIdentity(namespace, modelName string) error {

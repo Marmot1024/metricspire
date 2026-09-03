@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marmot1024/metricspire/internal/executionauth"
 	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/marmot1024/metricspire/internal/planner"
 )
@@ -25,27 +26,31 @@ const (
 	responseOverhead  int64 = 1 << 20
 )
 
+var ErrRequestAccessTokenRequired = errors.New("request-scoped Databricks access token is required")
+
 type TokenSource interface {
 	Token(context.Context) (string, error)
 }
 
 type ClientConfig struct {
-	Host         string
-	WarehouseID  string
-	TokenSource  TokenSource
-	HTTPClient   *http.Client
-	ByteLimit    int64
-	PollInterval time.Duration
+	Host                string
+	WarehouseID         string
+	TokenSource         TokenSource
+	RequireRequestToken bool
+	HTTPClient          *http.Client
+	ByteLimit           int64
+	PollInterval        time.Duration
 }
 
 type Client struct {
-	host         *url.URL
-	warehouseID  string
-	tokens       TokenSource
-	http         *http.Client
-	byteLimit    int64
-	pollInterval time.Duration
-	now          func() time.Time
+	host                *url.URL
+	warehouseID         string
+	tokens              TokenSource
+	requireRequestToken bool
+	http                *http.Client
+	byteLimit           int64
+	pollInterval        time.Duration
+	now                 func() time.Time
 }
 
 func NewClient(config ClientConfig) (*Client, error) {
@@ -56,7 +61,7 @@ func NewClient(config ClientConfig) (*Client, error) {
 	if strings.TrimSpace(config.WarehouseID) == "" {
 		return nil, errors.New("Databricks warehouse ID is required")
 	}
-	if config.TokenSource == nil {
+	if config.TokenSource == nil && !config.RequireRequestToken {
 		return nil, errors.New("Databricks token source is required")
 	}
 	httpClient := config.HTTPClient
@@ -79,7 +84,8 @@ func NewClient(config ClientConfig) (*Client, error) {
 	}
 	return &Client{
 		host: host, warehouseID: config.WarehouseID, tokens: config.TokenSource,
-		http: httpClient, byteLimit: byteLimit, pollInterval: pollInterval, now: time.Now,
+		requireRequestToken: config.RequireRequestToken,
+		http:                httpClient, byteLimit: byteLimit, pollInterval: pollInterval, now: time.Now,
 	}, nil
 }
 
@@ -143,14 +149,14 @@ func (c *Client) Execute(ctx context.Context, statement Statement) (model.Execut
 	for !terminal(snapshot.Job.Status) {
 		select {
 		case <-ctx.Done():
-			c.cancelBestEffort(snapshot.Job.ID)
+			c.cancelBestEffort(ctx, snapshot.Job.ID)
 			return snapshot, ctx.Err()
 		case <-time.After(c.pollInterval):
 		}
 		nextSnapshot, getErr := c.Get(ctx, snapshot.Job)
 		if getErr != nil {
 			if ctx.Err() != nil {
-				c.cancelBestEffort(snapshot.Job.ID)
+				c.cancelBestEffort(ctx, snapshot.Job.ID)
 				return snapshot, ctx.Err()
 			}
 			return snapshot, getErr
@@ -264,8 +270,9 @@ func (c *Client) decodeResult(ctx context.Context, manifest resultManifest, firs
 	return model.TypedResult{Columns: columns, Rows: rows, Truncated: false}, nil
 }
 
-func (c *Client) cancelBestEffort(statementID string) {
-	cancelContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (c *Client) cancelBestEffort(executionContext context.Context, statementID string) {
+	base := executionauth.PropagateAccessToken(context.Background(), executionContext)
+	cancelContext, cancel := context.WithTimeout(base, 5*time.Second)
 	defer cancel()
 	_ = c.Cancel(cancelContext, statementID)
 }
@@ -308,12 +315,19 @@ func (c *Client) doJSON(ctx context.Context, method, path string, input, output 
 	if err != nil {
 		return 0, fmt.Errorf("create Databricks request: %w", err)
 	}
-	token, err := c.tokens.Token(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("get Databricks access token: %w", err)
-	}
-	if strings.TrimSpace(token) == "" {
-		return 0, errors.New("Databricks token source returned an empty token")
+	token, present := executionauth.AccessToken(ctx)
+	if !present {
+		if c.requireRequestToken {
+			return 0, ErrRequestAccessTokenRequired
+		}
+		var err error
+		token, err = c.tokens.Token(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("get Databricks access token: %w", err)
+		}
+		if strings.TrimSpace(token) == "" {
+			return 0, errors.New("Databricks token source returned an empty token")
+		}
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Accept", "application/json")
@@ -337,13 +351,12 @@ func (c *Client) doJSON(ctx context.Context, method, path string, input, output 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		var apiError struct {
 			ErrorCode string `json:"error_code"`
-			Message   string `json:"message"`
 		}
 		_ = json.Unmarshal(data, &apiError)
-		if apiError.Message == "" {
-			apiError.Message = http.StatusText(response.StatusCode)
-		}
-		return int64(len(data)), problem("engine_http_error", "databricks.response", "HTTP %d: %s", response.StatusCode, apiError.Message)
+		return int64(len(data)), problem(
+			"engine_http_error", "databricks.response", "Databricks returned HTTP %d (%s)",
+			response.StatusCode, safeDatabricksErrorCode(apiError.ErrorCode),
+		)
 	}
 	if output == nil || len(data) == 0 {
 		return int64(len(data)), nil
@@ -352,6 +365,19 @@ func (c *Client) doJSON(ctx context.Context, method, path string, input, output 
 		return int64(len(data)), problem("invalid_engine_response", "databricks.response", "decode JSON: %v", err)
 	}
 	return int64(len(data)), nil
+}
+
+func safeDatabricksErrorCode(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) < 1 || len(value) > 64 {
+		return "unknown_error"
+	}
+	for _, character := range value {
+		if (character < 'A' || character > 'Z') && (character < '0' || character > '9') && character != '_' {
+			return "unknown_error"
+		}
+	}
+	return value
 }
 
 func validateStatement(statement Statement) error {
@@ -395,7 +421,11 @@ func mapStatus(state string) (model.JobStatus, error) {
 }
 
 func validateHost(value string) (*url.URL, error) {
-	parsed, err := url.Parse(strings.TrimSpace(value))
+	value = strings.TrimSpace(value)
+	if value != "" && !strings.Contains(value, "://") {
+		value = "https://" + value
+	}
+	parsed, err := url.Parse(value)
 	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, errors.New("Databricks host must be an absolute URL without credentials, query, or fragment")
 	}
@@ -406,6 +436,7 @@ func validateHost(value string) (*url.URL, error) {
 		return nil, errors.New("Databricks host must use HTTPS")
 	}
 	parsed.Path = ""
+	parsed.RawPath = ""
 	return parsed, nil
 }
 

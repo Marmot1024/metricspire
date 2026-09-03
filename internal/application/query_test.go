@@ -16,12 +16,16 @@ import (
 	"github.com/marmot1024/metricspire/internal/audit"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
+	"github.com/marmot1024/metricspire/internal/executionauth"
 	"github.com/marmot1024/metricspire/internal/model"
 )
 
 func TestPublishedReleaseToGovernedDatabricksResultAndRollback(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx, err := executionauth.WithAccessToken(context.Background(), "request-user-token")
+	if err != nil {
+		t.Fatal(err)
+	}
 	repository := catalog.NewMemoryRepository()
 	catalogService, _ := catalog.NewService(repository)
 	root := filepath.Join("..", "..", "examples", "orders")
@@ -47,6 +51,9 @@ func TestPublishedReleaseToGovernedDatabricksResultAndRollback(t *testing.T) {
 	executionRequests := 0
 	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		executionRequests++
+		if request.Header.Get("Authorization") != "Bearer request-user-token" {
+			t.Errorf("engine Authorization = %q", request.Header.Get("Authorization"))
+		}
 		if err := json.NewDecoder(request.Body).Decode(&submitted); err != nil {
 			t.Error(err)
 		}
@@ -68,7 +75,7 @@ func TestPublishedReleaseToGovernedDatabricksResultAndRollback(t *testing.T) {
 		return jsonResponse(response), nil
 	}), Timeout: time.Second}
 	client, err := databricks.NewClient(databricks.ClientConfig{
-		Host: "https://workspace.test", WarehouseID: "warehouse", TokenSource: databricks.StaticTokenSource("token"),
+		Host: "https://workspace.test", WarehouseID: "warehouse", RequireRequestToken: true,
 		HTTPClient: httpClient, ByteLimit: 4096, PollInterval: 10 * time.Millisecond,
 	})
 	if err != nil {
@@ -86,14 +93,16 @@ func TestPublishedReleaseToGovernedDatabricksResultAndRollback(t *testing.T) {
 	policy.ManifestFingerprint = ""
 	binding.ManifestFingerprint = ""
 	binding.Engine = databricks.EngineName
-	policyResolver := application.PolicyResolverFunc(func(context.Context, application.QueryScope, catalog.Release) (model.PolicySource, error) {
+	policyResolver := application.PolicyResolverFunc(func(ctx context.Context, _ application.QueryScope, _ catalog.Release) (model.PolicySource, error) {
+		assertNoExecutionToken(t, ctx, "policy resolver")
 		return policy, nil
 	})
-	bindingResolver := application.BindingResolverFunc(func(context.Context, application.QueryScope, catalog.Release) (model.SourceBinding, error) {
+	bindingResolver := application.BindingResolverFunc(func(ctx context.Context, _ application.QueryScope, _ catalog.Release) (model.SourceBinding, error) {
+		assertNoExecutionToken(t, ctx, "binding resolver")
 		return binding, nil
 	})
 	auditRecorder := audit.NewMemoryRecorder()
-	queryService, _ := application.NewQueryService(repository, policyResolver, bindingResolver, engine, auditRecorder)
+	queryService, _ := application.NewQueryService(repository, policyResolver, bindingResolver, engine, tokenCheckingRecorder{t: t, recorder: auditRecorder})
 
 	output, err := queryService.ExecuteActive(ctx, application.QueryInput{
 		QueryScope: application.QueryScope{Namespace: "demo", ModelName: source.Metadata.Name, Context: contextValue},
@@ -153,6 +162,23 @@ func TestPublishedReleaseToGovernedDatabricksResultAndRollback(t *testing.T) {
 	}
 	if executionRequests != 2 {
 		t.Fatalf("engine executed despite audit admission failure: %d requests", executionRequests)
+	}
+}
+
+type tokenCheckingRecorder struct {
+	t        *testing.T
+	recorder audit.Recorder
+}
+
+func (recorder tokenCheckingRecorder) Record(ctx context.Context, event audit.QueryEvent) error {
+	assertNoExecutionToken(recorder.t, ctx, "audit recorder")
+	return recorder.recorder.Record(ctx, event)
+}
+
+func assertNoExecutionToken(t *testing.T, ctx context.Context, component string) {
+	t.Helper()
+	if token, ok := executionauth.AccessToken(ctx); ok || token != "" {
+		t.Errorf("%s received execution token", component)
 	}
 }
 

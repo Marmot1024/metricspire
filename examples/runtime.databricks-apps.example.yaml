@@ -1,0 +1,27 @@
+api_version: metricspire.io/v1alpha1
+kind: RuntimeConfig
+http:
+  address: 0.0.0.0:8000
+  public_url: https://metricspire-staging.example.databricksapps.com
+  max_body_bytes: 1048576
+  control_timeout: 15s
+  query_timeout: 2m
+authentication:
+  provider: databricks_apps
+  databricks_apps:
+    expected_app_name: metricspire-staging
+    expected_workspace_id: "0000000000000000"
+    tenant: acceptance
+    # Every authenticated App user gets query:execute and this policy role.
+    query_role: analyst
+    # Members of this stable SCIM group ID additionally get model:manage.
+    publisher_group_id: replace-with-publisher-group-id
+policies:
+  - namespace: acceptance
+    model_name: tpch_orders
+    tenant: acceptance
+    path: ../testdata/acceptance/databricks-tpch/policy.yaml
+bindings:
+  - namespace: acceptance
+    model_name: tpch_orders
+    path: ../testdata/acceptance/databricks-tpch/binding.json

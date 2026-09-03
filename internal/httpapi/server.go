@@ -366,7 +366,18 @@ func (server *Server) handleQueryOperation(response http.ResponseWriter, request
 			}
 			return writeJSON(response, http.StatusOK, output)
 		default:
-			output, err := server.deps.Jobs.Submit(input)
+			executionContext := ctx
+			if server.deps.ExecutionCredential != nil {
+				var err error
+				executionContext, err = server.deps.ExecutionCredential.AddToContext(ctx, request, principal)
+				if err != nil {
+					return err
+				}
+				if executionContext == nil {
+					return errors.New("execution credential provider returned a nil context")
+				}
+			}
+			output, err := server.deps.Jobs.Submit(executionContext, input)
 			if err != nil {
 				return err
 			}
@@ -412,6 +423,10 @@ func (server *Server) handleJobCancel(response http.ResponseWriter, request *htt
 func (server *Server) authorize(response http.ResponseWriter, request *http.Request, permission Permission) (Principal, bool) {
 	principal, err := server.deps.Authenticator.Authenticate(request.Context(), request)
 	if err != nil {
+		var diagnostic interface{ SafeAuthenticationReason() string }
+		if errors.As(err, &diagnostic) {
+			server.logger.Warn("authentication rejected", "request_id", requestID(request), "reason", diagnostic.SafeAuthenticationReason())
+		}
 		server.writeProblem(response, request, http.StatusUnauthorized, "unauthenticated", "Authentication required", "valid authentication is required", "")
 		return Principal{}, false
 	}
@@ -470,6 +485,8 @@ func (server *Server) handleError(response http.ResponseWriter, request *http.Re
 		server.writeProblem(response, request, http.StatusGatewayTimeout, "timeout", "Request timed out", "the operation exceeded its server deadline", "")
 	case errors.Is(err, audit.ErrUnavailable):
 		server.writeProblem(response, request, http.StatusServiceUnavailable, "audit_unavailable", "Audit unavailable", "the request was not completed because its audit record could not be durably preserved", "")
+	case errors.Is(err, ErrUnauthenticated):
+		server.writeProblem(response, request, http.StatusUnauthorized, "unauthenticated", "Authentication required", "valid authentication and execution authorization are required", "")
 	case errors.Is(err, catalog.ErrNotFound):
 		server.writeProblem(response, request, http.StatusNotFound, "not_found", "Not found", "the requested resource was not found", "")
 	case errors.Is(err, application.ErrJobNotFound):

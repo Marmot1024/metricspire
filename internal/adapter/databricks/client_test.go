@@ -12,8 +12,40 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmot1024/metricspire/internal/executionauth"
 	"github.com/marmot1024/metricspire/internal/model"
 )
+
+func TestValidateHostNormalizesAppsWorkspaceHost(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"workspace.example.com", "https://workspace.example.com/"} {
+		value := value
+		t.Run(value, func(t *testing.T) {
+			t.Parallel()
+			host, err := validateHost(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if host.String() != "https://workspace.example.com" {
+				t.Fatalf("host = %q", host.String())
+			}
+		})
+	}
+}
+
+func TestValidateHostRejectsUnsafeAppsWorkspaceHost(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{
+		"https://user:secret@workspace.example.com",
+		"https://workspace.example.com/api/2.0",
+		"https://workspace.example.com?token=secret",
+		"https://workspace.example.com#fragment",
+	} {
+		if _, err := validateHost(value); err == nil {
+			t.Fatalf("unsafe host %q was accepted", value)
+		}
+	}
+}
 
 func TestClientExecutesAsyncStatementAndDecodesTypedChunks(t *testing.T) {
 	t.Parallel()
@@ -178,6 +210,64 @@ func TestExecuteCancelsWhenContextEndsDuringStatusRequest(t *testing.T) {
 	}
 }
 
+func TestClientUsesRequestTokenAndFailsClosedWhenItIsRequired(t *testing.T) {
+	t.Parallel()
+	requests := make(chan string, 1)
+	client, err := NewClient(ClientConfig{
+		Host: "https://workspace.test", WarehouseID: "warehouse", RequireRequestToken: true,
+		HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
+			requests <- request.Header.Get("Authorization")
+			return jsonResponse(http.StatusOK, statementResponse{
+				StatementID: "statement-user", Status: statementStatus{State: "SUCCEEDED"},
+				Manifest: resultManifest{Schema: resultSchema{Columns: []resultColumn{{Name: "value", TypeName: "LONG"}}}},
+				Result:   resultChunk{DataArray: [][]*string{{stringPointer("1")}}},
+			}), nil
+		}), ByteLimit: 1024, PollInterval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	statement := Statement{SQL: "SELECT 1", PhysicalFingerprint: "p", RowLimit: 1}
+	if _, err := client.Submit(context.Background(), statement); !errors.Is(err, ErrRequestAccessTokenRequired) {
+		t.Fatalf("Submit() without request token error = %v", err)
+	}
+	ctx, err := executionauth.WithAccessToken(context.Background(), "short-lived-user-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Submit(ctx, statement); err != nil {
+		t.Fatal(err)
+	}
+	if authorization := <-requests; authorization != "Bearer short-lived-user-token" {
+		t.Fatalf("Authorization = %q", authorization)
+	}
+}
+
+func TestRequestTokenOverridesServiceTokenWithoutLeakingItInErrors(t *testing.T) {
+	t.Parallel()
+	const requestToken = "user-token-must-not-leak"
+	client, err := NewClient(ClientConfig{
+		Host: "https://workspace.test", WarehouseID: "warehouse", TokenSource: StaticTokenSource("service-token"),
+		HTTPClient: testHTTPClient(func(request *http.Request) (*http.Response, error) {
+			if request.Header.Get("Authorization") != "Bearer "+requestToken {
+				t.Errorf("Authorization = %q", request.Header.Get("Authorization"))
+			}
+			return jsonResponse(http.StatusUnauthorized, map[string]string{"message": requestToken}), nil
+		}), ByteLimit: 1024, PollInterval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err := executionauth.WithAccessToken(context.Background(), requestToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Submit(ctx, Statement{SQL: "SELECT 1", PhysicalFingerprint: "p", RowLimit: 1})
+	if err == nil || strings.Contains(err.Error(), requestToken) {
+		t.Fatalf("request-token error = %v", err)
+	}
+}
+
 func TestDecodeResultRejectsChunkCyclesAndExcessRows(t *testing.T) {
 	t.Parallel()
 	manifest := resultManifest{Schema: resultSchema{Columns: []resultColumn{{Name: "id", TypeName: "LONG"}}}}
@@ -329,6 +419,8 @@ func mustClient(t *testing.T, httpClient *http.Client) *Client {
 	}
 	return client
 }
+
+func stringPointer(value string) *string { return &value }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 

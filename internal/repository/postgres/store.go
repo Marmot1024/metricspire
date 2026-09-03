@@ -22,12 +22,29 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
+// PasswordProvider supplies a fresh PostgreSQL password before the pool opens
+// a physical connection. It supports short-lived OAuth database credentials
+// without making the repository depend on any particular hosting platform.
+type PasswordProvider interface {
+	Password(context.Context) (string, error)
+}
+
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
-	config, err := pgxpool.ParseConfig(databaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("parse PostgreSQL configuration: %w", err)
+	return open(ctx, databaseURL, nil)
+}
+
+func OpenWithPasswordProvider(ctx context.Context, databaseURL string, provider PasswordProvider) (*Store, error) {
+	if provider == nil {
+		return nil, errors.New("PostgreSQL password provider is required")
 	}
-	config.MaxConns = 10
+	return open(ctx, databaseURL, provider)
+}
+
+func open(ctx context.Context, databaseURL string, provider PasswordProvider) (*Store, error) {
+	config, err := poolConfig(databaseURL, provider)
+	if err != nil {
+		return nil, err
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("open PostgreSQL pool: %w", err)
@@ -37,6 +54,28 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		return nil, fmt.Errorf("ping PostgreSQL: %w", err)
 	}
 	return &Store{pool: pool}, nil
+}
+
+func poolConfig(databaseURL string, provider PasswordProvider) (*pgxpool.Config, error) {
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse PostgreSQL configuration: %w", err)
+	}
+	config.MaxConns = 10
+	if provider != nil {
+		config.BeforeConnect = func(ctx context.Context, connection *pgx.ConnConfig) error {
+			password, err := provider.Password(ctx)
+			if err != nil {
+				return errors.New("refresh PostgreSQL credential")
+			}
+			if password == "" {
+				return errors.New("PostgreSQL password provider returned an empty credential")
+			}
+			connection.Password = password
+			return nil
+		}
+	}
+	return config, nil
 }
 
 func New(pool *pgxpool.Pool) (*Store, error) {

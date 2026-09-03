@@ -18,6 +18,7 @@ import (
 	"github.com/marmot1024/metricspire/internal/audit"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
+	"github.com/marmot1024/metricspire/internal/executionauth"
 	"github.com/marmot1024/metricspire/internal/httpapi"
 	"github.com/marmot1024/metricspire/internal/model"
 )
@@ -91,6 +92,39 @@ func TestHTTPExplainPlanAndQueryUseTrustedServerInputs(t *testing.T) {
 	}
 	if engine.executionCount() != 1 {
 		t.Fatalf("engine execution count = %d", engine.executionCount())
+	}
+}
+
+func TestHTTPAddsExecutionCredentialOnlyToQuery(t *testing.T) {
+	engine := &fakeEngine{}
+	credentialCalls := 0
+	credential := httpapi.ExecutionCredentialFunc(func(ctx context.Context, _ *http.Request, principal httpapi.Principal) (context.Context, error) {
+		credentialCalls++
+		if principal.Subject != "analyst@example.com" {
+			t.Fatalf("credential principal = %#v", principal)
+		}
+		return executionauth.WithAccessToken(ctx, "request-user-token")
+	})
+	handler, _, _ := newTestServerWithCredential(t, httpapi.Config{RequestID: func() string { return "req_credential" }}, engine, credential)
+	query := readQuery(t)
+	for _, operation := range []string{"explain", "plan"} {
+		response := performJSON(handler, http.MethodPost, queryPath(operation), "query", query)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("%s status = %d, body = %s", operation, response.StatusCode, readBody(t, response))
+		}
+	}
+	if credentialCalls != 0 {
+		t.Fatalf("credential provider called %d times before execution", credentialCalls)
+	}
+	response := performJSON(handler, http.MethodPost, queryPath("query"), "query", query)
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("query status = %d, body = %s", response.StatusCode, readBody(t, response))
+	}
+	var submitted application.QueryJobSnapshot
+	decodeResponse(t, response, &submitted)
+	finished := awaitJob(t, handler, submitted.Job.ID, "query")
+	if finished.Job.Status != model.JobSucceeded || credentialCalls != 1 || engine.executionTokenValue() != "request-user-token" {
+		t.Fatalf("finished = %#v, credential calls = %d, engine token = %q", finished, credentialCalls, engine.executionTokenValue())
 	}
 }
 
@@ -457,6 +491,14 @@ func newTestServerWithEngine(t *testing.T, config httpapi.Config, engine *fakeEn
 }
 
 func newTestServerWithEngineAndReadiness(t *testing.T, config httpapi.Config, engine *fakeEngine, recorder audit.Recorder, readiness httpapi.ReadinessChecker) (http.Handler, *fakeEngine, *observedResolvers) {
+	return newTestServerWithDependencies(t, config, engine, recorder, readiness, nil)
+}
+
+func newTestServerWithCredential(t *testing.T, config httpapi.Config, engine *fakeEngine, credential httpapi.ExecutionCredentialProvider) (http.Handler, *fakeEngine, *observedResolvers) {
+	return newTestServerWithDependencies(t, config, engine, nil, nil, credential)
+}
+
+func newTestServerWithDependencies(t *testing.T, config httpapi.Config, engine *fakeEngine, recorder audit.Recorder, readiness httpapi.ReadinessChecker, credential httpapi.ExecutionCredentialProvider) (http.Handler, *fakeEngine, *observedResolvers) {
 	t.Helper()
 	repository := catalog.NewMemoryRepository()
 	management, err := catalog.NewService(repository)
@@ -532,6 +574,7 @@ func newTestServerWithEngineAndReadiness(t *testing.T, config httpapi.Config, en
 	server, err := httpapi.NewServer(config, httpapi.Dependencies{
 		Authenticator: authenticator, Readiness: readiness,
 		Management: management, Catalog: repository, CatalogSearch: catalogSearch, Queries: queries, Jobs: jobs,
+		ExecutionCredential: credential,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -540,12 +583,13 @@ func newTestServerWithEngineAndReadiness(t *testing.T, config httpapi.Config, en
 }
 
 type fakeEngine struct {
-	mu           sync.Mutex
-	capabilities model.EngineCapabilities
-	executions   int
-	block        bool
-	started      chan struct{}
-	startOnce    sync.Once
+	mu             sync.Mutex
+	capabilities   model.EngineCapabilities
+	executions     int
+	executionToken string
+	block          bool
+	started        chan struct{}
+	startOnce      sync.Once
 }
 
 func (engine *fakeEngine) Capabilities() model.EngineCapabilities { return engine.capabilities }
@@ -553,6 +597,7 @@ func (engine *fakeEngine) Capabilities() model.EngineCapabilities { return engin
 func (engine *fakeEngine) Execute(ctx context.Context, plan model.PhysicalPlan) (model.ExecutionSnapshot, error) {
 	engine.mu.Lock()
 	engine.executions++
+	engine.executionToken, _ = executionauth.AccessToken(ctx)
 	block := engine.block
 	started := engine.started
 	engine.mu.Unlock()
@@ -574,6 +619,12 @@ func (engine *fakeEngine) executionCount() int {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 	return engine.executions
+}
+
+func (engine *fakeEngine) executionTokenValue() string {
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	return engine.executionToken
 }
 
 func performJSON(handler http.Handler, method, path, token string, body any) *http.Response {
