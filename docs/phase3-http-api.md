@@ -67,10 +67,12 @@ A disposable local PostgreSQL 17 instance proved migration 002 idempotency, cata
 
 On 2026-09-03, two read-only `DESCRIBE DETAIL` statements in the separate Databricks staging workspace confirmed that `samples.tpch.orders` and `samples.tpch.customer` exist as Delta tables for the fixed acceptance binding. The fixed real-acceptance harness then passed publication v1, a parameterized read-only query, publication v2, a second query, rollback to v1, a third query, golden-result reconciliation, and release-event checks through the same catalog and query application services used by Phase 3. No production-workspace request, business-data query, DDL, or DML was issued. This closes the real engine/application prerequisite, but it is not the remaining HTTP/UI query acceptance.
 
+The opt-in `TestPhase3RealHTTPAcceptance` then passed the UI root, HTTP draft and publication, policy-filtered catalog search, physical planning, asynchronous query job, golden typed result, and durable start/success audit against that staging fixture. It deliberately uses a fixed test principal, so it proves the HTTP-to-real-engine path without pretending to prove enterprise OIDC. It is disabled in the default suite and cannot contact Databricks unless its explicit real-acceptance switch and environment are provided.
+
 `metricspire serve --config` is the deployment entry point. It loads strict non-secret runtime configuration, requires environment-provided PostgreSQL/session/OIDC/Databricks secrets, refuses non-Databricks bindings in the current single-adapter release, and does not auto-migrate or query on startup.
 
 ## Remaining acceptance gates
 
 - Register a real deployment OIDC client and verify authentic enterprise login, logout, redirect URI, tenant/role/permission claim mapping, expiry, and session behavior. The local signed protocol fixture is not production identity evidence.
-- Run deployed HTTP/UI acceptance against disposable PostgreSQL and an explicitly approved read-only Databricks fixture. No Databricks DDL/DML is required or permitted.
+- Deploy the service and repeat the already-passed HTTP/UI-to-staging path in that deployment. No Databricks DDL/DML is required or permitted.
 - Re-run the deployment checks and record sanitized evidence. Until these pass, Phase 3 is **not complete**.
