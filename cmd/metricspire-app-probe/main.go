@@ -83,6 +83,9 @@ func run(parent context.Context, getenv func(string) string, logger *slog.Logger
 		}
 		return err
 	case <-ctx.Done():
+		// Emit before Shutdown to maximize the chance that a managed runtime
+		// retains evidence that it delivered cancellation.
+		logger.Info("probe stopping")
 		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancelShutdown()
 		if err := server.Shutdown(shutdownContext); err != nil {
