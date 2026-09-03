@@ -73,8 +73,25 @@ The opt-in `TestPhase3RealHTTPAcceptance` then passed the UI root, HTTP draft an
 
 `metricspire serve --config` is the deployment entry point. It loads strict non-secret runtime configuration, requires environment-provided PostgreSQL/session/OIDC/Databricks secrets, refuses non-Databricks bindings in the current single-adapter release, and does not auto-migrate or query on startup.
 
+`TestPhase3DeployedAcceptance` is the opt-in black-box staging check for an already deployed service. It requires an HTTPS origin, a dedicated empty acceptance namespace, direct access to that deployment's PostgreSQL audit table, and two real least-privilege JWTs: one with only `model:manage`, one with only `query:execute`. Fixture paths use the same reviewed TPCH model/query/expected result as the earlier real-engine test. Operators must inject tokens and database credentials through their secret runner rather than a committed file or shell history. The explicit safety switch is:
+
+```bash
+METRICSPIRE_RUN_DEPLOYED_PHASE3_ACCEPTANCE=staging-read-only \
+METRICSPIRE_DEPLOYED_BASE_URL='https://metricspire-staging.example' \
+METRICSPIRE_DEPLOYED_DATABASE_URL='postgres://...' \
+METRICSPIRE_DEPLOYED_NAMESPACE='phase3_deployed_acceptance' \
+METRICSPIRE_DEPLOYED_MANAGE_TOKEN="$MANAGE_TOKEN" \
+METRICSPIRE_DEPLOYED_QUERY_TOKEN="$QUERY_TOKEN" \
+METRICSPIRE_TEST_DATABRICKS_MODEL='testdata/acceptance/databricks-tpch/model.yaml' \
+METRICSPIRE_TEST_DATABRICKS_QUERY='testdata/acceptance/databricks-tpch/query.json' \
+METRICSPIRE_TEST_DATABRICKS_EXPECTED='testdata/acceptance/databricks-tpch/expected.json' \
+go test -count=1 -run TestPhase3DeployedAcceptance ./cmd/metricspire
+```
+
+The deployed runtime's reviewed `SourceBinding` must point to a read-only staging fixture. The check writes two immutable releases and a rollback to the PostgreSQL control plane, queries v1, v2, and the restored v1 only through the governed service, compares every typed result, and reconciles every `query_started`/`query_succeeded` audit row. It cannot prove interactive browser login because it does not handle a user's credentials or MFA.
+
 ## Remaining acceptance gates
 
 - Register a real deployment OIDC client and API resource audience; verify authentic enterprise login, logout, redirect URI, JWT access-token audience, tenant/role/permission claim mapping, expiry, and session behavior. The local signed protocol fixture is not production identity evidence.
-- Deploy the service and repeat the already-passed HTTP/UI-to-staging path in that deployment. No Databricks DDL/DML is required or permitted.
+- Deploy the service and run `TestPhase3DeployedAcceptance` with reviewed staging-only inputs. No Databricks DDL/DML is required or permitted.
 - Re-run the deployment checks and record sanitized evidence. Until these pass, Phase 3 is **not complete**.
