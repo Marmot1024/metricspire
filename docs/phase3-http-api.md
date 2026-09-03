@@ -65,6 +65,8 @@ The final local gate passed `go test -count=1 ./...`, `go test -count=1 -race ./
 
 A disposable local PostgreSQL 17 instance proved migration 002 idempotency, catalog lifecycle, optimistic concurrency, and structured audit write/read. A process-level local acceptance also started `metricspire serve` against PostgreSQL and an isolated OIDC discovery service, exercised the UI and PKCE login redirect, then proved graceful shutdown. It did not send a Databricks request.
 
+On 2026-09-03, two read-only `DESCRIBE DETAIL` statements in the separate Databricks staging workspace confirmed that `samples.tpch.orders` and `samples.tpch.customer` exist as Delta tables for the fixed acceptance binding. The fixed real-acceptance harness then passed publication v1, a parameterized read-only query, publication v2, a second query, rollback to v1, a third query, golden-result reconciliation, and release-event checks through the same catalog and query application services used by Phase 3. No production-workspace request, business-data query, DDL, or DML was issued. This closes the real engine/application prerequisite, but it is not the remaining HTTP/UI query acceptance.
+
 `metricspire serve --config` is the deployment entry point. It loads strict non-secret runtime configuration, requires environment-provided PostgreSQL/session/OIDC/Databricks secrets, refuses non-Databricks bindings in the current single-adapter release, and does not auto-migrate or query on startup.
 
 ## Remaining acceptance gates
