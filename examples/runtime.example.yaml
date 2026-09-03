@@ -9,6 +9,7 @@ http:
 oidc:
   issuer_url: https://identity.example.com
   client_id: metricspire
+  bearer_audience: metricspire-api
   session_ttl: 8h
   tenant_claim: tenant
   roles_claim: roles

@@ -65,10 +65,14 @@ type sessionState struct {
 }
 
 func NewWeb(ctx context.Context, config WebConfig) (*WebAuthenticator, error) {
-	provider, verifier, err := discover(ctx, config.OIDC)
+	if strings.TrimSpace(config.OIDC.ClientID) == "" {
+		return nil, errors.New("OIDC client ID is required")
+	}
+	provider, err := discover(ctx, config.OIDC)
 	if err != nil {
 		return nil, err
 	}
+	verifier := provider.Verifier(&oidc.Config{ClientID: config.OIDC.ClientID})
 	redirect, err := url.Parse(strings.TrimSpace(config.RedirectURL))
 	if err != nil || redirect.Host == "" || redirect.User != nil || redirect.RawQuery != "" || redirect.Fragment != "" || redirect.Path != "/auth/callback" {
 		return nil, errors.New("OIDC redirect URL must be an absolute /auth/callback URL")
@@ -103,7 +107,9 @@ func NewWeb(ctx context.Context, config WebConfig) (*WebAuthenticator, error) {
 	if !strings.HasPrefix(postLoginPath, "/") || strings.HasPrefix(postLoginPath, "//") {
 		return nil, errors.New("OIDC post-login path must be an absolute local path")
 	}
-	bearer, err := newWithVerifier(config.OIDC, remoteVerifier{verifier: verifier})
+	bearer, err := newWithVerifier(config.OIDC, remoteVerifier{
+		verifier: provider.Verifier(&oidc.Config{ClientID: bearerAudience(config.OIDC)}),
+	})
 	if err != nil {
 		return nil, err
 	}

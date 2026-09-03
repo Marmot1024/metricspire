@@ -17,7 +17,7 @@ Warehouse-native catalog/schema/table/view/row/column permissions remain authori
 
 ## Identity and session
 
-The first concrete `Authenticator` uses standard OIDC and is not Databricks-specific. It verifies provider discovery, JWKS signature, issuer, audience, expiry, stable `sub`, tenant, roles, and the two recognized product permissions. Browser login uses Authorization Code + PKCE with state and nonce. Flow/session cookies are AES-256-GCM encrypted, HTTP-only, SameSite=Lax, and Secure except for an explicitly enabled loopback development origin. Session lifetime never exceeds the ID token lifetime.
+The first concrete `Authenticator` uses standard OIDC and is not Databricks-specific. It verifies provider discovery, JWKS signature, issuer, audience, expiry, stable `sub`, tenant, roles, and the two recognized product permissions. Browser login uses Authorization Code + PKCE with state and nonce; its ID token must target the configured browser `client_id`. API bearer authentication separately requires a signed JWT access token targeting `bearer_audience` (falling back to `client_id` only for compatibility when no separate audience is configured). Opaque access tokens are rejected because this adapter performs local verification and has no token-introspection contract. Flow/session cookies are AES-256-GCM encrypted, HTTP-only, SameSite=Lax, and Secure except for an explicitly enabled loopback development origin. Session lifetime never exceeds the ID token lifetime.
 
 Databricks OAuth M2M is a separate engine service credential. It is never accepted as a MetricSpire end-user identity. Runtime secrets are environment variables; YAML/JSON configuration contains only issuer/client metadata and trusted policy/binding file routes.
 
@@ -73,6 +73,6 @@ The opt-in `TestPhase3RealHTTPAcceptance` then passed the UI root, HTTP draft an
 
 ## Remaining acceptance gates
 
-- Register a real deployment OIDC client and verify authentic enterprise login, logout, redirect URI, tenant/role/permission claim mapping, expiry, and session behavior. The local signed protocol fixture is not production identity evidence.
+- Register a real deployment OIDC client and API resource audience; verify authentic enterprise login, logout, redirect URI, JWT access-token audience, tenant/role/permission claim mapping, expiry, and session behavior. The local signed protocol fixture is not production identity evidence.
 - Deploy the service and repeat the already-passed HTTP/UI-to-staging path in that deployment. No Databricks DDL/DML is required or permitted.
 - Re-run the deployment checks and record sanitized evidence. Until these pass, Phase 3 is **not complete**.

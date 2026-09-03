@@ -37,6 +37,7 @@ type HTTPConfig struct {
 type OIDCConfig struct {
 	IssuerURL                    string `json:"issuer_url" yaml:"issuer_url"`
 	ClientID                     string `json:"client_id" yaml:"client_id"`
+	BearerAudience               string `json:"bearer_audience,omitempty" yaml:"bearer_audience,omitempty"`
 	SessionTTL                   string `json:"session_ttl,omitempty" yaml:"session_ttl,omitempty"`
 	TenantClaim                  string `json:"tenant_claim,omitempty" yaml:"tenant_claim,omitempty"`
 	RolesClaim                   string `json:"roles_claim,omitempty" yaml:"roles_claim,omitempty"`

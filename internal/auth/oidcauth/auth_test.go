@@ -80,6 +80,37 @@ func TestOIDCAuthenticatorRejectsInvalidAudienceExpiredAndMissingTenant(t *testi
 	}
 }
 
+func TestOIDCBearerAudienceIsIndependentFromBrowserClient(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer := newIssuer(t, &privateKey.PublicKey)
+	authenticator, err := oidcauth.New(context.Background(), oidcauth.Config{
+		IssuerURL: issuer.url, BearerAudience: "metricspire-api", HTTPClient: issuer.client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	claims := map[string]any{
+		"iss": issuer.url, "aud": "metricspire-api", "sub": "api-user", "tenant": "demo",
+		"roles": []string{"analyst"}, "permissions": []string{"query:execute"},
+		"iat": now.Unix(), "exp": now.Add(time.Minute).Unix(),
+	}
+	request := httptest.NewRequest(http.MethodGet, "https://metricspire.test/api/v1/catalog/search", nil)
+	request.Header.Set("Authorization", "Bearer "+signToken(t, privateKey, claims))
+	principal, err := authenticator.Authenticate(context.Background(), request)
+	if err != nil || principal.Subject != "api-user" {
+		t.Fatalf("API-audience principal = %#v, %v", principal, err)
+	}
+	claims["aud"] = "metricspire-browser"
+	request.Header.Set("Authorization", "Bearer "+signToken(t, privateKey, claims))
+	if _, err := authenticator.Authenticate(context.Background(), request); err == nil {
+		t.Fatal("bearer token for the browser client audience was accepted")
+	}
+}
+
 func TestOIDCAuthenticatorRequiresHTTPSOutsideTests(t *testing.T) {
 	if _, err := oidcauth.New(context.Background(), oidcauth.Config{IssuerURL: "http://issuer.example", ClientID: "client"}); err == nil || !strings.Contains(err.Error(), "HTTPS") {
 		t.Fatalf("HTTP issuer error = %v", err)

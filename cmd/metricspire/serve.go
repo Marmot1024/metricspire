@@ -130,7 +130,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	defer jobs.Close()
 
 	oidcConfig := oidcauth.Config{
-		IssuerURL: config.OIDC.IssuerURL, ClientID: config.OIDC.ClientID,
+		IssuerURL: config.OIDC.IssuerURL, ClientID: config.OIDC.ClientID, BearerAudience: config.OIDC.BearerAudience,
 		TenantClaim: config.OIDC.TenantClaim, RolesClaim: config.OIDC.RolesClaim,
 		PermissionsClaim: config.OIDC.PermissionsClaim,
 		AllowHTTP:        config.OIDC.DevelopmentAllowInsecureHTTP,

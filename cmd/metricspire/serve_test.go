@@ -70,7 +70,8 @@ func TestRuntimeExampleLoadsDatabricksTrustedRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(policies) != 1 || len(bindings) != 1 || policies[0].Tenant != "acceptance" || bindings[0].Binding.Engine != "databricks_sql" {
+	if len(policies) != 1 || len(bindings) != 1 || policies[0].Tenant != "acceptance" ||
+		bindings[0].Binding.Engine != "databricks_sql" || config.OIDC.BearerAudience != "metricspire-api" {
 		t.Fatalf("trusted routes = %#v %#v", policies, bindings)
 	}
 }

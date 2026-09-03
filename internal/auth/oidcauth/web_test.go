@@ -27,7 +27,9 @@ func TestOIDCWebLoginSessionAndLogout(t *testing.T) {
 	expectedNonce := ""
 	issuer := newWebIssuer(t, privateKey, &expectedNonce)
 	authenticator, err := oidcauth.NewWeb(context.Background(), oidcauth.WebConfig{
-		OIDC:         oidcauth.Config{IssuerURL: issuer.url, ClientID: "metricspire", HTTPClient: issuer.client},
+		OIDC: oidcauth.Config{
+			IssuerURL: issuer.url, ClientID: "metricspire", BearerAudience: "metricspire-api", HTTPClient: issuer.client,
+		},
 		ClientSecret: "test-secret", RedirectURL: "https://app.test/auth/callback",
 		SessionKey: []byte("0123456789abcdef0123456789abcdef"), SessionTTL: time.Hour,
 	})
@@ -75,6 +77,19 @@ func TestOIDCWebLoginSessionAndLogout(t *testing.T) {
 	}
 	if principal.Subject != "web-user" || principal.Tenant != "demo" || !principal.Has(httpapi.PermissionQuery) {
 		t.Fatalf("session principal = %#v", principal)
+	}
+
+	now := time.Now()
+	bearerToken := signToken(t, privateKey, map[string]any{
+		"iss": issuer.url, "aud": "metricspire-api", "sub": "api-user", "tenant": "demo",
+		"roles": []string{"analyst"}, "permissions": []string{"query:execute"},
+		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+	})
+	apiRequest = httptest.NewRequest(http.MethodGet, "https://app.test/api/v1/catalog/search", nil)
+	apiRequest.Header.Set("Authorization", "Bearer "+bearerToken)
+	principal, err = authenticator.Authenticate(context.Background(), apiRequest)
+	if err != nil || principal.Subject != "api-user" {
+		t.Fatalf("bearer principal = %#v, %v", principal, err)
 	}
 
 	tampered := *sessionCookie

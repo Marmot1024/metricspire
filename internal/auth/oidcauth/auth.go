@@ -22,6 +22,7 @@ const maximumBearerTokenBytes = 16 << 10
 type Config struct {
 	IssuerURL        string
 	ClientID         string
+	BearerAudience   string
 	TenantClaim      string
 	RolesClaim       string
 	PermissionsClaim string
@@ -41,28 +42,29 @@ type Authenticator struct {
 }
 
 func New(ctx context.Context, config Config) (*Authenticator, error) {
-	_, verifier, err := discover(ctx, config)
+	audience := bearerAudience(config)
+	if audience == "" {
+		return nil, errors.New("OIDC bearer audience is required")
+	}
+	provider, err := discover(ctx, config)
 	if err != nil {
 		return nil, err
 	}
-	return newWithVerifier(config, remoteVerifier{verifier: verifier})
+	return newWithVerifier(config, remoteVerifier{verifier: provider.Verifier(&oidc.Config{ClientID: audience})})
 }
 
-func discover(ctx context.Context, config Config) (*oidc.Provider, *oidc.IDTokenVerifier, error) {
+func discover(ctx context.Context, config Config) (*oidc.Provider, error) {
 	if ctx == nil {
-		return nil, nil, errors.New("OIDC initialization context is required")
+		return nil, errors.New("OIDC initialization context is required")
 	}
 	issuer, err := url.Parse(strings.TrimSpace(config.IssuerURL))
 	if err != nil || issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
-		return nil, nil, errors.New("OIDC issuer URL is invalid")
+		return nil, errors.New("OIDC issuer URL is invalid")
 	}
 	if issuer.Scheme != "https" {
 		if !config.AllowHTTP || issuer.Scheme != "http" || !isLoopbackHost(issuer.Hostname()) {
-			return nil, nil, errors.New("OIDC issuer must use HTTPS; HTTP is allowed only for loopback development")
+			return nil, errors.New("OIDC issuer must use HTTPS; HTTP is allowed only for loopback development")
 		}
-	}
-	if strings.TrimSpace(config.ClientID) == "" {
-		return nil, nil, errors.New("OIDC client ID is required")
 	}
 	httpClient := config.HTTPClient
 	if httpClient == nil {
@@ -70,10 +72,16 @@ func discover(ctx context.Context, config Config) (*oidc.Provider, *oidc.IDToken
 	}
 	provider, err := oidc.NewProvider(oidc.ClientContext(ctx, httpClient), issuer.String())
 	if err != nil {
-		return nil, nil, fmt.Errorf("discover OIDC provider: %w", err)
+		return nil, fmt.Errorf("discover OIDC provider: %w", err)
 	}
-	verifier := provider.Verifier(&oidc.Config{ClientID: config.ClientID})
-	return provider, verifier, nil
+	return provider, nil
+}
+
+func bearerAudience(config Config) string {
+	if audience := strings.TrimSpace(config.BearerAudience); audience != "" {
+		return audience
+	}
+	return strings.TrimSpace(config.ClientID)
 }
 
 func isLoopbackHost(host string) bool {

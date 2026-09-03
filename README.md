@@ -22,7 +22,7 @@ MetricSpire is an open-source semantic metrics layer and governed data API. It c
 - executes parameterized Databricks SQL with timeout, cancellation, typed results, row limits, and cumulative response-byte limits;
 - rejects unsupported engine capabilities before submitting a query.
 - exposes separate management and query permissions through a strict HTTP API with Problem responses, body/deadline limits, security headers, asynchronous job status/cancellation, and fail-closed query audit;
-- verifies generic OIDC issuer/audience/signature/expiry claims and supports Authorization Code + PKCE browser login with encrypted, HTTP-only sessions;
+- verifies generic OIDC issuer/signature/expiry claims, separates the browser client audience from the API JWT access-token audience, and supports Authorization Code + PKCE browser login with encrypted, HTTP-only sessions;
 - serves a dependency-free minimal UI for catalog search, explain/plan/query, job cancellation, draft load/save/validation, publication, release listing, and rollback; every action calls the same HTTP API rather than duplicating application logic.
 
 ## Core flow
@@ -70,7 +70,7 @@ go run ./cmd/metricspire plan \
   --physical-out dist/demo/physical-plan.json
 ```
 
-`context.json` is trusted only in this offline CLI demonstration. The HTTP transport creates `RequestContext` from a cryptographically verified OIDC identity; callers cannot self-report tenant, principal, roles, policy, binding, engine, or manifest fingerprint in `SemanticQuery`. OIDC is provider-neutral: deployment configuration selects the issuer and claim names without binding MetricSpire to Databricks identity.
+`context.json` is trusted only in this offline CLI demonstration. The HTTP transport creates `RequestContext` from a cryptographically verified OIDC identity; callers cannot self-report tenant, principal, roles, policy, binding, engine, or manifest fingerprint in `SemanticQuery`. OIDC is provider-neutral: deployment configuration selects the issuer, browser client ID, API bearer audience, and claim names without binding MetricSpire to Databricks identity. Browser sessions derive from verified ID tokens; API bearer authentication requires a locally verifiable JWT access token for the configured API audience. Opaque access tokens are not accepted by this adapter.
 
 ## Local PostgreSQL workflow
 
