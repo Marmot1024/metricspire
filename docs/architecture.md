@@ -60,7 +60,9 @@ The HTTP package keeps a provider-neutral `Authenticator`; the first concrete ad
 
 OIDC implementation tests use locally generated RSA signatures and an isolated protocol fixture. They prove the cryptographic and session behavior, not compatibility with a particular enterprise identity provider; issuer registration, redirect URI, claim mapping, and real login/logout remain deployment acceptance work.
 
-The initial deployment model uses a least-privileged read-only engine identity restricted to approved data resources. End-user identity passthrough remains a later, evidence-driven option because its implementation and guarantees differ across engines.
+The portable self-hosted profile initially uses a least-privileged read-only engine identity restricted to approved data resources. End-user identity passthrough is engine- and host-specific, so it must be implemented as an adapter rather than changing the semantic or policy core.
+
+For the company Databricks Apps profile, the platform already authenticates access to the app. The trusted Apps adapter must derive the MetricSpire principal only from headers supplied by the managed ingress and must reject that mode outside the Apps trust boundary. User-triggered SQL should forward the short-lived Databricks user-authorization token to the engine adapter so Unity Catalog evaluates the real user's catalog, table, row-filter, and column-mask permissions. App authorization through the dedicated service principal is reserved for reviewed background or shared operations. Forwarded tokens must never enter logs, audit payloads, configuration files, or PostgreSQL. This profile is not implemented or accepted yet; the current Databricks adapter still uses a service credential.
 
 ## Determinism and integrity
 
@@ -84,6 +86,19 @@ All dynamic JSON is decoded with unknown-field and duplicate-key rejection plus 
 
 The generic OCI image runs a static binary as a non-root numeric user with no shell. Migrations remain a separate one-shot command. `/health/live` checks only the process; `/health/ready` checks PostgreSQL with a bounded context and never probes Databricks, so deployment health cannot create warehouse traffic.
 
+## Distribution and deployment profiles
+
+The public project remains vendor-neutral and uses conventional release artifacts:
+
+- source plus license and third-party notices;
+- checksummed static Linux binaries for direct installation;
+- immutable, versioned OCI images for containers, Kubernetes, and VM-based container runtimes;
+- release-time SBOM, provenance/signing, upgrade notes, secret scanning, and clean-room review.
+
+These artifacts run the same `metricspire serve` binary and keep PostgreSQL and analytical engines external. Docker Compose is a development convenience, not the production topology. A Helm chart and package-manager integrations are deliberately outside `v0.1` until operator evidence justifies their maintenance cost.
+
+Databricks Apps is a separate company deployment profile, not the open-source runtime contract. It uses Databricks-managed ingress, identity, app resources, and source deployment. Databricks Apps does not build from the OCI `Dockerfile`; its documented development and dependency flows cover Python and Node.js before running an optional `app.yaml` command. The custom command is evidence that a packaged executable may be startable, not an official Go support statement. MetricSpire now accepts HTTP/1.1 and H2C on one listener using the Go 1.26 standard library, and `serve --http-address` lets `app.yaml` supply `0.0.0.0:$DATABRICKS_APP_PORT` without editing reviewed configuration. An acceptance-only probe packages checksum-protected amd64 and arm64 static servers below the 10 MB per-file limit; a standard-library Python bootstrap selects, verifies, extracts, and replaces itself with the Go process. This path passed locally in a Linux/Python 3.11 container, including HTTP/1.1, H2C, and graceful SIGTERM. A staging probe must still establish managed-runtime executable support and supportability, architecture, ingress behavior, PostgreSQL/Lakebase access, SQL warehouse resource, user-authorization token forwarding, and rollback procedure. Until that probe, required identity/credential adapter work, and the deployed black-box suite pass, Databricks Apps support is a selected target, not a completed capability.
+
 ## Current exclusions
 
-Phase 3 still has no accepted enterprise identity-provider deployment, MCP transport, shared result cache, message queue, arbitrary SQL, cross-engine joins, or multi-engine routing. DuckDB is not a production data engine. ClickHouse, Doris, Trino/Presto, and other adapters must prove conformance independently before being advertised.
+Phase 3 still has no accepted self-hosted enterprise identity-provider deployment or Databricks Apps deployment, MCP transport, shared result cache, message queue, arbitrary SQL, cross-engine joins, or multi-engine routing. DuckDB is not a production data engine. ClickHouse, Doris, Trino/Presto, and other adapters must prove conformance independently before being advertised.

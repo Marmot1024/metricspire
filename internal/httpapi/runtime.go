@@ -22,8 +22,13 @@ func NewRuntimeServer(address string, handler http.Handler) (*http.Server, error
 	if strings.TrimSpace(address) == "" || handler == nil {
 		return nil, errors.New("HTTP address and handler are required")
 	}
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetHTTP2(true)
+	protocols.SetUnencryptedHTTP2(true)
 	return &http.Server{
 		Addr: address, Handler: handler,
+		Protocols:         protocols,
 		ReadHeaderTimeout: DefaultReadHeaderTimeout,
 		ReadTimeout:       DefaultReadTimeout,
 		WriteTimeout:      DefaultWriteTimeout,

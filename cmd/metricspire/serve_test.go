@@ -61,6 +61,35 @@ func TestDecodeSessionKeyRequiresExactly32RandomBytes(t *testing.T) {
 	}
 }
 
+func TestResolveHTTPAddressUsesOnlyAValidTrustedOverride(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		configured string
+		override   string
+		want       string
+		wantError  bool
+	}{
+		{name: "configured", configured: "127.0.0.1:8080", want: "127.0.0.1:8080"},
+		{name: "override", configured: "127.0.0.1:8080", override: "0.0.0.0:9000", want: "0.0.0.0:9000"},
+		{name: "trimmed", configured: "127.0.0.1:8080", override: " [::]:9000 ", want: "[::]:9000"},
+		{name: "invalid configured", configured: "8080", wantError: true},
+		{name: "invalid override", configured: "127.0.0.1:8080", override: "0.0.0.0", wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := resolveHTTPAddress(test.configured, test.override)
+			if test.wantError {
+				if err == nil {
+					t.Fatalf("resolveHTTPAddress() = %q, want error", got)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("resolveHTTPAddress() = %q, %v; want %q", got, err, test.want)
+			}
+		})
+	}
+}
+
 func TestRuntimeExampleLoadsDatabricksTrustedRoutes(t *testing.T) {
 	configPath := filepath.Join("..", "..", "examples", "runtime.example.yaml")
 	config, err := runtimeconfig.Load(configPath)

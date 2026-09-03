@@ -48,6 +48,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	configPath := flags.String("config", "", "runtime configuration (.json/.yaml)")
+	httpAddress := flags.String("http-address", "", "trusted listen-address override (host:port)")
 	if err := parseNoPositionals(flags, arguments); err != nil {
 		return err
 	}
@@ -55,6 +56,10 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		return errors.New("--config is required")
 	}
 	config, err := runtimeconfig.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	listenAddress, err := resolveHTTPAddress(config.HTTP.Address, *httpAddress)
 	if err != nil {
 		return err
 	}
@@ -160,7 +165,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	if err != nil {
 		return err
 	}
-	server, err := httpapi.NewRuntimeServer(config.HTTP.Address, handler)
+	server, err := httpapi.NewRuntimeServer(listenAddress, handler)
 	if err != nil {
 		return err
 	}
@@ -194,6 +199,17 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		}
 		return writeServeStatus(stdout, "stopped", listener.Addr().String(), config.HTTP.PublicURL)
 	}
+}
+
+func resolveHTTPAddress(configured, override string) (string, error) {
+	address := strings.TrimSpace(configured)
+	if strings.TrimSpace(override) != "" {
+		address = strings.TrimSpace(override)
+	}
+	if _, _, err := net.SplitHostPort(address); err != nil {
+		return "", fmt.Errorf("HTTP address must be host:port: %w", err)
+	}
+	return address, nil
 }
 
 func loadServeEnvironment(getenv func(string) string) (serveEnvironment, error) {

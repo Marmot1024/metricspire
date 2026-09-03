@@ -189,7 +189,7 @@ Usage:
     --logical-out logical.json --physical-out physical.json
 
 Product HTTP service:
-  metricspire serve --config examples/runtime.example.yaml
+  metricspire serve --config examples/runtime.example.yaml [--http-address host:port]
 
 Catalog and query workflow:
   metricspire migrate

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -364,6 +365,55 @@ func TestRuntimeServerHasDefensiveNetworkTimeouts(t *testing.T) {
 	}
 	if server.ReadHeaderTimeout <= 0 || server.ReadTimeout <= 0 || server.WriteTimeout <= 0 || server.IdleTimeout <= 0 || server.MaxHeaderBytes <= 0 {
 		t.Fatalf("runtime server limits = %#v", server)
+	}
+	if server.Protocols == nil || !server.Protocols.HTTP1() || !server.Protocols.HTTP2() || !server.Protocols.UnencryptedHTTP2() {
+		t.Fatalf("runtime server protocols = %v", server.Protocols)
+	}
+}
+
+func TestRuntimeServerAcceptsUnencryptedHTTP2(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	server, err := httpapi.NewRuntimeServer(listener.Addr().String(), http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.ProtoMajor != 2 {
+			t.Errorf("request protocol = %s", request.Proto)
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveErrors := make(chan error, 1)
+	go func() {
+		serveErrors <- server.Serve(listener)
+	}()
+
+	protocols := new(http.Protocols)
+	protocols.SetUnencryptedHTTP2(true)
+	transport := &http.Transport{Protocols: protocols}
+	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
+	t.Cleanup(transport.CloseIdleConnections)
+	response, err := client.Get("http://" + listener.Addr().String())
+	if err != nil {
+		server.Close()
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent || response.ProtoMajor != 2 {
+		t.Fatalf("H2C response = %s %d", response.Proto, response.StatusCode)
+	}
+
+	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelShutdown()
+	if err := server.Shutdown(shutdownContext); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-serveErrors; !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("Serve returned %v", err)
 	}
 }
 

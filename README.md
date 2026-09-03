@@ -4,7 +4,7 @@
 
 MetricSpire is an open-source semantic metrics layer and governed data API. It compiles reviewed metric definitions into immutable releases, authorizes structured queries, and executes bounded plans through replaceable analytical-engine adapters.
 
-> Current status: Phase 2 passed on 2026-09-02. Phase 3 is in progress: the HTTP product boundary, server-resolved policy/binding, asynchronous jobs, query audit, catalog search, minimal UI, generic OIDC login, and `serve` composition are implemented and locally tested. Acceptance against a real deployment identity provider is still required; this is not yet a production-ready platform release.
+> Current status: Phase 2 passed on 2026-09-02. Phase 3 is in progress: the HTTP product boundary, server-resolved policy/binding, asynchronous jobs, query audit, catalog search, minimal UI, generic OIDC login, and `serve` composition are implemented and locally tested. The portable OCI/self-hosted profile and the company-specific Databricks Apps profile are now explicitly separated; neither has completed deployed acceptance, so this is not yet a production-ready platform release.
 
 ## Version names
 
@@ -96,11 +96,22 @@ go run ./cmd/metricspire release-list \
 
 `metricspire serve --config <runtime.yaml>` composes the existing catalog, query, audit, OIDC, job, UI, and Databricks adapter boundaries. The runtime file contains only non-secret routes and OIDC metadata; database URLs, session keys, OIDC client secrets, and engine credentials remain environment inputs. See [`examples/runtime.example.yaml`](examples/runtime.example.yaml) and the [Phase 3 HTTP contract](docs/phase3-http-api.md).
 
+Platforms that allocate a port at runtime can pass `--http-address 0.0.0.0:<port>` as a trusted process argument without rewriting the reviewed configuration. The server accepts HTTP/1.1, HTTP/2 over TLS, and unencrypted HTTP/2 (H2C) on the same listener; TLS normally terminates at the deployment ingress.
+
 Run `metricspire migrate` explicitly before starting the service. `serve` never migrates PostgreSQL on startup and never creates analytical tables. The current Databricks adapter emits bounded, parameterized `SELECT` statements only.
 
-The repository also provides a multi-stage OCI [`Dockerfile`](Dockerfile). The runtime image is a static binary plus CA certificates and license notices, runs as numeric non-root user `65532`, and contains no shell or credentials. Mount a reviewed runtime configuration and its policy/binding files read-only under `/etc/metricspire`; inject secret environment variables through the deployment platform. Run `metricspire migrate` as a separate one-shot deployment step before starting replicas.
+The repository also provides a multi-stage OCI [`Dockerfile`](Dockerfile). The runtime image is a static binary plus CA certificates and license notices, runs as numeric non-root user `65532`, and contains no shell or credentials. Its local Phase 3 build produced a 4.28 MB image and ran the version command with a read-only root filesystem, all Linux capabilities removed, and privilege escalation disabled. Mount a reviewed runtime configuration and its policy/binding files read-only under `/etc/metricspire`; inject secret environment variables through the deployment platform. Run `metricspire migrate` as a separate one-shot deployment step before starting replicas. A successful local build is packaging evidence, not deployed-service acceptance.
 
 Unauthenticated `GET /health/live` reports process liveness. `GET /health/ready` pings only the PostgreSQL control plane and returns a generic `503 not_ready` without connection details when unavailable; it never queries Databricks. These endpoints are intended for platform probes, not as acceptance evidence.
+
+## Distribution and deployment profiles
+
+MetricSpire has one product core and two deployment profiles. They are release adapters, not separate products:
+
+- **Open-source self-hosting**: the planned `v0.1.0` release will publish source, checksummed static Linux binaries, and versioned OCI images. The OCI image is the portable default for containers, Kubernetes, or a VM with a container runtime; the raw binary remains useful for minimal VM and local installations. PostgreSQL and analytical engines stay external. Release automation, an SBOM, provenance/signing, upgrade notes, and a clean-room/secret scan are Phase 5 release gates, not claims already satisfied by this development checkout. A Helm chart is intentionally deferred until real operators need one.
+- **Databricks Apps company profile**: the same Go service is intended to run behind Databricks Apps ingress and use a separately managed PostgreSQL-compatible control plane and a SQL warehouse resource. Databricks Apps deploys source with its own runtime and `app.yaml`; it does not consume this repository's OCI `Dockerfile`. The official development and dependency contract covers Python and Node.js, while custom commands leave packaged executables technically possible but do not make Go an officially documented runtime. The acceptance-only [`deploy/databricks-apps-probe`](deploy/databricks-apps-probe) package proves the checksum/bootstrap/H2C path in a local Linux/Python 3.11 container without any database or warehouse access. A staging probe must still prove managed-runtime executable support, architecture, ingress, and lifecycle before this profile is advertised as supported.
+
+Databricks Apps also changes the deployment authentication adapter, not the core authorization model. Interactive SQL should use Databricks user authorization so Unity Catalog applies the caller's existing table, row, and column permissions. The app service principal remains suitable for reviewed background or shared operations. MetricSpire still enforces metric publication, metric/dimension grants, budgets, and audit, and never copies warehouse ACLs. Generic OIDC remains the portable authentication adapter for self-hosted deployments.
 
 ## Contracts and guarantees
 
