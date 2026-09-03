@@ -44,6 +44,8 @@ func runContext(ctx context.Context, arguments []string, stdout, stderr io.Write
 		return runCompilePolicy(arguments[1:], stderr)
 	case "plan":
 		return runPlan(arguments[1:], stderr)
+	case "serve":
+		return runServe(ctx, arguments[1:], stdout, stderr)
 	case "migrate", "healthcheck", "draft-put", "draft-get", "publish", "rollback", "release-list", "release-events", "query-active":
 		return runPhase2(ctx, arguments[0], arguments[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -186,6 +188,9 @@ Usage:
     --query query.json --binding binding.json --capabilities capabilities.json \
     --logical-out logical.json --physical-out physical.json
 
+Product HTTP service:
+  metricspire serve --config examples/runtime.example.yaml
+
 Catalog and query workflow:
   metricspire migrate
   metricspire draft-put --namespace demo --source model.yaml --actor alice --expected-revision 0
@@ -195,5 +200,7 @@ Catalog and query workflow:
   metricspire rollback --namespace demo --model commerce --release rel_... --actor alice
 
 Database and Databricks credentials default to METRICSPIRE_DATABASE_URL,
-DATABRICKS_HOST, DATABRICKS_SQL_WAREHOUSE_ID, and OAuth M2M environment variables.`)
+DATABRICKS_HOST, DATABRICKS_SQL_WAREHOUSE_ID, and OAuth M2M environment variables.
+The HTTP service also requires a base64 METRICSPIRE_SESSION_KEY; OIDC client
+secrets, when required by the provider, use METRICSPIRE_OIDC_CLIENT_SECRET.`)
 }

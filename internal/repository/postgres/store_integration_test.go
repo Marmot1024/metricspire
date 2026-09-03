@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmot1024/metricspire/internal/audit"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
 	"github.com/marmot1024/metricspire/internal/model"
@@ -96,6 +97,29 @@ func TestPostgresCatalogLifecycleAndOptimisticConcurrency(t *testing.T) {
 	active, err := store.GetActiveRelease(ctx, namespace, source.Metadata.Name)
 	if err != nil || active.ID != release1.ID {
 		t.Fatalf("active release = %#v, %v", active, err)
+	}
+	activeReleases, err := store.ListActiveReleases(ctx, namespace)
+	if err != nil || len(activeReleases) != 1 || activeReleases[0].ID != release1.ID {
+		t.Fatalf("active releases = %#v, %v", activeReleases, err)
+	}
+	requestID := fmt.Sprintf("request_%d", time.Now().UnixNano())
+	if err := store.Record(ctx, audit.QueryEvent{
+		RequestID: requestID, Tenant: "demo", Principal: "integration-test",
+		Namespace: namespace, ModelName: source.Metadata.Name, ReleaseID: release1.ID,
+		ManifestFingerprint: release1.ManifestFingerprint, LogicalFingerprint: release1.ManifestFingerprint,
+		PhysicalFingerprint: release1.ManifestFingerprint, JobID: "job_integration",
+		Kind: audit.EventQuerySucceeded, RowCount: 3, OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var eventKind string
+	var rowCount int
+	if err := store.Pool().QueryRow(ctx, `
+SELECT event_kind, row_count FROM metricspire_query_audit WHERE request_id = $1`, requestID).Scan(&eventKind, &rowCount); err != nil {
+		t.Fatal(err)
+	}
+	if eventKind != string(audit.EventQuerySucceeded) || rowCount != 3 {
+		t.Fatalf("stored audit = %s rows=%d", eventKind, rowCount)
 	}
 	events, err := store.ListEvents(ctx, namespace, source.Metadata.Name)
 	if err != nil || len(events) != 3 || events[1].ToReleaseID != release2.ID || events[2].Kind != catalog.EventRollback {

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MetricSpire</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <header>
+    <p class="eyebrow">MetricSpire v0.1</p>
+    <h1>指标目录与受治理查询</h1>
+    <p>页面与 API 共用服务端认证、策略、绑定、预算与审计链路。</p>
+    <div class="row"><a class="button" href="/auth/login">OIDC 登录</a><button id="logout-button" type="button">退出登录</button></div>
+  </header>
+  <main>
+    <section>
+      <h2>目录搜索</h2>
+      <div class="row">
+        <label>Namespace <input id="namespace" value="demo" autocomplete="off"></label>
+        <label>关键词 <input id="search" placeholder="指标名、说明、负责人" autocomplete="off"></label>
+        <button id="search-button" type="button">搜索</button>
+      </div>
+      <pre id="catalog-output" aria-live="polite">尚未搜索</pre>
+    </section>
+
+    <section>
+      <h2>语义查询</h2>
+      <label>Model <input id="model" value="commerce" autocomplete="off"></label>
+      <label for="query">SemanticQuery JSON</label>
+      <textarea id="query" rows="16" spellcheck="false">{
+  "api_version": "metricspire.io/v1alpha1",
+  "kind": "SemanticQuery",
+  "metrics": ["average_order_value"],
+  "limit": 100
+}</textarea>
+      <div class="row">
+        <button data-operation="explain" type="button">Explain</button>
+        <button data-operation="plan" type="button">Plan</button>
+        <button data-operation="query" type="button">Query</button>
+      </div>
+      <pre id="query-output" aria-live="polite">尚未执行</pre>
+    </section>
+
+    <section>
+      <h2>模型治理</h2>
+      <p>草稿内容使用 SemanticSource JSON；发布和回滚只接受版本号、release ID 与说明，actor 来自登录身份。</p>
+      <label for="source">SemanticSource JSON</label>
+      <textarea id="source" rows="10" spellcheck="false">{}</textarea>
+      <div class="row">
+        <label>Expected revision <input id="revision" type="number" min="0" value="0"></label>
+        <button data-management="validate" type="button">Validate</button>
+        <button data-management="draft" type="button">Save draft</button>
+        <button data-management="publish" type="button">Publish</button>
+        <button data-management="releases" type="button">List releases</button>
+      </div>
+      <pre id="management-output" aria-live="polite">尚未操作</pre>
+    </section>
+  </main>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

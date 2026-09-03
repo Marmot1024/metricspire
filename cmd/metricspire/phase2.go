@@ -13,6 +13,7 @@ import (
 
 	"github.com/marmot1024/metricspire/internal/adapter/databricks"
 	"github.com/marmot1024/metricspire/internal/application"
+	"github.com/marmot1024/metricspire/internal/audit"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
 	"github.com/marmot1024/metricspire/internal/model"
@@ -120,7 +121,10 @@ func runDraftPut(parent context.Context, arguments []string, stdout, stderr io.W
 		return err
 	}
 	defer store.Close()
-	service, _ := catalog.NewService(store)
+	service, err := catalog.NewService(store)
+	if err != nil {
+		return err
+	}
 	draft, err := service.SaveDraft(ctx, catalog.SaveDraftInput{
 		Namespace: *namespace, Source: source, Actor: *actor, ExpectedRevision: *expectedRevision,
 	})
@@ -180,7 +184,10 @@ func runPublish(parent context.Context, arguments []string, stdout, stderr io.Wr
 		return err
 	}
 	defer store.Close()
-	service, _ := catalog.NewService(store)
+	service, err := catalog.NewService(store)
+	if err != nil {
+		return err
+	}
 	release, err := service.Publish(ctx, *namespace, *modelName, *revision, *actor, *note)
 	if err != nil {
 		return err
@@ -211,7 +218,10 @@ func runRollback(parent context.Context, arguments []string, stdout, stderr io.W
 		return err
 	}
 	defer store.Close()
-	service, _ := catalog.NewService(store)
+	service, err := catalog.NewService(store)
+	if err != nil {
+		return err
+	}
 	release, err := service.Rollback(ctx, *namespace, *modelName, *releaseID, *actor, *note)
 	if err != nil {
 		return err
@@ -344,7 +354,10 @@ func runQueryActive(parent context.Context, arguments []string, stdout, stderr i
 	if err != nil {
 		return err
 	}
-	engine, _ := databricks.NewQueryEngine(client)
+	engine, err := databricks.NewQueryEngine(client)
+	if err != nil {
+		return err
+	}
 	ctx, cancel, err := commandContext(parent, *timeout)
 	if err != nil {
 		return err
@@ -355,10 +368,19 @@ func runQueryActive(parent context.Context, arguments []string, stdout, stderr i
 		return err
 	}
 	defer store.Close()
-	service, _ := application.NewQueryService(store, engine)
+	policyResolver := application.PolicyResolverFunc(func(context.Context, application.QueryScope, catalog.Release) (model.PolicySource, error) {
+		return policy, nil
+	})
+	bindingResolver := application.BindingResolverFunc(func(context.Context, application.QueryScope, catalog.Release) (model.SourceBinding, error) {
+		return binding, nil
+	})
+	service, err := application.NewQueryService(store, policyResolver, bindingResolver, engine, audit.DiscardRecorder)
+	if err != nil {
+		return err
+	}
 	output, executeErr := service.ExecuteActive(ctx, application.QueryInput{
-		Namespace: *namespace, ModelName: *modelName, Context: requestContext,
-		Query: query, Policy: policy, Binding: binding,
+		QueryScope: application.QueryScope{Namespace: *namespace, ModelName: *modelName, Context: requestContext},
+		Query:      query,
 	})
 	if output.Release.ID != "" {
 		if err := writeJSON(stdout, output); err != nil {

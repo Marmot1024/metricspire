@@ -4,7 +4,7 @@
 
 MetricSpire is an open-source semantic metrics layer and governed data API. It compiles reviewed metric definitions into immutable releases, authorizes structured queries, and executes bounded plans through replaceable analytical-engine adapters.
 
-> Current status: Phase 2 passed on 2026-09-02. The repository now contains the PostgreSQL catalog lifecycle and the first real query adapter for Databricks SQL. HTTP APIs, a management UI, and end-user authentication enter Phase 3; this is not yet a production-ready platform release.
+> Current status: Phase 2 passed on 2026-09-02. Phase 3 is in progress: the HTTP product boundary, server-resolved policy/binding, asynchronous jobs, query audit, catalog search, minimal UI, generic OIDC login, and `serve` composition are implemented and locally tested. Acceptance against a real deployment identity provider is still required; this is not yet a production-ready platform release.
 
 ## Version names
 
@@ -21,6 +21,9 @@ MetricSpire is an open-source semantic metrics layer and governed data API. It c
 - builds deterministic logical and physical plans with content fingerprints;
 - executes parameterized Databricks SQL with timeout, cancellation, typed results, row limits, and cumulative response-byte limits;
 - rejects unsupported engine capabilities before submitting a query.
+- exposes separate management and query permissions through a strict HTTP API with Problem responses, body/deadline limits, security headers, asynchronous job status/cancellation, and fail-closed query audit;
+- verifies generic OIDC issuer/audience/signature/expiry claims and supports Authorization Code + PKCE browser login with encrypted, HTTP-only sessions;
+- serves a dependency-free minimal UI that calls the same HTTP API rather than duplicating application logic.
 
 ## Core flow
 
@@ -29,9 +32,9 @@ SemanticModel ──compile/publish──> immutable SemanticManifest
        │                                  │
        └──── PostgreSQL draft/release lifecycle ──── active release
 
-SemanticQuery + trusted RequestContext + PolicyBundle
+SemanticQuery + server-authenticated RequestContext + server-resolved PolicyBundle
                          └──> LogicalPlan
-LogicalPlan + SourceBinding + EngineCapabilities
+LogicalPlan + server-resolved SourceBinding + EngineCapabilities
                          └──> PhysicalPlan
 PhysicalPlan ──> QueryEngine adapter ──> bounded TypedResult
 ```
@@ -67,7 +70,7 @@ go run ./cmd/metricspire plan \
   --physical-out dist/demo/physical-plan.json
 ```
 
-`context.json` is trusted only in this offline CLI demonstration. A future HTTP or MCP transport must create `RequestContext` after authentication; callers cannot self-report tenant, principal, or roles in `SemanticQuery`.
+`context.json` is trusted only in this offline CLI demonstration. The HTTP transport creates `RequestContext` from a cryptographically verified OIDC identity; callers cannot self-report tenant, principal, roles, policy, binding, engine, or manifest fingerprint in `SemanticQuery`. OIDC is provider-neutral: deployment configuration selects the issuer and claim names without binding MetricSpire to Databricks identity.
 
 ## Local PostgreSQL workflow
 
@@ -88,6 +91,12 @@ go run ./cmd/metricspire release-list \
 ```
 
 `query-active` additionally requires a reviewed engine binding, a read-only Databricks SQL warehouse, and OAuth M2M credentials (or an explicit token for local development). Credentials are environment inputs and must never be committed. See the [Phase 2 acceptance record](docs/phase2-acceptance.md) for the opt-in real-engine tests.
+
+## HTTP service
+
+`metricspire serve --config <runtime.yaml>` composes the existing catalog, query, audit, OIDC, job, UI, and Databricks adapter boundaries. The runtime file contains only non-secret routes and OIDC metadata; database URLs, session keys, OIDC client secrets, and engine credentials remain environment inputs. See [`examples/runtime.example.yaml`](examples/runtime.example.yaml) and the [Phase 3 HTTP contract](docs/phase3-http-api.md).
+
+Run `metricspire migrate` explicitly before starting the service. `serve` never migrates PostgreSQL on startup and never creates analytical tables. The current Databricks adapter emits bounded, parameterized `SELECT` statements only.
 
 ## Contracts and guarantees
 
@@ -115,11 +124,11 @@ CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' ./cmd/metricspire
 
 Real PostgreSQL and Databricks acceptance is explicit and opt-in; skipped tests or mock responses are never reported as real integration proof.
 
-Read the [architecture note](docs/architecture.md), [Phase 1 acceptance](docs/phase1-acceptance.md), and [Phase 2 acceptance](docs/phase2-acceptance.md) for boundaries and evidence.
+Read the [architecture note](docs/architecture.md), [Phase 1 acceptance](docs/phase1-acceptance.md), [Phase 2 acceptance](docs/phase2-acceptance.md), and [Phase 3 HTTP contract](docs/phase3-http-api.md) for boundaries and evidence.
 
 ## Non-goals for v0.1
 
-MetricSpire is not an ETL platform, BI dashboard, data warehouse, arbitrary SQL gateway, cross-engine execution engine, or large-result export system. Phase 2 does not include a public HTTP API, management UI, MCP endpoint, Redis, Kafka, complex approval workflow, or simultaneous support for multiple analytical engines.
+MetricSpire is not an ETL platform, BI dashboard, data warehouse, arbitrary SQL gateway, cross-engine execution engine, or large-result export system. v0.1 does not include MCP, AI query generation, Redis, Kafka, a complex approval workflow, or simultaneous support for multiple analytical engines.
 
 ## License
 

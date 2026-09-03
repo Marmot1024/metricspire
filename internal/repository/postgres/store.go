@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/marmot1024/metricspire/internal/audit"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/compiler"
 	"github.com/marmot1024/metricspire/internal/model"
@@ -47,6 +48,26 @@ func New(pool *pgxpool.Pool) (*Store, error) {
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 func (s *Store) Close()              { s.pool.Close() }
+
+func (s *Store) Record(ctx context.Context, event audit.QueryEvent) error {
+	if err := event.Validate(); err != nil {
+		return err
+	}
+	_, err := s.pool.Exec(ctx, `
+INSERT INTO metricspire_query_audit
+    (request_id, tenant, principal, namespace, model_name, release_id,
+     manifest_fingerprint, logical_fingerprint, physical_fingerprint,
+     job_id, event_kind, error_code, row_count, truncated, occurred_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		event.RequestID, event.Tenant, event.Principal, event.Namespace, event.ModelName, event.ReleaseID,
+		event.ManifestFingerprint, event.LogicalFingerprint, event.PhysicalFingerprint,
+		event.JobID, event.Kind, event.ErrorCode, event.RowCount, event.Truncated, event.OccurredAt,
+	)
+	if err != nil {
+		return fmt.Errorf("record query audit: %w", err)
+	}
+	return nil
+}
 
 func (s *Store) SaveDraft(ctx context.Context, input catalog.SaveDraftInput) (catalog.Draft, error) {
 	payload, err := json.Marshal(input.Source)
@@ -286,6 +307,33 @@ ORDER BY created_at, release_id`, namespace, name)
 	return result, nil
 }
 
+func (s *Store) ListActiveReleases(ctx context.Context, namespace string) ([]catalog.Release, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT r.release_id, r.namespace, r.model_name, r.source_revision, r.manifest_fingerprint,
+       r.manifest, r.created_by, r.note, r.created_at
+FROM metricspire_active_releases a
+JOIN metricspire_releases r
+  ON r.namespace = a.namespace AND r.model_name = a.model_name AND r.release_id = a.release_id
+WHERE a.namespace = $1
+ORDER BY r.model_name`, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("list active releases: %w", err)
+	}
+	defer rows.Close()
+	result := make([]catalog.Release, 0)
+	for rows.Next() {
+		release, err := scanRelease(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, release)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list active releases: %w", err)
+	}
+	return result, nil
+}
+
 func (s *Store) ListEvents(ctx context.Context, namespace, name string) ([]catalog.ReleaseEvent, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT event_id, namespace, model_name, event_kind, COALESCE(from_release_id, ''),
@@ -387,3 +435,4 @@ func classify(operation string, err error) error {
 }
 
 var _ catalog.Repository = (*Store)(nil)
+var _ audit.Recorder = (*Store)(nil)

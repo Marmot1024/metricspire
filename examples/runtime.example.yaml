@@ -1,0 +1,24 @@
+api_version: metricspire.io/v1alpha1
+kind: RuntimeConfig
+http:
+  address: 127.0.0.1:8080
+  public_url: https://metrics.example.com
+  max_body_bytes: 1048576
+  control_timeout: 15s
+  query_timeout: 2m
+oidc:
+  issuer_url: https://identity.example.com
+  client_id: metricspire
+  session_ttl: 8h
+  tenant_claim: tenant
+  roles_claim: roles
+  permissions_claim: permissions
+policies:
+  - namespace: acceptance
+    model_name: tpch_orders
+    tenant: acceptance
+    path: ../testdata/acceptance/databricks-tpch/policy.yaml
+bindings:
+  - namespace: acceptance
+    model_name: tpch_orders
+    path: ../testdata/acceptance/databricks-tpch/binding.json

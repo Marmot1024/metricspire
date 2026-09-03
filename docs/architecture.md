@@ -2,7 +2,7 @@
 
 MetricSpire `v0.1.0-dev` is a modular monolith with a deliberately small trusted core. The public contracts remain `metricspire.io/v1alpha1`; product and contract versions have independent lifecycles.
 
-Phase 2 implements one complete backend path: PostgreSQL catalog lifecycle, deterministic semantic planning, and bounded Databricks SQL execution. Phase 3 will add HTTP management/query APIs, end-user authentication, audit delivery, and a basic UI around the same application services.
+Phase 2 implements one complete backend path: PostgreSQL catalog lifecycle, deterministic semantic planning, and bounded Databricks SQL execution. Phase 3 now adds provider-neutral HTTP management/query APIs, generic OIDC authentication, server-resolved trusted inputs, durable query audit, asynchronous jobs, a basic UI, and explicit runtime composition around the same application services. Acceptance against a real deployment identity provider remains open.
 
 ## Component boundaries
 
@@ -15,10 +15,11 @@ SemanticModel ──> CatalogService ──> CatalogRepository ──> PostgreSQ
      └──> SemanticManifest + PolicyBundle
                          │
 trusted RequestContext + SemanticQuery
-                         └──> LogicalPlan
-SourceBinding + EngineCapabilities
+              │          └──> LogicalPlan
+PolicyResolver┘
+BindingResolver + EngineCapabilities
                          └──> PhysicalPlan
-                                   └──> QueryEngine ──> TypedResult
+                                   └──> audited async job ──> QueryEngine ──> TypedResult
                                            │
                                            └── Databricks SQL (first adapter)
 ```
@@ -27,6 +28,9 @@ SourceBinding + EngineCapabilities
 - `QueryEngine` owns analytical execution, capabilities, timeout/cancellation, and typed results. It is a different adapter family from `CatalogRepository`.
 - `SourceBinding` maps logical datasets and fields to structured physical resources for one engine and environment. It contains no credentials or SQL fragments.
 - Databricks-specific SQL and HTTP behavior stays under `internal/adapter/databricks`; the semantic, catalog, application, and planner packages do not depend on it.
+- `Authenticator` returns a trusted principal; the HTTP layer creates `RequestContext`. `PolicyResolver` and `BindingResolver` select trusted configuration by namespace/model/tenant. None of these values are accepted in a public query body.
+- `JobManager` owns product job IDs, deadlines, ownership checks, status, and cancellation. The engine adapter still owns its remote statement lifecycle.
+- query audit is fail-closed: an admission event must be durable before execution; completion-audit failure withholds the result. Audit rows contain fingerprints and outcome metadata, never SQL, filter values, credentials, or result rows.
 
 ## Semantic truth and portability
 
@@ -50,7 +54,11 @@ MetricSpire and the analytical engine enforce different layers:
 - MetricSpire governs metric discovery, publication, allowed metrics/dimensions, release state, request budgets, and audit context;
 - a matching engine denial always wins; MetricSpire does not copy or bypass warehouse ACLs.
 
-`RequestContext` becomes trusted only when a transport constructs it after authentication. The current CLI accepts a context file solely for local and integration testing. Phase 3 transports must reject caller-supplied identity and invoke the same fail-closed policy path.
+`RequestContext` becomes trusted only when a transport constructs it after authentication. The current CLI accepts a context file solely for local and integration testing. The Phase 3 HTTP transport strictly rejects unknown query fields, including caller-supplied identity, policy, binding, engine, manifest fingerprint, or SQL, and invokes the same fail-closed policy path.
+
+The HTTP package keeps a provider-neutral `Authenticator`; the first concrete adapter is standards-based OIDC. It verifies discovery metadata, JWKS signatures, issuer, audience, expiry, tenant, roles, and product permissions. Browser login uses Authorization Code + PKCE, state, nonce, and AES-256-GCM encrypted HTTP-only sessions. Bearer callers may use an OIDC ID token issued for the MetricSpire client audience. Databricks OAuth M2M remains a separate service-to-engine credential and can never represent an end user.
+
+OIDC implementation tests use locally generated RSA signatures and an isolated protocol fixture. They prove the cryptographic and session behavior, not compatibility with a particular enterprise identity provider; issuer registration, redirect URI, claim mapping, and real login/logout remain deployment acceptance work.
 
 The initial deployment model uses a least-privileged read-only engine identity restricted to approved data resources. End-user identity passthrough remains a later, evidence-driven option because its implementation and guarantees differ across engines.
 
@@ -66,6 +74,14 @@ The planner limits metrics, dimensions, filters, values per filter, total parame
 
 Small typed JSON results are the v0.1 boundary. Streaming export, external result locations, distributed cross-engine execution, and materialization are later capabilities.
 
+## HTTP and UI boundary
+
+Management and query permissions are separate. Management endpoints validate, save drafts, publish, list releases, and rollback; query endpoints search the active catalog, explain, plan, submit jobs, fetch status, and cancel. Explain creates only an authorized logical plan. Plan may resolve a physical binding but never calls an analytical engine. Query submission is asynchronous, so network write deadlines are independent of query deadlines.
+
+All dynamic JSON is decoded with unknown-field and duplicate-key rejection plus a byte limit. Responses carry request IDs, no-store and browser security headers; cross-origin state changes are rejected. Errors use one `application/problem+json` shape. The embedded UI has no separate business logic, token field, or fake login; it calls the same API and uses the OIDC session.
+
+`metricspire serve --config` performs explicit dependency assembly. Non-secret HTTP/OIDC/policy/binding routes come from strict YAML or JSON. PostgreSQL URLs, the 32-byte session key, optional OIDC client secret, and Databricks credentials come only from environment variables. Startup does not run migrations or perform an analytical query. Shutdown stops HTTP admission, cancels and waits for background jobs and their completion audit, then closes PostgreSQL.
+
 ## Current exclusions
 
-Phase 2 has no public HTTP/MCP transport, UI, generalized identity provider integration, shared result cache, message queue, arbitrary SQL, cross-engine joins, or multi-engine routing. DuckDB is not a production data engine. ClickHouse, Doris, Trino/Presto, and other adapters must prove conformance independently before being advertised.
+Phase 3 still has no accepted enterprise identity-provider deployment, MCP transport, shared result cache, message queue, arbitrary SQL, cross-engine joins, or multi-engine routing. DuckDB is not a production data engine. ClickHouse, Doris, Trino/Presto, and other adapters must prove conformance independently before being advertised.

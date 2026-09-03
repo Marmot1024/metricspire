@@ -95,6 +95,7 @@ type Repository interface {
 	GetRelease(context.Context, string, string, string) (Release, error)
 	GetActiveRelease(context.Context, string, string) (Release, error)
 	ListReleases(context.Context, string, string) ([]Release, error)
+	ListActiveReleases(context.Context, string) ([]Release, error)
 	ListEvents(context.Context, string, string) ([]ReleaseEvent, error)
 }
 

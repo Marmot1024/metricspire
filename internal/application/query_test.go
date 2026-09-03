@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/marmot1024/metricspire/internal/adapter/databricks"
 	"github.com/marmot1024/metricspire/internal/application"
+	"github.com/marmot1024/metricspire/internal/audit"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
 	"github.com/marmot1024/metricspire/internal/model"
@@ -42,7 +44,9 @@ func TestPublishedReleaseToGovernedDatabricksResultAndRollback(t *testing.T) {
 		ByteLimit int64  `json:"byte_limit"`
 		Warehouse string `json:"warehouse_id"`
 	}
+	executionRequests := 0
 	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		executionRequests++
 		if err := json.NewDecoder(request.Body).Decode(&submitted); err != nil {
 			t.Error(err)
 		}
@@ -71,8 +75,6 @@ func TestPublishedReleaseToGovernedDatabricksResultAndRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine, _ := databricks.NewQueryEngine(client)
-	queryService, _ := application.NewQueryService(repository, engine)
-
 	var policy model.PolicySource
 	var contextValue model.RequestContext
 	var query model.SemanticQuery
@@ -84,10 +86,18 @@ func TestPublishedReleaseToGovernedDatabricksResultAndRollback(t *testing.T) {
 	policy.ManifestFingerprint = ""
 	binding.ManifestFingerprint = ""
 	binding.Engine = databricks.EngineName
+	policyResolver := application.PolicyResolverFunc(func(context.Context, application.QueryScope, catalog.Release) (model.PolicySource, error) {
+		return policy, nil
+	})
+	bindingResolver := application.BindingResolverFunc(func(context.Context, application.QueryScope, catalog.Release) (model.SourceBinding, error) {
+		return binding, nil
+	})
+	auditRecorder := audit.NewMemoryRecorder()
+	queryService, _ := application.NewQueryService(repository, policyResolver, bindingResolver, engine, auditRecorder)
 
 	output, err := queryService.ExecuteActive(ctx, application.QueryInput{
-		Namespace: "demo", ModelName: source.Metadata.Name, Context: contextValue,
-		Query: query, Policy: policy, Binding: binding,
+		QueryScope: application.QueryScope{Namespace: "demo", ModelName: source.Metadata.Name, Context: contextValue},
+		Query:      query, JobID: "job_product_e2e",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -97,6 +107,11 @@ func TestPublishedReleaseToGovernedDatabricksResultAndRollback(t *testing.T) {
 	}
 	if submitted.Warehouse != "warehouse" || submitted.RowLimit != int64(query.Limit) || submitted.ByteLimit != 4096 {
 		t.Fatalf("submitted request = %#v", submitted)
+	}
+	events := auditRecorder.Events()
+	if len(events) != 2 || events[0].Kind != audit.EventQueryStarted || events[1].Kind != audit.EventQuerySucceeded ||
+		events[0].JobID != "job_product_e2e" || events[1].JobID != "job_product_e2e" || events[1].RowCount != 1 {
+		t.Fatalf("query audit events = %#v", events)
 	}
 	if !strings.Contains(submitted.Statement, "FROM `demo`.`public`.`orders`") || strings.Contains(submitted.Statement, ";") {
 		t.Fatalf("submitted SQL = %s", submitted.Statement)
@@ -120,11 +135,24 @@ func TestPublishedReleaseToGovernedDatabricksResultAndRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	afterRollback, err := queryService.ExecuteActive(ctx, application.QueryInput{
-		Namespace: "demo", ModelName: source.Metadata.Name, Context: contextValue,
-		Query: query, Policy: policy, Binding: binding,
+		QueryScope: application.QueryScope{Namespace: "demo", ModelName: source.Metadata.Name, Context: contextValue},
+		Query:      query,
 	})
 	if err != nil || afterRollback.Release.ID != release1.ID {
 		t.Fatalf("query after rollback = %#v, %v", afterRollback, err)
+	}
+	if executionRequests != 2 {
+		t.Fatalf("execution requests = %d", executionRequests)
+	}
+	auditRecorder.SetError(errors.New("audit store unavailable"))
+	if _, err := queryService.ExecuteActive(ctx, application.QueryInput{
+		QueryScope: application.QueryScope{Namespace: "demo", ModelName: source.Metadata.Name, Context: contextValue},
+		Query:      query,
+	}); !errors.Is(err, audit.ErrUnavailable) {
+		t.Fatalf("audit failure error = %v", err)
+	}
+	if executionRequests != 2 {
+		t.Fatalf("engine executed despite audit admission failure: %d requests", executionRequests)
 	}
 }
 

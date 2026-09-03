@@ -157,6 +157,23 @@ func (r *MemoryRepository) ListReleases(_ context.Context, namespace, name strin
 	return result, nil
 }
 
+func (r *MemoryRepository) ListActiveReleases(_ context.Context, namespace string) ([]Release, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	prefix := namespace + "\x00"
+	result := make([]Release, 0)
+	for key, id := range r.active {
+		if len(key) < len(prefix) || key[:len(prefix)] != prefix {
+			continue
+		}
+		if release, exists := r.releases[releaseKey(key, id)]; exists {
+			result = append(result, clone(release))
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result, nil
+}
+
 func (r *MemoryRepository) ListEvents(_ context.Context, namespace, name string) ([]ReleaseEvent, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

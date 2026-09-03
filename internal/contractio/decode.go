@@ -15,6 +15,7 @@ import (
 )
 
 func ReadFile(path string, target any) error {
+	// #nosec G304 -- CLI and trusted runtime configuration intentionally select local contract files.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
