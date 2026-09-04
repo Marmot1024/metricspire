@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -155,6 +156,90 @@ func TestPhase3DeployedAcceptance(t *testing.T) {
 	assertDeployedAudit(t, firstJob.Job.ID, secondJob.Job.ID, rolledBackJob.Job.ID)
 }
 
+// TestPhase3DeployedIdentityAcceptance closes one real Databricks Apps
+// identity state at a time without changing drafts or releases. The operator
+// runs it with a short-lived token obtained by that user on their own machine.
+// The query-only state proves product permission separation; the Unity Catalog
+// denial state proves that a user accepted by MetricSpire cannot bypass the
+// analytical engine's native data permissions.
+func TestPhase3DeployedIdentityAcceptance(t *testing.T) {
+	if os.Getenv("METRICSPIRE_RUN_DEPLOYED_PHASE3_IDENTITY_ACCEPTANCE") != "staging-read-only" {
+		t.Skip("set METRICSPIRE_RUN_DEPLOYED_PHASE3_IDENTITY_ACCEPTANCE=staging-read-only to run deployed identity acceptance")
+	}
+	requireDeployedPhase3Environment(t,
+		"METRICSPIRE_DEPLOYED_BASE_URL",
+		"METRICSPIRE_DEPLOYED_NAMESPACE",
+		"METRICSPIRE_DEPLOYED_USER_TOKEN",
+		"METRICSPIRE_DEPLOYED_IDENTITY_EXPECTATION",
+		"METRICSPIRE_TEST_DATABRICKS_MODEL",
+		"METRICSPIRE_TEST_DATABRICKS_QUERY",
+		"METRICSPIRE_TEST_DATABRICKS_EXPECTED",
+	)
+
+	baseURL, err := deployedBaseURL(os.Getenv("METRICSPIRE_DEPLOYED_BASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectation, err := deployedIdentityExpectation(os.Getenv("METRICSPIRE_DEPLOYED_IDENTITY_EXPECTATION"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := strings.TrimSpace(os.Getenv("METRICSPIRE_DEPLOYED_USER_TOKEN"))
+	namespace := strings.TrimSpace(os.Getenv("METRICSPIRE_DEPLOYED_NAMESPACE"))
+
+	var source model.SemanticSource
+	readPhase3Fixture(t, "METRICSPIRE_TEST_DATABRICKS_MODEL", &source)
+	var query model.SemanticQuery
+	readPhase3Fixture(t, "METRICSPIRE_TEST_DATABRICKS_QUERY", &query)
+	var expected model.TypedResult
+	readPhase3Fixture(t, "METRICSPIRE_TEST_DATABRICKS_EXPECTED", &expected)
+	modelName := strings.TrimSpace(source.Metadata.Name)
+	if namespace == "" || modelName == "" || len(source.Spec.Metrics) == 0 {
+		t.Fatal("deployed identity namespace, fixture model name, and at least one metric are required")
+	}
+
+	client := &http.Client{
+		Timeout:       30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	deployedHealth(t, client, baseURL+"/health/live", token, "ok")
+	deployedHealth(t, client, baseURL+"/health/ready", token, "ready")
+	deployedRootAndLogin(t, client, baseURL, token, runtimeconfig.AuthenticationDatabricksApps)
+
+	modelPath := fmt.Sprintf("/api/v1/namespaces/%s/models/%s", url.PathEscape(namespace), url.PathEscape(modelName))
+	catalogPath := "/api/v1/catalog/search?namespace=" + url.QueryEscape(namespace) + "&q=" + url.QueryEscape(source.Spec.Metrics[0].Name) + "&limit=10"
+	deployedHTTPJSON(t, client, http.MethodGet, baseURL+modelPath+"/draft", token, nil, http.StatusForbidden, nil)
+	deployedHTTPJSON(t, client, http.MethodPost, baseURL+modelPath+"/publish", token,
+		httpapi.PublishRequest{ExpectedRevision: 0, Note: "must not be accepted"}, http.StatusForbidden, nil)
+	deployedHTTPJSON(t, client, http.MethodPost, baseURL+modelPath+"/rollback", token,
+		httpapi.RollbackRequest{ReleaseID: "must-not-be-used", Note: "must not be accepted"}, http.StatusForbidden, nil)
+
+	var entries []application.MetricCatalogEntry
+	deployedHTTPJSON(t, client, http.MethodGet, baseURL+catalogPath, token, nil, http.StatusOK, &entries)
+	if len(entries) != 1 || entries[0].ReleaseID == "" {
+		t.Fatalf("deployed identity catalog entries = %#v", entries)
+	}
+	var plan application.PlanOutput
+	deployedHTTPJSON(t, client, http.MethodPost, baseURL+modelPath+"/plan", token, query, http.StatusOK, &plan)
+	if plan.Release.ID != entries[0].ReleaseID || plan.Physical.Fingerprint == "" {
+		t.Fatalf("deployed identity plan = %#v", plan)
+	}
+
+	if expectation == "query-only" {
+		finished := submitDeployedQuery(t, client, baseURL, modelPath, token, query)
+		if finished.ReleaseID != plan.Release.ID {
+			t.Fatalf("deployed identity query release = %s, want %s", finished.ReleaseID, plan.Release.ID)
+		}
+		assertExpectedRealResult(t, finished.Result, expected)
+		return
+	}
+
+	finished := awaitDeployedQuery(t, client, baseURL, modelPath, token, query)
+	if err := validateDeployedUnityCatalogDenial(finished, token); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDeployedBaseURLRequiresHTTPSOrigin(t *testing.T) {
 	for _, value := range []string{
 		"http://metricspire.example",
@@ -182,6 +267,48 @@ func TestDeployedAuthProfileDefaultsToOIDCAndRejectsUnknownValues(t *testing.T) 
 	}
 	if _, err := deployedAuthProfile("unknown"); err == nil {
 		t.Fatal("unknown deployed auth profile was accepted")
+	}
+}
+
+func TestDeployedIdentityExpectationAndUnityCatalogDenialValidation(t *testing.T) {
+	for _, value := range []string{"query-only", "unity-catalog-denied"} {
+		if actual, err := deployedIdentityExpectation(value); err != nil || actual != value {
+			t.Fatalf("deployedIdentityExpectation(%q) = %q, %v", value, actual, err)
+		}
+	}
+	for _, value := range []string{"", "publisher", "query_only"} {
+		if _, err := deployedIdentityExpectation(value); err == nil {
+			t.Fatalf("deployedIdentityExpectation(%q) succeeded", value)
+		}
+	}
+
+	valid := application.QueryJobSnapshot{Job: model.ExecutionJob{
+		Status: model.JobFailed,
+		Error:  &model.Problem{Code: "engine_http_error", Message: "Databricks returned HTTP 403 (PERMISSION_DENIED)"},
+	}}
+	if err := validateDeployedUnityCatalogDenial(valid, "short-lived-token"); err != nil {
+		t.Fatal(err)
+	}
+	valid.Job.Error = &model.Problem{Code: "engine_permission_denied", Message: "analytical query execution failed"}
+	if err := validateDeployedUnityCatalogDenial(valid, "short-lived-token"); err != nil {
+		t.Fatal(err)
+	}
+	for name, snapshot := range map[string]application.QueryJobSnapshot{
+		"succeeded": {Job: model.ExecutionJob{Status: model.JobSucceeded}},
+		"wrong code": {Job: model.ExecutionJob{Status: model.JobFailed,
+			Error: &model.Problem{Code: "engine_internal_error", Message: "analytical query execution failed"}}},
+		"leaked path": {Job: model.ExecutionJob{Status: model.JobFailed,
+			Error: &model.Problem{Code: "engine_permission_denied", Message: "analytical query execution failed", Path: "databricks.status"}}},
+		"leaked token": {Job: model.ExecutionJob{Status: model.JobFailed,
+			Error: &model.Problem{Code: "engine_permission_denied", Message: "short-lived-token"}}},
+		"leaked upstream detail": {Job: model.ExecutionJob{Status: model.JobFailed,
+			Error: &model.Problem{Code: "engine_http_error", Message: "Databricks returned HTTP 403 (PERMISSION_DENIED): samples.tpch.orders"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateDeployedUnityCatalogDenial(snapshot, "short-lived-token"); err == nil {
+				t.Fatalf("invalid denial snapshot was accepted: %#v", snapshot)
+			}
+		})
 	}
 }
 
@@ -328,6 +455,15 @@ func assertDeployedSecurityHeaders(t *testing.T, response *http.Response) {
 
 func submitDeployedQuery(t *testing.T, client *http.Client, baseURL, modelPath, token string, query model.SemanticQuery) application.QueryJobSnapshot {
 	t.Helper()
+	snapshot := awaitDeployedQuery(t, client, baseURL, modelPath, token, query)
+	if snapshot.Job.Status != model.JobSucceeded {
+		t.Fatalf("deployed query job = %#v", snapshot)
+	}
+	return snapshot
+}
+
+func awaitDeployedQuery(t *testing.T, client *http.Client, baseURL, modelPath, token string, query model.SemanticQuery) application.QueryJobSnapshot {
+	t.Helper()
 	var submitted application.QueryJobSnapshot
 	deployedHTTPJSON(t, client, http.MethodPost, baseURL+modelPath+"/query", token, query, http.StatusAccepted, &submitted)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -336,9 +472,6 @@ func submitDeployedQuery(t *testing.T, client *http.Client, baseURL, modelPath, 
 		var snapshot application.QueryJobSnapshot
 		deployedHTTPJSON(t, client, http.MethodGet, baseURL+"/api/v1/jobs/"+url.PathEscape(submitted.Job.ID), token, nil, http.StatusOK, &snapshot)
 		if realJobTerminal(snapshot.Job.Status) {
-			if snapshot.Job.Status != model.JobSucceeded {
-				t.Fatalf("deployed query job = %#v", snapshot)
-			}
 			return snapshot
 		}
 		select {
@@ -347,6 +480,48 @@ func submitDeployedQuery(t *testing.T, client *http.Client, baseURL, modelPath, 
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
+}
+
+func deployedIdentityExpectation(value string) (string, error) {
+	expectation := strings.TrimSpace(value)
+	if expectation != "query-only" && expectation != "unity-catalog-denied" {
+		return "", errors.New("METRICSPIRE_DEPLOYED_IDENTITY_EXPECTATION must be query-only or unity-catalog-denied")
+	}
+	return expectation, nil
+}
+
+func validateDeployedUnityCatalogDenial(snapshot application.QueryJobSnapshot, token string) error {
+	if snapshot.Job.Status != model.JobFailed || snapshot.Job.Error == nil || snapshot.Result != nil {
+		return fmt.Errorf("Unity Catalog denial job did not fail safely: %#v", snapshot)
+	}
+	problem := snapshot.Job.Error
+	if !validDeployedPermissionProblem(*problem) {
+		return fmt.Errorf("Unity Catalog denial returned an unexpected public error: %#v", problem)
+	}
+	if problem.Path != "" || strings.Contains(problem.Message, token) {
+		return errors.New("Unity Catalog denial leaked an upstream path or access token")
+	}
+	return nil
+}
+
+func validDeployedPermissionProblem(problem model.Problem) bool {
+	if problem.Code == "engine_permission_denied" {
+		return problem.Message == "analytical query execution failed"
+	}
+	const prefix = "Databricks returned HTTP 403 ("
+	if problem.Code != "engine_http_error" || !strings.HasPrefix(problem.Message, prefix) || !strings.HasSuffix(problem.Message, ")") {
+		return false
+	}
+	code := strings.TrimSuffix(strings.TrimPrefix(problem.Message, prefix), ")")
+	if len(code) < 1 || len(code) > 64 {
+		return false
+	}
+	for _, character := range code {
+		if (character < 'A' || character > 'Z') && (character < '0' || character > '9') && character != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func assertDeployedAudit(t *testing.T, jobIDs ...string) {

@@ -39,4 +39,20 @@ The final identity checks must use real staging identities, not forged forwarded
 1. With read access to the fixed fixture, catalog/plan/query succeeds while draft, publish, and rollback return HTTP 403.
 2. With no Unity Catalog access to the reviewed fixture, MetricSpire accepts the structured query but the terminal job contains only the bounded public engine-denial signal and no upstream response details.
 
+`TestPhase3DeployedIdentityAcceptance` performs exactly one of those states without creating a draft, publishing a release, rolling back, or connecting directly to Lakebase. Run it from that user's machine through a secret runner, with `METRICSPIRE_DEPLOYED_IDENTITY_EXPECTATION` set to either `query-only` or `unity-catalog-denied`. It requires the App HTTPS origin, the existing acceptance namespace, the user's short-lived token, and the three reviewed files under `testdata/acceptance/databricks-tpch`. The test first requires 403 from management routes, then proves catalog and planning access before checking either the five-row golden result or a sanitized Unity Catalog denial. It fails if a publisher token is supplied for the query-only state.
+
+```bash
+METRICSPIRE_RUN_DEPLOYED_PHASE3_IDENTITY_ACCEPTANCE=staging-read-only \
+METRICSPIRE_DEPLOYED_IDENTITY_EXPECTATION=query-only \
+METRICSPIRE_DEPLOYED_BASE_URL='https://replace-with-staging-app-origin' \
+METRICSPIRE_DEPLOYED_NAMESPACE=acceptance \
+METRICSPIRE_DEPLOYED_USER_TOKEN="$SHORT_LIVED_USER_TOKEN" \
+METRICSPIRE_TEST_DATABRICKS_MODEL=testdata/acceptance/databricks-tpch/model.yaml \
+METRICSPIRE_TEST_DATABRICKS_QUERY=testdata/acceptance/databricks-tpch/query.json \
+METRICSPIRE_TEST_DATABRICKS_EXPECTED=testdata/acceptance/databricks-tpch/expected.json \
+go test -count=1 -run '^TestPhase3DeployedIdentityAcceptance$' ./cmd/metricspire
+```
+
+Load `SHORT_LIVED_USER_TOKEN` with a non-echoing prompt or approved secret runner; never paste its value into the command or a file. Run the second state by changing only the expectation and the controlled user's Unity Catalog permissions.
+
 Do not change App ACLs, publisher membership, Unity Catalog grants, or fixture bindings merely to make the test pass without first recording the intended staging principal and exact permission delta. After the checks, reconcile query audit by request/job ID, remove temporary grants, and stop App compute again.
