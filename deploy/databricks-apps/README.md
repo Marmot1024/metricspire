@@ -33,3 +33,10 @@ The database resource grants the App service principal `CONNECT` and database-le
 For the first explicitly approved staging deployment only, set `METRICSPIRE_APPS_MIGRATE_ONCE=approved-staging` while building. The generated `app.yaml` then asks the bootstrap to run the idempotent control-plane migration once, using the final App service principal, before replacing itself with `metricspire serve`. Immediately rebuild and redeploy without this variable; the normal package cannot run a migration. Never use the one-time switch in production.
 
 Acceptance must prove managed-ingress identity, default query access, the single publisher group, user-authorized SQL, a Unity Catalog denial for an otherwise valid user, cancellation, audit, and the absence of user/database tokens from logs and PostgreSQL. Resource creation, local tests, and the earlier Go runtime probe do not satisfy these checks.
+
+The final identity checks must use real staging identities, not forged forwarded headers or the publisher token reused under two labels. Give the selected non-publisher only App `CAN_USE`; do not add that identity to the configured publisher group. The user should authenticate through managed ingress and keep their credentials on their own machine. Record request IDs and outcomes for these two states:
+
+1. With read access to the fixed fixture, catalog/plan/query succeeds while draft, publish, and rollback return HTTP 403.
+2. With no Unity Catalog access to the reviewed fixture, MetricSpire accepts the structured query but the terminal job contains only the bounded public engine-denial signal and no upstream response details.
+
+Do not change App ACLs, publisher membership, Unity Catalog grants, or fixture bindings merely to make the test pass without first recording the intended staging principal and exact permission delta. After the checks, reconcile query audit by request/job ID, remove temporary grants, and stop App compute again.
