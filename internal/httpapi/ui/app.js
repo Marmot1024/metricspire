@@ -511,14 +511,18 @@ function updateQueryPreview() {
   }
 }
 
+function shellQuote(value) {
+  return "'" + value.replaceAll("'", "'\"'\"'") + "'";
+}
+
 async function copyQueryRequest() {
   try {
     const {query} = buildQuery();
     const payload = [
-      `curl --request POST '${window.location.origin}${publicQueryPath("query")}'`,
+      `curl --request POST ${shellQuote(window.location.origin + publicQueryPath("query"))}`,
       '--header "Authorization: Bearer ${METRICSPIRE_TOKEN}"',
       "--header 'Content-Type: application/json'",
-      `--data '${JSON.stringify(query)}'`,
+      `--data ${shellQuote(JSON.stringify(query))}`,
     ].join(" \\\n  ");
     if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(payload);
     else window.prompt("复制下面的 API 请求", payload);
@@ -653,11 +657,12 @@ function fillSelect(select, values, selected, emptyLabel = "请选择") {
 
 function renderEntityFields(entityName, selectedField = "") {
   const dataset = datasetForEntity(entityName);
-  fillSelect(byID("metric-field"), dataset ? dataset.fields.map((field) => field.name) : [], selectedField, "没有可用字段");
+  fillSelect(byID("metric-field"), dataset ? dataset.fields.map((field) => `${entityName}.${field.name}`) : [], selectedField, "没有可用字段");
 }
 
 function renderMetricDimensions(entityName, selectedDimensions = [], timeDimension = "") {
-  const dimensions = dimensionsForEntity(entityName);
+  const dimensions = state.draft.source.spec.dimensions.filter((dimension) =>
+    dimension.entity === entityName || selectedDimensions.includes(dimension.name));
   const container = byID("metric-dimension-options");
   container.replaceChildren();
   for (const dimension of dimensions) {
@@ -976,10 +981,10 @@ async function publishDraft() {
     const release = await requestJSON(routePath(state.governanceRoute, "publish"), {
       method: "POST", body: JSON.stringify({expected_revision: state.draft.revision, note}),
     });
-    setStatus("governance-status", `版本 ${release.id} 已发布并成为当前版本。`, "success");
     byID("release-note").value = "";
     await loadGovernance();
     await loadCatalog();
+    setStatus("governance-status", `版本 ${release.id} 已发布并成为当前版本。`, "success");
   } catch (error) {
     setStatus("governance-status", errorMessage(error), "error");
   }
@@ -991,15 +996,15 @@ async function rollbackRelease(releaseID) {
     setStatus("governance-status", "回滚说明必填：请说明为什么恢复此版本。", "error");
     return;
   }
-  if (!window.confirm(`确认将 ${state.governanceRoute.model_name} 恢复为 ${releaseID}？系统会创建新的不可变发布记录。`)) return;
+  if (!window.confirm(`确认将 ${state.governanceRoute.model_name} 恢复为 ${releaseID}？系统会重新启用该历史版本并记录回滚事件，不会创建新版本。`)) return;
   try {
     const release = await requestJSON(routePath(state.governanceRoute, "rollback"), {
       method: "POST", body: JSON.stringify({release_id: releaseID, note}),
     });
-    setStatus("governance-status", `已通过新版本 ${release.id} 恢复 ${releaseID} 的定义。`, "success");
     byID("release-note").value = "";
     await loadGovernance();
     await loadCatalog();
+    setStatus("governance-status", `已重新启用历史版本 ${release.id}，并记录回滚事件。`, "success");
   } catch (error) {
     setStatus("governance-status", errorMessage(error), "error");
   }
@@ -1097,6 +1102,6 @@ async function initialize() {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = {resolvePresetRange, shiftDate, timezoneParts, zonedMidnightISO};
+  module.exports = {resolvePresetRange, shiftDate, timezoneParts, zonedMidnightISO, shellQuote};
 }
 if (typeof document !== "undefined") initialize();

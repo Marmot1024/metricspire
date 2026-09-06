@@ -22,6 +22,10 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test internal/httpapi/ui/app_test.js
       - run: go test -race ./...
       - run: go vet ./...
       - run: CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' ./cmd/metricspire
