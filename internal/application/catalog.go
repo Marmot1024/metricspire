@@ -3,11 +3,13 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/compiler"
 	"github.com/marmot1024/metricspire/internal/model"
+	"github.com/marmot1024/metricspire/internal/planner"
 	"github.com/marmot1024/metricspire/internal/policy"
 )
 
@@ -15,20 +17,88 @@ type ActiveReleaseLister interface {
 	ListActiveReleases(context.Context, string) ([]catalog.Release, error)
 }
 
+// ResolveActiveModel keeps the public query boundary metric-first. It returns
+// one internal model only when every requested metric exists in, and is
+// authorized from, exactly one active release. Callers never choose the model.
+func (service *CatalogService) ResolveActiveModel(ctx context.Context, scope QueryScope, metrics []string) (string, error) {
+	if strings.TrimSpace(scope.Namespace) == "" || strings.TrimSpace(scope.Context.Tenant) == "" || strings.TrimSpace(scope.Context.Principal) == "" {
+		return "", errors.New("metric route scope is incomplete")
+	}
+	if len(metrics) == 0 {
+		return "", &model.Problem{Code: "invalid_query", Path: "metrics", Message: "at least one metric is required"}
+	}
+	if len(metrics) > planner.MaximumMetrics {
+		return "", &model.Problem{Code: "budget_exceeded", Path: "metrics", Message: fmt.Sprintf("must contain at most %d metrics", planner.MaximumMetrics)}
+	}
+	releases, err := service.releases.ListActiveReleases(ctx, scope.Namespace)
+	if err != nil {
+		return "", err
+	}
+	candidates := make([]string, 0, 1)
+	for _, release := range releases {
+		available := make(map[string]struct{}, len(release.Manifest.Definitions.Metrics))
+		for _, metric := range release.Manifest.Definitions.Metrics {
+			available[metric.Name] = struct{}{}
+		}
+		containsAll := true
+		for _, metric := range metrics {
+			if _, exists := available[metric]; !exists {
+				containsAll = false
+				break
+			}
+		}
+		if !containsAll {
+			continue
+		}
+		modelScope := scope
+		modelScope.ModelName = release.Name
+		policySource, err := service.policies.ResolvePolicy(ctx, modelScope, release)
+		if errors.Is(err, ErrResolutionNotFound) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		bundle, err := compiler.CompilePolicy(policySource, release.Manifest)
+		if err != nil {
+			return "", err
+		}
+		if _, err := policy.Authorize(scope.Context, bundle, release.ManifestFingerprint, model.SemanticQuery{Metrics: metrics}); err != nil {
+			var problem *model.Problem
+			if errors.As(err, &problem) && problem.Code == "permission_denied" {
+				continue
+			}
+			return "", err
+		}
+		candidates = append(candidates, release.Name)
+	}
+	switch len(candidates) {
+	case 1:
+		return candidates[0], nil
+	case 0:
+		return "", &model.Problem{Code: "metric_route_not_found", Path: "metrics", Message: "the requested metrics do not resolve to one authorized active model"}
+	default:
+		return "", &model.Problem{Code: "metric_route_ambiguous", Path: "metrics", Message: fmt.Sprintf("the requested metrics resolve to %d active models; metric codes must be unique within a namespace", len(candidates))}
+	}
+}
+
 type MetricCatalogEntry struct {
-	Namespace           string         `json:"namespace"`
-	ModelName           string         `json:"model_name"`
-	ReleaseID           string         `json:"release_id"`
-	ManifestFingerprint string         `json:"manifest_fingerprint"`
-	Name                string         `json:"name"`
-	DisplayName         string         `json:"display_name"`
-	Description         string         `json:"description"`
-	Owner               string         `json:"owner"`
-	Tags                []string       `json:"tags,omitempty"`
-	Deprecated          bool           `json:"deprecated"`
-	ValueType           model.DataType `json:"value_type"`
-	Unit                string         `json:"unit,omitempty"`
-	AllowedDimensions   []string       `json:"allowed_dimensions"`
+	Namespace           string                  `json:"namespace"`
+	ModelName           string                  `json:"-"`
+	ReleaseID           string                  `json:"release_id"`
+	ManifestFingerprint string                  `json:"manifest_fingerprint"`
+	Name                string                  `json:"name"`
+	DisplayName         string                  `json:"display_name"`
+	Description         string                  `json:"description"`
+	Owner               string                  `json:"owner"`
+	Tags                []string                `json:"tags,omitempty"`
+	UsageExamples       []string                `json:"usage_examples,omitempty"`
+	Deprecated          bool                    `json:"deprecated"`
+	ValueType           model.DataType          `json:"value_type"`
+	Unit                string                  `json:"unit,omitempty"`
+	AllowedDimensions   []string                `json:"allowed_dimensions"`
+	TimeDimension       string                  `json:"time_dimension,omitempty"`
+	TimeGranularities   []model.TimeGranularity `json:"time_granularities,omitempty"`
 }
 
 type CatalogService struct {
@@ -81,20 +151,28 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 				}
 				return nil, err
 			}
-			if !matchesMetricCatalogQuery(query, release.Name, metric) {
+			if !matchesMetricCatalogQuery(query, metric) {
 				continue
 			}
 			authorizedDimensions, err := catalogDimensions(scope.Context, bundle, release.ManifestFingerprint, metric)
 			if err != nil {
 				return nil, err
 			}
+			var granularities []model.TimeGranularity
+			for _, dimension := range release.Manifest.Definitions.Dimensions {
+				if dimension.Name == metric.TimeDimension {
+					granularities = append([]model.TimeGranularity(nil), dimension.TimeGranularities...)
+					break
+				}
+			}
 			results = append(results, MetricCatalogEntry{
 				Namespace: release.Namespace, ModelName: release.Name, ReleaseID: release.ID,
 				ManifestFingerprint: release.ManifestFingerprint, Name: metric.Name,
 				DisplayName: metric.DisplayName, Description: metric.Description, Owner: metric.Owner,
-				Tags: append([]string(nil), metric.Tags...), Deprecated: metric.Deprecated,
+				Tags: append([]string(nil), metric.Tags...), UsageExamples: append([]string(nil), metric.UsageExamples...), Deprecated: metric.Deprecated,
 				ValueType: metric.ValueType, Unit: metric.Unit,
-				AllowedDimensions: authorizedDimensions,
+				AllowedDimensions: authorizedDimensions, TimeDimension: metric.TimeDimension,
+				TimeGranularities: granularities,
 			})
 			if len(results) == limit {
 				return results, nil
@@ -120,11 +198,11 @@ func catalogDimensions(context model.RequestContext, bundle model.PolicyBundle, 
 	return result, nil
 }
 
-func matchesMetricCatalogQuery(query, modelName string, metric model.Metric) bool {
+func matchesMetricCatalogQuery(query string, metric model.Metric) bool {
 	if query == "" {
 		return true
 	}
-	values := []string{modelName, metric.Name, metric.DisplayName, metric.Description, metric.Owner, strings.Join(metric.Tags, " ")}
+	values := []string{metric.Name, metric.DisplayName, metric.Description, metric.Owner, strings.Join(metric.Tags, " ")}
 	for _, value := range values {
 		if strings.Contains(strings.ToLower(value), query) {
 			return true

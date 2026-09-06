@@ -398,6 +398,17 @@ func validateSpec(spec model.SemanticSpec) (catalog, error) {
 				return result, problem("invalid_metric", fmt.Sprintf("%s.tags[%d]", path, tagIndex), "tag must not be empty")
 			}
 		}
+		if len(metric.UsageExamples) > 5 {
+			return result, problem("invalid_metric", path+".usage_examples", "at most five usage examples are allowed")
+		}
+		if err := rejectDuplicates(metric.UsageExamples, path+".usage_examples"); err != nil {
+			return result, err
+		}
+		for exampleIndex, example := range metric.UsageExamples {
+			if strings.TrimSpace(example) == "" {
+				return result, problem("invalid_metric", fmt.Sprintf("%s.usage_examples[%d]", path, exampleIndex), "usage example must not be empty")
+			}
+		}
 		if err := rejectDuplicates(metric.AllowedDimensions, path+".allowed_dimensions"); err != nil {
 			return result, err
 		}

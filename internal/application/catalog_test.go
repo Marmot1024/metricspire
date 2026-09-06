@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
 	"github.com/marmot1024/metricspire/internal/model"
+	"github.com/marmot1024/metricspire/internal/planner"
 )
 
 func TestCatalogSearchReturnsOnlyAuthorizedMetricsFromActiveReleases(t *testing.T) {
@@ -22,6 +24,11 @@ func TestCatalogSearchReturnsOnlyAuthorizedMetricsFromActiveReleases(t *testing.
 	}
 	if err := contractio.ReadFile(filepath.Join(root, "policy.yaml"), &policySource); err != nil {
 		t.Fatal(err)
+	}
+	for index := range source.Spec.Metrics {
+		if source.Spec.Metrics[index].Name == "refund_rate" {
+			source.Spec.Metrics[index].UsageExamples = []string{"查看上月退款率"}
+		}
 	}
 	draft, err := management.SaveDraft(context.Background(), catalog.SaveDraftInput{
 		Namespace: "demo", Source: source, Actor: "owner", ExpectedRevision: 0,
@@ -52,7 +59,29 @@ func TestCatalogSearchReturnsOnlyAuthorizedMetricsFromActiveReleases(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 1 || results[0].Name != "refund_rate" || len(results[0].AllowedDimensions) != 1 || results[0].AllowedDimensions[0] != "order_date" {
+	if len(results) != 1 || results[0].Name != "refund_rate" || len(results[0].AllowedDimensions) != 1 || results[0].AllowedDimensions[0] != "order_date" ||
+		results[0].TimeDimension != "order_date" || len(results[0].TimeGranularities) != 3 || len(results[0].UsageExamples) != 1 {
 		t.Fatalf("authorized catalog = %#v", results)
+	}
+	modelName, err := service.ResolveActiveModel(context.Background(), application.QueryScope{
+		Namespace: "demo", Context: model.RequestContext{
+			Tenant: "demo", Principal: "analyst", Roles: []string{"analyst"}, RequestID: "route-test",
+		},
+	}, []string{"refund_rate"})
+	if err != nil || modelName != source.Metadata.Name {
+		t.Fatalf("resolved model = %q, %v", modelName, err)
+	}
+	tooManyMetrics := make([]string, planner.MaximumMetrics+1)
+	if _, err := service.ResolveActiveModel(context.Background(), application.QueryScope{
+		Namespace: "demo", Context: model.RequestContext{
+			Tenant: "demo", Principal: "analyst", Roles: []string{"analyst"}, RequestID: "route-budget-test",
+		},
+	}, tooManyMetrics); err == nil {
+		t.Fatal("expected metric route budget error")
+	} else {
+		var problem *model.Problem
+		if !errors.As(err, &problem) || problem.Code != "budget_exceeded" {
+			t.Fatalf("route budget error = %v", err)
+		}
 	}
 }

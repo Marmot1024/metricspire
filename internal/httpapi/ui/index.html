@@ -3,64 +3,273 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MetricSpire</title>
+  <meta name="description" content="MetricSpire 指标目录、治理发布与受控查询">
+  <title>MetricSpire 指标语义平台</title>
   <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
-  <header>
-    <p class="eyebrow">MetricSpire v0.1</p>
-    <h1>指标目录与受治理查询</h1>
-    <p>页面与 API 共用服务端认证、策略、绑定、预算与审计链路。</p>
-    <div class="row"><a class="button" href="/auth/login">OIDC 登录</a><button id="logout-button" type="button">退出登录</button></div>
-  </header>
-  <main>
-    <section>
-      <h2>目录搜索</h2>
-      <div class="row">
-        <label>Namespace <input id="namespace" value="demo" autocomplete="off"></label>
-        <label>关键词 <input id="search" placeholder="指标名、说明、负责人" autocomplete="off"></label>
-        <button id="search-button" type="button">搜索</button>
-      </div>
-      <pre id="catalog-output" aria-live="polite">尚未搜索</pre>
-    </section>
+  <div class="product-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="MetricSpire 首页">
+        <span class="brand-mark" aria-hidden="true">M</span>
+        <span><strong>MetricSpire</strong><small>指标语义平台</small></span>
+      </a>
 
-    <section>
-      <h2>语义查询</h2>
-      <label>Model <input id="model" value="commerce" autocomplete="off"></label>
-      <label for="query">SemanticQuery JSON</label>
-      <textarea id="query" rows="16" spellcheck="false">{
-  "api_version": "metricspire.io/v1alpha1",
-  "kind": "SemanticQuery",
-  "metrics": ["average_order_value"],
-  "limit": 100
-}</textarea>
-      <div class="row">
-        <button data-operation="explain" type="button">Explain</button>
-        <button data-operation="plan" type="button">Plan</button>
-        <button data-operation="query" type="button">Query</button>
-        <button id="cancel-job-button" type="button" disabled>Cancel current job</button>
-      </div>
-      <pre id="query-output" aria-live="polite">尚未执行</pre>
-    </section>
+      <nav id="workspace-tabs" class="side-nav" aria-label="主要功能" hidden>
+        <button class="nav-item active" type="button" data-tab="catalog" aria-selected="true">
+          <span>01</span><strong>指标库</strong><small>发现可信指标</small>
+        </button>
+        <button id="governance-tab" class="nav-item" type="button" data-tab="governance" aria-selected="false" hidden>
+          <span>02</span><strong>治理发布</strong><small>维护与版本管理</small>
+        </button>
+        <button id="query-tab" class="nav-item" type="button" data-tab="query" aria-selected="false" hidden>
+          <span>03</span><strong>查询验证</strong><small>生成规范请求</small>
+        </button>
+      </nav>
 
-    <section>
-      <h2>模型治理</h2>
-      <p>草稿内容使用 SemanticSource JSON；发布和回滚只接受版本号、release ID 与说明，actor 来自登录身份。</p>
-      <label for="source">SemanticSource JSON</label>
-      <textarea id="source" rows="10" spellcheck="false">{}</textarea>
-      <div class="row">
-        <label>Expected revision <input id="revision" type="number" min="0" value="0"></label>
-        <label>Release ID <input id="release-id" autocomplete="off" placeholder="release_..."></label>
-        <button data-management="load" type="button">Load draft</button>
-        <button data-management="validate" type="button">Validate</button>
-        <button data-management="draft" type="button">Save draft</button>
-        <button data-management="publish" type="button">Publish</button>
-        <button data-management="releases" type="button">List releases</button>
-        <button data-management="rollback" type="button">Rollback</button>
+      <div class="session-card">
+        <span id="environment-badge" class="badge">正在连接</span>
+        <strong id="session-name">读取登录身份…</strong>
+        <a id="login-link" class="text-button" href="/auth/login" hidden>登录</a>
+        <button id="logout-button" class="text-button" type="button" hidden>退出登录</button>
       </div>
-      <pre id="management-output" aria-live="polite">尚未操作</pre>
-    </section>
-  </main>
+    </aside>
+
+    <main class="main-shell">
+      <header class="context-bar">
+        <div>
+          <span class="eyebrow">当前业务域</span>
+          <strong id="current-namespace">等待服务配置</strong>
+        </div>
+        <label class="scope-picker" for="namespace-select">切换业务域
+          <select id="namespace-select"></select>
+        </label>
+      </header>
+
+      <div id="notice" class="notice" role="status" aria-live="polite">正在读取平台配置…</div>
+
+      <section id="catalog-workspace" class="view" data-workspace="catalog" hidden>
+        <header class="page-heading">
+          <div>
+            <p class="eyebrow">可信指标目录</p>
+            <h1>找到正确指标，再开始开发</h1>
+            <p>按名称、业务定义、标签或负责人搜索。这里不暴露物理表、SQL 或内部模型路由。</p>
+          </div>
+          <span id="catalog-count" class="count-badge">0 个指标</span>
+        </header>
+
+        <div class="search-bar">
+          <label class="sr-only" for="catalog-search">搜索指标</label>
+          <input id="catalog-search" type="search" placeholder="例如：付费订单数、收入、活跃用户" autocomplete="off">
+          <button id="catalog-search-button" class="button secondary" type="button">搜索</button>
+        </div>
+
+        <div class="catalog-layout">
+          <div id="catalog-list" class="catalog-list" aria-live="polite"></div>
+          <article id="metric-detail" class="detail-panel">
+            <div id="metric-detail-empty" class="empty-state">选择一个指标查看完整定义和可用维度。</div>
+            <div id="metric-detail-content" hidden>
+              <div class="detail-heading">
+                <div>
+                  <span id="detail-status" class="badge">已发布</span>
+                  <h2 id="detail-name"></h2>
+                  <code id="detail-code"></code>
+                </div>
+                <button id="detail-query-button" class="button primary" type="button">用于查询</button>
+              </div>
+              <p id="detail-description" class="lead"></p>
+              <dl class="detail-grid">
+                <div><dt>负责人</dt><dd id="detail-owner"></dd></div>
+                <div><dt>返回类型</dt><dd id="detail-type"></dd></div>
+                <div><dt>当前版本</dt><dd id="detail-release"></dd></div>
+                <div><dt>时间口径</dt><dd id="detail-time"></dd></div>
+              </dl>
+              <section class="detail-section">
+                <h3>可用维度</h3>
+                <div id="detail-dimensions" class="chips"></div>
+              </section>
+              <section class="detail-section">
+                <h3>标签</h3>
+                <div id="detail-tags" class="chips"></div>
+              </section>
+              <section class="detail-section">
+                <h3>维护者示例</h3>
+                <div id="detail-examples" class="example-list"></div>
+              </section>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="governance-workspace" class="view" data-workspace="governance" hidden>
+        <header class="page-heading with-control">
+          <div>
+            <p class="eyebrow">维护者工作台</p>
+            <h1>定义、验证并安全发布</h1>
+            <p>只维护指标语义和发布版本；连接凭据与数据权限仍由运行环境和数据引擎管理。</p>
+          </div>
+          <label for="governance-route">维护对象
+            <select id="governance-route"></select>
+          </label>
+        </header>
+
+        <div class="status-grid">
+          <article><span>当前线上版本</span><strong id="active-release-value">—</strong><small id="active-release-meta">尚未读取</small></article>
+          <article><span>草稿版本</span><strong id="draft-revision-value">—</strong><small id="draft-updated-meta">尚未读取</small></article>
+          <article><span>数据源绑定</span><strong id="binding-status-value">—</strong><small id="binding-status-meta">尚未检查</small></article>
+        </div>
+
+        <div class="governance-layout">
+          <section class="panel editor-panel">
+            <div class="panel-heading">
+              <div><p class="step">01 · 维护指标</p><h2>指标定义</h2></div>
+              <button id="new-metric-button" class="button secondary" type="button">新增基础指标</button>
+            </div>
+            <label for="metric-select">选择草稿中的指标
+              <select id="metric-select"></select>
+            </label>
+
+            <form id="metric-form">
+              <div id="editor-mode-note" class="inline-note"></div>
+              <div class="form-grid two">
+                <label>指标 code<input id="metric-code" required pattern="[a-z][a-z0-9_]*"></label>
+                <label>展示名称<input id="metric-display-name" required></label>
+              </div>
+              <label>业务定义<textarea id="metric-description" class="plain-textarea" rows="3" required></textarea></label>
+              <div class="form-grid three">
+                <label>负责人<input id="metric-owner" required></label>
+                <label>单位<input id="metric-unit"></label>
+                <label>标签<input id="metric-tags" placeholder="多个标签用逗号分隔"></label>
+              </div>
+              <label>常见使用示例<textarea id="metric-examples" class="plain-textarea" rows="2" placeholder="每行一个问题，最多 5 条；例如：按渠道查看上月付费订单数"></textarea></label>
+
+              <fieldset class="form-section">
+                <legend>计算口径</legend>
+                <div class="form-grid four">
+                  <label>业务实体<select id="metric-entity"></select></label>
+                  <label>聚合方式<select id="metric-operation"><option value="sum">求和</option><option value="count">计数</option><option value="count_distinct">去重计数</option><option value="avg">平均值</option><option value="min">最小值</option><option value="max">最大值</option></select></label>
+                  <label>计算字段<select id="metric-field"></select></label>
+                  <label>结果类型<select id="metric-value-type"><option value="integer">整数</option><option value="decimal">小数</option></select></label>
+                </div>
+                <p id="execution-lock-note" class="muted"></p>
+              </fieldset>
+
+              <fieldset class="form-section">
+                <legend>允许的分析方式</legend>
+                <div id="metric-dimension-options" class="chips"></div>
+                <label class="narrow-field">默认时间维度<select id="metric-time-dimension"></select></label>
+              </fieldset>
+
+              <fieldset class="form-section compact-section">
+                <legend>发布信息</legend>
+                <div class="form-grid two">
+                  <label>验证证据<input id="metric-evidence" placeholder="例如：与财务报表对账通过"></label>
+                  <label class="toggle"><input id="metric-verified" type="checkbox"><span>口径已经验证</span></label>
+                </div>
+                <label class="toggle"><input id="metric-deprecated" type="checkbox"><span>标记为已弃用</span></label>
+              </fieldset>
+
+              <button id="apply-metric-button" class="button primary" type="submit">应用到当前草稿</button>
+            </form>
+          </section>
+
+          <aside class="review-column">
+            <section class="panel">
+              <div class="panel-heading"><div><p class="step">02 · 发布前检查</p><h2>变更与影响</h2></div></div>
+              <div id="review-status" class="result-status">载入草稿后显示检查结果。</div>
+              <div id="change-list" class="change-list"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading"><div><p class="step">数据位置</p><h2>现有绑定</h2></div></div>
+              <div id="binding-summary" class="binding-summary">尚未读取。</div>
+            </section>
+          </aside>
+        </div>
+
+        <section class="panel release-panel">
+          <div class="panel-heading">
+            <div><p class="step">03 · 保存与发布</p><h2>版本管理</h2></div>
+            <label class="release-note-field">发布说明<input id="release-note" placeholder="说明本次为什么修改"></label>
+          </div>
+          <div class="action-row">
+            <button id="review-draft-button" class="button secondary" type="button">重新检查</button>
+            <button id="save-draft-button" class="button secondary" type="button">保存草稿</button>
+            <button id="publish-button" class="button primary" type="button">发布新版本</button>
+          </div>
+          <div id="governance-status" class="result-status" hidden></div>
+          <div id="release-list" class="release-list"></div>
+        </section>
+      </section>
+
+      <section id="query-workspace" class="view" data-workspace="query" hidden>
+        <header class="page-heading">
+          <div>
+            <p class="eyebrow">开发者验证工具</p>
+            <h1>生成一条规范指标查询</h1>
+            <p>这里用于发布前后验证和复制 API 请求，不是报表或自由 SQL 工具。</p>
+          </div>
+        </header>
+
+        <div class="query-layout">
+          <section class="panel">
+            <div class="panel-heading"><div><p class="step">01 · 选择指标</p><h2>查询内容</h2></div></div>
+            <div id="query-metric-options" class="metric-options"></div>
+            <div id="query-examples" class="inline-note">选择指标后显示维护者提供的常见使用方式。</div>
+
+            <fieldset class="form-section">
+              <legend>分组维度</legend>
+              <div id="query-dimension-options" class="chips"><span class="muted">选择指标后显示可用维度。</span></div>
+            </fieldset>
+
+            <fieldset class="form-section">
+              <legend>时间范围</legend>
+              <div class="form-grid four">
+                <label>常用时间<select id="time-preset"><option value="none">不限制时间</option><option value="yesterday">昨日</option><option value="previous_week">上周</option><option value="previous_month">上月</option><option value="custom">自定义</option></select></label>
+                <label>时间粒度<select id="time-grain"><option value="">不分组</option><option value="day">按日</option><option value="week">按周</option><option value="month">按月</option></select></label>
+                <label>业务时区<input id="business-timezone" autocomplete="off"></label>
+                <label>最多返回<input id="row-limit" type="number" min="1" max="1000" value="100"></label>
+              </div>
+              <div id="custom-time-range" class="form-grid two" hidden>
+                <label>开始日期<input id="time-start" type="date"></label>
+                <label>结束日期（不含）<input id="time-end" type="date"></label>
+              </div>
+              <p id="resolved-time" class="muted"></p>
+            </fieldset>
+
+            <fieldset class="form-section">
+              <legend>筛选条件</legend>
+              <div class="filter-row">
+                <label>维度<select id="filter-dimension"></select></label>
+                <label>条件<select id="filter-operator"><option value="eq">等于</option><option value="in">属于其中</option></select></label>
+                <label class="grow">值<input id="filter-values" placeholder="多个值用英文逗号分隔"></label>
+                <button id="add-filter-button" class="button secondary" type="button">添加</button>
+              </div>
+              <div id="active-filters" class="chips"></div>
+            </fieldset>
+
+            <div class="action-row">
+              <button id="copy-query-button" class="button secondary" type="button">复制 API 请求</button>
+              <button id="run-query-button" class="button primary" type="button">运行查询</button>
+              <button id="cancel-job-button" class="button danger" type="button" disabled>取消</button>
+            </div>
+            <div id="query-status" class="result-status" hidden></div>
+          </section>
+
+          <aside class="panel request-panel">
+            <div class="panel-heading"><div><p class="step">02 · 规范请求</p><h2>SemanticQuery</h2></div></div>
+            <pre id="query-request-preview">选择指标后生成请求。</pre>
+            <details><summary>开发者检查</summary><div class="developer-actions"><button data-operation="explain" class="text-button" type="button">语义解释</button><button data-operation="plan" class="text-button" type="button">执行计划</button></div></details>
+          </aside>
+        </div>
+
+        <section id="result-panel" class="panel result-panel" hidden>
+          <div class="panel-heading"><div><p class="step">03 · 查询结果</p><h2>结果预览</h2></div><span id="result-meta" class="badge"></span></div>
+          <div class="table-wrap"><table id="result-table"></table></div>
+          <details class="raw-details"><summary>查看原始响应</summary><pre id="query-output"></pre></details>
+        </section>
+      </section>
+    </main>
+  </div>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

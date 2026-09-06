@@ -123,6 +123,24 @@ func TestJobManagerPropagatesOnlyRequestExecutionToken(t *testing.T) {
 	}
 }
 
+func TestJobManagerReportsTheResolvedTimeSemantics(t *testing.T) {
+	executor := resolvedTimeExecutor{}
+	manager, err := application.NewJobManager(context.Background(), executor, time.Second, 10, func() string { return "job_time" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	submitted, err := manager.Submit(context.Background(), trustedJobInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := awaitManagedJob(t, manager, "tenant", "alice", submitted.Job.ID)
+	if finished.ResolvedTimeRange == nil || finished.ResolvedTimeRange.Start != "2026-08-31T16:00:00Z" ||
+		finished.ResolvedTimeGrouping == nil || finished.ResolvedTimeGrouping.Timezone != "Asia/Shanghai" {
+		t.Fatalf("resolved time snapshot = %#v", finished)
+	}
+}
+
 type blockingExecutor struct {
 	started chan struct{}
 	input   application.QueryInput
@@ -135,6 +153,8 @@ type tokenExecutor struct {
 	unrelated any
 }
 
+type resolvedTimeExecutor struct{}
+
 type unrelatedJobKey struct{}
 
 func (problemExecutor) ExecuteActive(context.Context, application.QueryInput) (application.QueryOutput, error) {
@@ -146,6 +166,20 @@ func (executor *tokenExecutor) ExecuteActive(ctx context.Context, _ application.
 	executor.unrelated = ctx.Value(unrelatedJobKey{})
 	executor.observed <- token
 	return application.QueryOutput{}, nil
+}
+
+func (resolvedTimeExecutor) ExecuteActive(context.Context, application.QueryInput) (application.QueryOutput, error) {
+	return application.QueryOutput{
+		Logical: model.LogicalPlan{
+			TimeRange:    &model.TimeRange{Dimension: "order_date", Start: "2026-08-31T16:00:00Z", End: "2026-09-01T16:00:00Z"},
+			TimeGrouping: &model.TimeGrouping{Dimension: "order_date", Timezone: "Asia/Shanghai", Granularity: model.GrainDay},
+		},
+		Physical: model.PhysicalPlan{Limit: 100},
+		Execution: model.ExecutionSnapshot{
+			Job:    model.ExecutionJob{Status: model.JobSucceeded},
+			Result: &model.TypedResult{},
+		},
+	}, nil
 }
 
 func (executor *blockingExecutor) ExecuteActive(ctx context.Context, input application.QueryInput) (application.QueryOutput, error) {

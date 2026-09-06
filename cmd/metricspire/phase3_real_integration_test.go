@@ -121,7 +121,8 @@ func TestPhase3RealHTTPAcceptance(t *testing.T) {
 		Authenticator: httpapi.AuthenticatorFunc(func(context.Context, *http.Request) (httpapi.Principal, error) {
 			return principal, nil
 		}),
-		Readiness: store, Management: management, Catalog: store, CatalogSearch: catalogSearch, Queries: queries, Jobs: jobs,
+		Readiness: store, Management: management, Catalog: store, CatalogSearch: catalogSearch,
+		Bindings: bindingResolver, Queries: queries, Jobs: jobs,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +141,7 @@ func TestPhase3RealHTTPAcceptance(t *testing.T) {
 	}
 
 	modelPath := fmt.Sprintf("/api/v1/namespaces/%s/models/%s", namespace, modelName)
+	queryPath := fmt.Sprintf("/api/v1/namespaces/%s", namespace)
 	var draft catalog.Draft
 	phase3HTTPJSON(t, server.Client(), http.MethodPut, server.URL+modelPath+"/draft",
 		httpapi.SaveDraftRequest{ExpectedRevision: 0, Source: source}, http.StatusOK, &draft)
@@ -156,12 +158,12 @@ func TestPhase3RealHTTPAcceptance(t *testing.T) {
 	}
 
 	var plan application.PlanOutput
-	phase3HTTPJSON(t, server.Client(), http.MethodPost, server.URL+modelPath+"/plan", query, http.StatusOK, &plan)
+	phase3HTTPJSON(t, server.Client(), http.MethodPost, server.URL+queryPath+"/plan", query, http.StatusOK, &plan)
 	if plan.Release.ID != release.ID || plan.Physical.Fingerprint == "" {
 		t.Fatalf("HTTP plan = %#v", plan)
 	}
 	var submitted application.QueryJobSnapshot
-	phase3HTTPJSON(t, server.Client(), http.MethodPost, server.URL+modelPath+"/query", query, http.StatusAccepted, &submitted)
+	phase3HTTPJSON(t, server.Client(), http.MethodPost, server.URL+queryPath+"/query", query, http.StatusAccepted, &submitted)
 	finished := awaitPhase3HTTPJob(t, ctx, server.Client(), server.URL, submitted.Job.ID)
 	if finished.Job.Status != model.JobSucceeded || finished.ReleaseID != release.ID {
 		t.Fatalf("HTTP query job = %#v", finished)
@@ -208,7 +210,7 @@ FROM metricspire_query_audit
 	}
 
 	var afterRollback application.QueryJobSnapshot
-	phase3HTTPJSON(t, server.Client(), http.MethodPost, server.URL+modelPath+"/query", query, http.StatusAccepted, &afterRollback)
+	phase3HTTPJSON(t, server.Client(), http.MethodPost, server.URL+queryPath+"/query", query, http.StatusAccepted, &afterRollback)
 	rolledBackResult := awaitPhase3HTTPJob(t, ctx, server.Client(), server.URL, afterRollback.Job.ID)
 	if rolledBackResult.Job.Status != model.JobSucceeded || rolledBackResult.ReleaseID != release.ID {
 		t.Fatalf("HTTP query after rollback = %#v", rolledBackResult)

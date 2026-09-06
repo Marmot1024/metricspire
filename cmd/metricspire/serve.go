@@ -141,11 +141,12 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	handler, err := httpapi.NewServer(httpapi.Config{
 		MaxBodyBytes: config.HTTP.MaxBodyBytes, ControlTimeout: controlTimeout,
 		QueryTimeout: queryTimeout, AllowedOrigin: config.HTTP.PublicURL,
+		AuthenticationProfile: config.Authentication.Provider, UIModels: configuredUIModels(config.Bindings),
 	}, httpapi.Dependencies{
 		Authenticator: authenticator, AuthEndpoints: authEndpoints,
 		Readiness:  store,
 		Management: management, Catalog: store, CatalogSearch: catalogSearch,
-		Queries: queries, Jobs: jobs, ExecutionCredential: executionCredential,
+		Bindings: bindingResolver, Queries: queries, Jobs: jobs, ExecutionCredential: executionCredential,
 	}, logger)
 	if err != nil {
 		return err
@@ -184,6 +185,20 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		}
 		return writeServeStatus(stdout, "stopped", listener.Addr().String(), config.HTTP.PublicURL)
 	}
+}
+
+func configuredUIModels(routes []runtimeconfig.BindingRoute) []httpapi.UIModelRoute {
+	models := make([]httpapi.UIModelRoute, 0, len(routes))
+	seen := make(map[string]struct{}, len(routes))
+	for _, route := range routes {
+		key := route.Namespace + "\x00" + route.ModelName
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		models = append(models, httpapi.UIModelRoute{Namespace: route.Namespace, ModelName: route.ModelName})
+	}
+	return models
 }
 
 func buildServeAuthentication(ctx context.Context, config runtimeconfig.Config, environment serveEnvironment, getenv func(string) string) (httpapi.Authenticator, http.Handler, httpapi.ExecutionCredentialProvider, error) {

@@ -72,11 +72,36 @@ func TestTimePointsNormalizeToUTCWhileBusinessTimezoneIsPreserved(t *testing.T) 
 	}
 }
 
+func TestTimeRangePreservesExplicitBusinessTimezone(t *testing.T) {
+	t.Parallel()
+	values := loadFixture(t)
+	values.query.TimeRange.Timezone = "Asia/Shanghai"
+	logical, err := planner.BuildLogical(values.manifest, values.bundle, values.context, values.query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logical.TimeRange.Timezone != "Asia/Shanghai" {
+		t.Fatalf("time range timezone = %q", logical.TimeRange.Timezone)
+	}
+}
+
 func TestPlannerRejectsMissingTimezoneCapabilityAndBinding(t *testing.T) {
 	t.Parallel()
 	t.Run("timezone", func(t *testing.T) {
 		values := loadFixture(t)
 		values.query.TimeGrouping.Timezone = ""
+		_, err := planner.BuildLogical(values.manifest, values.bundle, values.context, values.query)
+		assertProblem(t, err, "invalid_time")
+	})
+	t.Run("invalid range timezone", func(t *testing.T) {
+		values := loadFixture(t)
+		values.query.TimeRange.Timezone = "not/a-timezone"
+		_, err := planner.BuildLogical(values.manifest, values.bundle, values.context, values.query)
+		assertProblem(t, err, "invalid_time")
+	})
+	t.Run("conflicting range and grouping timezones", func(t *testing.T) {
+		values := loadFixture(t)
+		values.query.TimeRange.Timezone = "America/Los_Angeles"
 		_, err := planner.BuildLogical(values.manifest, values.bundle, values.context, values.query)
 		assertProblem(t, err, "invalid_time")
 	})

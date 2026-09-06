@@ -108,6 +108,14 @@ func TestDerivedMetricCannotWidenDependencyDimensions(t *testing.T) {
 	assertProblem(t, err, "invalid_metric")
 }
 
+func TestCompileLimitsCuratedUsageExamples(t *testing.T) {
+	t.Parallel()
+	source := loadSource(t)
+	source.Spec.Metrics[0].UsageExamples = []string{"one", "two", "three", "four", "five", "six"}
+	_, err := compiler.Compile(source)
+	assertProblem(t, err, "invalid_metric")
+}
+
 func TestCompileRejectsDeclaredValueTypeThatDiffersFromExpression(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -149,7 +149,7 @@ func (authenticator *Authenticator) Authenticate(ctx context.Context, request *h
 		return httpapi.Principal{}, rejected("forwarded_identity")
 	}
 	principal := httpapi.Principal{
-		Tenant: authenticator.tenant, Subject: current.ID,
+		Tenant: authenticator.tenant, Subject: current.ID, DisplayName: current.Username,
 		Roles: []string{authenticator.queryRole}, Permissions: []httpapi.Permission{httpapi.PermissionQuery},
 	}
 	for _, group := range current.Groups {

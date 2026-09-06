@@ -181,29 +181,41 @@ func (s *Service) Rollback(ctx context.Context, namespace, name, releaseID, acto
 }
 
 func validatePublishable(manifest model.SemanticManifest) error {
+	issues := PublicationIssues(manifest)
+	if len(issues) > 0 {
+		return fmt.Errorf("%w: %s", ErrNotPublishable, issues[0])
+	}
+	return nil
+}
+
+// PublicationIssues returns every missing governance field so a review UI can
+// explain the full correction set before the authoritative publish attempt.
+func PublicationIssues(manifest model.SemanticManifest) []string {
+	issues := make([]string, 0)
 	for _, metric := range manifest.Definitions.Metrics {
 		if metric.Verification.Status != model.VerificationVerified {
-			return fmt.Errorf("%w: metric %q is not verified", ErrNotPublishable, metric.Name)
+			issues = append(issues, fmt.Sprintf("metric %q is not verified", metric.Name))
 		}
 		if strings.TrimSpace(metric.DisplayName) == "" {
-			return fmt.Errorf("%w: metric %q has no display name", ErrNotPublishable, metric.Name)
+			issues = append(issues, fmt.Sprintf("metric %q has no display name", metric.Name))
 		}
 		if strings.TrimSpace(metric.Description) == "" {
-			return fmt.Errorf("%w: metric %q has no business definition", ErrNotPublishable, metric.Name)
+			issues = append(issues, fmt.Sprintf("metric %q has no business definition", metric.Name))
 		}
 		if strings.TrimSpace(metric.Owner) == "" {
-			return fmt.Errorf("%w: metric %q has no owner", ErrNotPublishable, metric.Name)
+			issues = append(issues, fmt.Sprintf("metric %q has no owner", metric.Name))
 		}
 		if len(metric.Verification.Evidence) == 0 {
-			return fmt.Errorf("%w: metric %q has no verification evidence", ErrNotPublishable, metric.Name)
+			issues = append(issues, fmt.Sprintf("metric %q has no verification evidence", metric.Name))
 		}
 		for _, evidence := range metric.Verification.Evidence {
 			if strings.TrimSpace(evidence) == "" {
-				return fmt.Errorf("%w: metric %q has empty verification evidence", ErrNotPublishable, metric.Name)
+				issues = append(issues, fmt.Sprintf("metric %q has empty verification evidence", metric.Name))
+				break
 			}
 		}
 	}
-	return nil
+	return issues
 }
 
 // validateCompatibleRelease keeps a published metric code stable. Descriptive

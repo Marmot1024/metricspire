@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/marmot1024/metricspire/internal/contractio"
+	"github.com/marmot1024/metricspire/internal/httpapi"
 	"github.com/marmot1024/metricspire/internal/runtimeconfig"
 )
 
@@ -154,6 +155,27 @@ func TestDatabricksAppsRuntimeExampleLoadsFailClosedProfile(t *testing.T) {
 	if config.Authentication.Provider != runtimeconfig.AuthenticationDatabricksApps || apps == nil ||
 		apps.ExpectedAppName == "" || apps.ExpectedWorkspaceID == "" || apps.QueryRole != "analyst" || apps.PublisherGroupID == "" {
 		t.Fatalf("Databricks Apps runtime example = %#v", config.Authentication)
+	}
+}
+
+func TestConfiguredUIModelsKeepsRouteOrderAndRemovesDuplicates(t *testing.T) {
+	routes := []runtimeconfig.BindingRoute{
+		{Namespace: "acceptance", ModelName: "tpch_orders"},
+		{Namespace: "demo", ModelName: "commerce"},
+		{Namespace: "acceptance", ModelName: "tpch_orders"},
+	}
+	want := []httpapi.UIModelRoute{
+		{Namespace: "acceptance", ModelName: "tpch_orders"},
+		{Namespace: "demo", ModelName: "commerce"},
+	}
+	got := configuredUIModels(routes)
+	if len(got) != len(want) {
+		t.Fatalf("configuredUIModels() = %#v", got)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("configuredUIModels()[%d] = %#v, want %#v", index, got[index], want[index])
+		}
 	}
 }
 

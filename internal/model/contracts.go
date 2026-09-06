@@ -116,6 +116,7 @@ type Metric struct {
 	Description       string       `json:"description,omitempty" yaml:"description,omitempty"`
 	Owner             string       `json:"owner,omitempty" yaml:"owner,omitempty"`
 	Tags              []string     `json:"tags,omitempty" yaml:"tags,omitempty"`
+	UsageExamples     []string     `json:"usage_examples,omitempty" yaml:"usage_examples,omitempty"`
 	Deprecated        bool         `json:"deprecated,omitempty" yaml:"deprecated,omitempty"`
 	Entity            string       `json:"entity" yaml:"entity"`
 	Kind              MetricKind   `json:"kind" yaml:"kind"`
@@ -288,6 +289,7 @@ type TimeRange struct {
 	Dimension string `json:"dimension" yaml:"dimension"`
 	Start     string `json:"start" yaml:"start"`
 	End       string `json:"end" yaml:"end"`
+	Timezone  string `json:"timezone,omitempty" yaml:"timezone,omitempty"`
 }
 
 type TimeGrouping struct {

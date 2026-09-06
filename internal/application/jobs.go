@@ -26,10 +26,12 @@ type ActiveQueryExecutor interface {
 }
 
 type QueryJobSnapshot struct {
-	Job                 model.ExecutionJob `json:"job"`
-	ReleaseID           string             `json:"release_id,omitempty"`
-	ManifestFingerprint string             `json:"manifest_fingerprint,omitempty"`
-	Result              *model.TypedResult `json:"result,omitempty"`
+	Job                  model.ExecutionJob  `json:"job"`
+	ReleaseID            string              `json:"release_id,omitempty"`
+	ManifestFingerprint  string              `json:"manifest_fingerprint,omitempty"`
+	ResolvedTimeRange    *model.TimeRange    `json:"resolved_time_range,omitempty"`
+	ResolvedTimeGrouping *model.TimeGrouping `json:"resolved_time_grouping,omitempty"`
+	Result               *model.TypedResult  `json:"result,omitempty"`
 }
 
 type JobManager struct {
@@ -189,6 +191,14 @@ func (manager *JobManager) run(ctx context.Context, id string, input QueryInput)
 	job.snapshot.Job.RowLimit = int64(output.Physical.Limit)
 	job.snapshot.ReleaseID = output.Release.ID
 	job.snapshot.ManifestFingerprint = output.Release.ManifestFingerprint
+	if output.Logical.TimeRange != nil {
+		value := *output.Logical.TimeRange
+		job.snapshot.ResolvedTimeRange = &value
+	}
+	if output.Logical.TimeGrouping != nil {
+		value := *output.Logical.TimeGrouping
+		job.snapshot.ResolvedTimeGrouping = &value
+	}
 	if err == nil {
 		job.snapshot.Job.Status = model.JobSucceeded
 		job.snapshot.Result = output.Execution.Result
@@ -264,6 +274,14 @@ func publicJobProblem(problem model.Problem) model.Problem {
 
 func cloneJob(value QueryJobSnapshot) QueryJobSnapshot {
 	result := value
+	if value.ResolvedTimeRange != nil {
+		timeRange := *value.ResolvedTimeRange
+		result.ResolvedTimeRange = &timeRange
+	}
+	if value.ResolvedTimeGrouping != nil {
+		grouping := *value.ResolvedTimeGrouping
+		result.ResolvedTimeGrouping = &grouping
+	}
 	if value.Job.Error != nil {
 		problem := *value.Job.Error
 		result.Job.Error = &problem

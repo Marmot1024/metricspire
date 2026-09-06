@@ -86,6 +86,7 @@ func TestPhase3DeployedAcceptance(t *testing.T) {
 	deployedRootAndLogin(t, client, baseURL, ingressToken, authProfile)
 
 	modelPath := fmt.Sprintf("/api/v1/namespaces/%s/models/%s", url.PathEscape(namespace), url.PathEscape(modelName))
+	queryPath := fmt.Sprintf("/api/v1/namespaces/%s", url.PathEscape(namespace))
 	catalogPath := "/api/v1/catalog/search?namespace=" + url.QueryEscape(namespace) + "&q=" + url.QueryEscape(source.Spec.Metrics[0].Name) + "&limit=10"
 	if authProfile == runtimeconfig.AuthenticationOIDC {
 		deployedHTTPJSON(t, client, http.MethodGet, baseURL+catalogPath, "", nil, http.StatusUnauthorized, nil)
@@ -110,11 +111,11 @@ func TestPhase3DeployedAcceptance(t *testing.T) {
 		t.Fatalf("deployed catalog entries = %#v", entries)
 	}
 	var plan application.PlanOutput
-	deployedHTTPJSON(t, client, http.MethodPost, baseURL+modelPath+"/plan", queryToken, query, http.StatusOK, &plan)
+	deployedHTTPJSON(t, client, http.MethodPost, baseURL+queryPath+"/plan", queryToken, query, http.StatusOK, &plan)
 	if plan.Release.ID != release.ID || plan.Physical.Fingerprint == "" {
 		t.Fatalf("deployed plan = %#v", plan)
 	}
-	firstJob := submitDeployedQuery(t, client, baseURL, modelPath, queryToken, query)
+	firstJob := submitDeployedQuery(t, client, baseURL, queryPath, queryToken, query)
 	if firstJob.ReleaseID != release.ID {
 		t.Fatalf("deployed first job release = %s, want %s", firstJob.ReleaseID, release.ID)
 	}
@@ -136,7 +137,7 @@ func TestPhase3DeployedAcceptance(t *testing.T) {
 	if len(releases) != 2 || !releases[1].Active || releases[1].ID != secondRelease.ID {
 		t.Fatalf("deployed release summaries = %#v", releases)
 	}
-	secondJob := submitDeployedQuery(t, client, baseURL, modelPath, queryToken, query)
+	secondJob := submitDeployedQuery(t, client, baseURL, queryPath, queryToken, query)
 	if secondJob.ReleaseID != secondRelease.ID {
 		t.Fatalf("deployed second job release = %s, want %s", secondJob.ReleaseID, secondRelease.ID)
 	}
@@ -147,7 +148,7 @@ func TestPhase3DeployedAcceptance(t *testing.T) {
 	if rolledBack.ID != release.ID {
 		t.Fatalf("deployed rollback release = %#v", rolledBack)
 	}
-	rolledBackJob := submitDeployedQuery(t, client, baseURL, modelPath, queryToken, query)
+	rolledBackJob := submitDeployedQuery(t, client, baseURL, queryPath, queryToken, query)
 	if rolledBackJob.ReleaseID != release.ID {
 		t.Fatalf("deployed rollback job release = %s, want %s", rolledBackJob.ReleaseID, release.ID)
 	}
@@ -207,6 +208,7 @@ func TestPhase3DeployedIdentityAcceptance(t *testing.T) {
 	deployedRootAndLogin(t, client, baseURL, token, runtimeconfig.AuthenticationDatabricksApps)
 
 	modelPath := fmt.Sprintf("/api/v1/namespaces/%s/models/%s", url.PathEscape(namespace), url.PathEscape(modelName))
+	queryPath := fmt.Sprintf("/api/v1/namespaces/%s", url.PathEscape(namespace))
 	catalogPath := "/api/v1/catalog/search?namespace=" + url.QueryEscape(namespace) + "&q=" + url.QueryEscape(source.Spec.Metrics[0].Name) + "&limit=10"
 	deployedHTTPJSON(t, client, http.MethodGet, baseURL+modelPath+"/draft", token, nil, http.StatusForbidden, nil)
 	deployedHTTPJSON(t, client, http.MethodPost, baseURL+modelPath+"/publish", token,
@@ -220,13 +222,13 @@ func TestPhase3DeployedIdentityAcceptance(t *testing.T) {
 		t.Fatalf("deployed identity catalog entries = %#v", entries)
 	}
 	var plan application.PlanOutput
-	deployedHTTPJSON(t, client, http.MethodPost, baseURL+modelPath+"/plan", token, query, http.StatusOK, &plan)
+	deployedHTTPJSON(t, client, http.MethodPost, baseURL+queryPath+"/plan", token, query, http.StatusOK, &plan)
 	if plan.Release.ID != entries[0].ReleaseID || plan.Physical.Fingerprint == "" {
 		t.Fatalf("deployed identity plan = %#v", plan)
 	}
 
 	if expectation == "query-only" {
-		finished := submitDeployedQuery(t, client, baseURL, modelPath, token, query)
+		finished := submitDeployedQuery(t, client, baseURL, queryPath, token, query)
 		if finished.ReleaseID != plan.Release.ID {
 			t.Fatalf("deployed identity query release = %s, want %s", finished.ReleaseID, plan.Release.ID)
 		}
@@ -234,7 +236,7 @@ func TestPhase3DeployedIdentityAcceptance(t *testing.T) {
 		return
 	}
 
-	finished := awaitDeployedQuery(t, client, baseURL, modelPath, token, query)
+	finished := awaitDeployedQuery(t, client, baseURL, queryPath, token, query)
 	if err := validateDeployedUnityCatalogDenial(finished, token); err != nil {
 		t.Fatal(err)
 	}
@@ -453,19 +455,19 @@ func assertDeployedSecurityHeaders(t *testing.T, response *http.Response) {
 	}
 }
 
-func submitDeployedQuery(t *testing.T, client *http.Client, baseURL, modelPath, token string, query model.SemanticQuery) application.QueryJobSnapshot {
+func submitDeployedQuery(t *testing.T, client *http.Client, baseURL, queryPath, token string, query model.SemanticQuery) application.QueryJobSnapshot {
 	t.Helper()
-	snapshot := awaitDeployedQuery(t, client, baseURL, modelPath, token, query)
+	snapshot := awaitDeployedQuery(t, client, baseURL, queryPath, token, query)
 	if snapshot.Job.Status != model.JobSucceeded {
 		t.Fatalf("deployed query job = %#v", snapshot)
 	}
 	return snapshot
 }
 
-func awaitDeployedQuery(t *testing.T, client *http.Client, baseURL, modelPath, token string, query model.SemanticQuery) application.QueryJobSnapshot {
+func awaitDeployedQuery(t *testing.T, client *http.Client, baseURL, queryPath, token string, query model.SemanticQuery) application.QueryJobSnapshot {
 	t.Helper()
 	var submitted application.QueryJobSnapshot
-	deployedHTTPJSON(t, client, http.MethodPost, baseURL+modelPath+"/query", token, query, http.StatusAccepted, &submitted)
+	deployedHTTPJSON(t, client, http.MethodPost, baseURL+queryPath+"/query", token, query, http.StatusAccepted, &submitted)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	for {

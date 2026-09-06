@@ -444,6 +444,12 @@ func normalizeTimeSemantics(index manifestIndex, query *model.SemanticQuery, roo
 	if !start.Before(end) {
 		return problem("invalid_time", "time_range", "start must be before exclusive end")
 	}
+	rangeValue.Timezone = strings.TrimSpace(rangeValue.Timezone)
+	if rangeValue.Timezone != "" {
+		if _, err := time.LoadLocation(rangeValue.Timezone); err != nil {
+			return problem("invalid_time", "time_range.timezone", "%q is not a valid IANA timezone", rangeValue.Timezone)
+		}
+	}
 	for _, metricName := range query.Metrics {
 		if value := index.metrics[metricName].TimeDimension; value != "" && value != rangeValue.Dimension {
 			return problem("invalid_time", "time_range.dimension", "metric %q uses time dimension %q", metricName, value)
@@ -454,6 +460,9 @@ func normalizeTimeSemantics(index manifestIndex, query *model.SemanticQuery, roo
 	query.TimeRange = &rangeValue
 	if query.TimeGrouping != nil && query.TimeGrouping.Dimension != rangeValue.Dimension {
 		return problem("invalid_time", "time_grouping.dimension", "must match time_range.dimension")
+	}
+	if query.TimeGrouping != nil && rangeValue.Timezone != "" && query.TimeGrouping.Timezone != rangeValue.Timezone {
+		return problem("invalid_time", "time_grouping.timezone", "must match time_range.timezone")
 	}
 	return validateTimeGrouping(index, query)
 }

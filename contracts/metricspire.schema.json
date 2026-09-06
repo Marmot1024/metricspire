@@ -168,6 +168,7 @@
         "description": {"type": "string"},
         "owner": {"type": "string"},
         "tags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "usage_examples": {"type": "array", "maxItems": 5, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
         "deprecated": {"type": "boolean"},
         "entity": {"$ref": "#/$defs/Name"},
         "kind": {"enum": ["aggregate", "ratio", "derived"]},
@@ -332,7 +333,8 @@
       "properties": {
         "dimension": {"$ref": "#/$defs/Name"},
         "start": {"type": "string", "format": "date-time"},
-        "end": {"type": "string", "format": "date-time"}
+        "end": {"type": "string", "format": "date-time"},
+        "timezone": {"type": "string", "minLength": 1}
       }
     },
     "TimeGrouping": {

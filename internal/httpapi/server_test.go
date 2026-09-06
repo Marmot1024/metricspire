@@ -95,6 +95,26 @@ func TestHTTPExplainPlanAndQueryUseTrustedServerInputs(t *testing.T) {
 	}
 }
 
+func TestHTTPMetricFirstQueryResolvesTheInternalModel(t *testing.T) {
+	handler, engine, observed := newTestServer(t, httpapi.Config{RequestID: func() string { return "req_metric_first" }})
+	query := readQuery(t)
+	path := httpapi.APIPrefix + "/namespaces/demo/query"
+	response := performJSON(handler, http.MethodPost, path, "query", query)
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("metric-first query status = %d, body = %s", response.StatusCode, readBody(t, response))
+	}
+	var submitted application.QueryJobSnapshot
+	decodeResponse(t, response, &submitted)
+	finished := awaitJob(t, handler, submitted.Job.ID, "query")
+	if finished.Job.Status != model.JobSucceeded || engine.executionCount() != 1 || observed.lastScope.ModelName != "commerce" {
+		t.Fatalf("metric-first result = %#v, scope = %#v", finished, observed.lastScope)
+	}
+
+	query.Metrics = []string{"does_not_exist"}
+	response = performJSON(handler, http.MethodPost, path, "query", query)
+	assertProblem(t, response, http.StatusUnprocessableEntity, "metric_route_not_found")
+}
+
 func TestHTTPAddsExecutionCredentialOnlyToQuery(t *testing.T) {
 	engine := &fakeEngine{}
 	credentialCalls := 0
@@ -295,6 +315,35 @@ func TestHTTPManagementUsesAuthenticatedActorAndReturnsReleaseSummaries(t *testi
 	}
 }
 
+func TestHTTPGovernanceReviewIsReadOnlyAndManagerOnly(t *testing.T) {
+	handler, _, observed := newTestServer(t, httpapi.Config{RequestID: func() string { return "req_review" }})
+	source := readSource(t)
+
+	response := performJSON(handler, http.MethodPost, modelPath("review"), "query", httpapi.ReviewRequest{Source: source})
+	assertProblem(t, response, http.StatusForbidden, "permission_denied")
+
+	response = performJSON(handler, http.MethodPost, modelPath("review"), "manage", httpapi.ReviewRequest{Source: source})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("review status = %d, body = %s", response.StatusCode, readBody(t, response))
+	}
+	var review application.GovernanceReview
+	decodeResponse(t, response, &review)
+	if review.ActiveRelease == nil || review.ActiveRelease.ID == "" || review.Binding.Status != application.BindingReady ||
+		len(review.MetricChanges) != 0 || observed.bindingCalls != 1 {
+		t.Fatalf("review = %#v, binding calls = %d", review, observed.bindingCalls)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, modelPath("draft"), nil)
+	request.Header.Set("Authorization", "Bearer manage")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	var draft catalog.Draft
+	decodeResponse(t, recorder.Result(), &draft)
+	if draft.Revision != 1 {
+		t.Fatalf("review changed draft revision to %d", draft.Revision)
+	}
+}
+
 func TestHTTPBodyLimitContentTypeMethodAndNotFoundUseProblems(t *testing.T) {
 	handler, _, _ := newTestServer(t, httpapi.Config{MaxBodyBytes: 32, RequestID: func() string { return "req_limits" }})
 
@@ -343,7 +392,11 @@ func TestHTTPRejectsCrossOriginStateChange(t *testing.T) {
 }
 
 func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
-	handler, _, _ := newTestServer(t, httpapi.Config{RequestID: func() string { return "req_ui" }})
+	handler, _, _ := newTestServer(t, httpapi.Config{
+		AuthenticationProfile: "databricks_apps",
+		UIModels:              []httpapi.UIModelRoute{{Namespace: "demo", ModelName: "commerce"}},
+		RequestID:             func() string { return "req_ui" },
+	})
 
 	request := httptest.NewRequest(http.MethodGet, httpapi.APIPrefix+"/catalog/search?namespace=demo&q=refund", nil)
 	request.Header.Set("Authorization", "Bearer query")
@@ -362,7 +415,7 @@ func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(data, []byte("resource")) || bytes.Contains(data, []byte("expression")) {
+	if bytes.Contains(data, []byte("resource")) || bytes.Contains(data, []byte("expression")) || bytes.Contains(data, []byte("model_name")) {
 		t.Fatalf("catalog response leaked execution details: %s", data)
 	}
 
@@ -374,8 +427,9 @@ func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
 		t.Fatalf("UI response = %d %#v", response.StatusCode, response.Header)
 	}
 	body := readRawBody(t, response)
-	if !strings.Contains(body, "指标目录与受治理查询") || !strings.Contains(body, "/assets/app.js") ||
-		!strings.Contains(body, "cancel-job-button") || !strings.Contains(body, "data-management=\"rollback\"") {
+	if !strings.Contains(body, "找到正确指标，再开始开发") || !strings.Contains(body, "/assets/app.js") ||
+		!strings.Contains(body, "run-query-button") || !strings.Contains(body, "governance-tab") ||
+		!strings.Contains(body, "定义、验证并安全发布") {
 		t.Fatalf("UI body = %q", body)
 	}
 
@@ -384,10 +438,63 @@ func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 	response = recorder.Result()
 	script := readRawBody(t, response)
-	if response.StatusCode != http.StatusOK || !strings.Contains(script, "/api/v1/catalog/search") ||
-		!strings.Contains(script, "operation === \"load\"") || !strings.Contains(script, "operation === \"rollback\"") ||
-		!strings.Contains(script, "/cancel") {
+	if response.StatusCode != http.StatusOK || !strings.Contains(script, "/api/v1/ui/context") ||
+		!strings.Contains(script, "/api/v1/catalog/search") || !strings.Contains(script, "reviewGovernance") ||
+		!strings.Contains(script, "rollbackRelease") || !strings.Contains(script, "/cancel") ||
+		!strings.Contains(script, "result-table") || !strings.Contains(script, "previous_month") {
 		t.Fatal("UI JavaScript does not call the product API")
+	}
+}
+
+func TestHTTPUIContextUsesAuthenticatedIdentityAndConfiguredModels(t *testing.T) {
+	handler, _, _ := newTestServer(t, httpapi.Config{
+		AuthenticationProfile: "databricks_apps",
+		UIModels: []httpapi.UIModelRoute{
+			{Namespace: "acceptance", ModelName: "tpch_orders"},
+			{Namespace: "demo", ModelName: "commerce"},
+		},
+		RequestID: func() string { return "req_ui_context" },
+	})
+
+	request := httptest.NewRequest(http.MethodGet, httpapi.APIPrefix+"/ui/context", nil)
+	request.Header.Set("Authorization", "Bearer query")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	response := recorder.Result()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("context status = %d, body = %s", response.StatusCode, readBody(t, response))
+	}
+	var context httpapi.UIContext
+	decodeResponse(t, response, &context)
+	if context.AuthenticationProfile != "databricks_apps" || context.DisplayName != "Analyst" ||
+		len(context.Permissions) != 1 || context.Permissions[0] != httpapi.PermissionQuery ||
+		len(context.Namespaces) != 2 || context.Namespaces[0] != "acceptance" || len(context.Models) != 0 {
+		t.Fatalf("UI context = %#v", context)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, httpapi.APIPrefix+"/ui/context", nil)
+	request.Header.Set("Authorization", "Bearer manage")
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	response = recorder.Result()
+	decodeResponse(t, response, &context)
+	if len(context.Models) != 2 || context.Models[0].ModelName != "tpch_orders" {
+		t.Fatalf("manager UI context = %#v", context)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, httpapi.APIPrefix+"/ui/context", nil)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	assertProblem(t, recorder.Result(), http.StatusUnauthorized, "unauthenticated")
+
+	request = httptest.NewRequest(http.MethodPost, httpapi.APIPrefix+"/ui/context", nil)
+	request.Header.Set("Authorization", "Bearer query")
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	response = recorder.Result()
+	assertProblem(t, response, http.StatusMethodNotAllowed, "method_not_allowed")
+	if response.Header.Get("Allow") != http.MethodGet {
+		t.Fatalf("Allow = %q", response.Header.Get("Allow"))
 	}
 }
 
@@ -559,7 +666,7 @@ func newTestServerWithDependencies(t *testing.T, config httpapi.Config, engine *
 	authenticator := httpapi.AuthenticatorFunc(func(_ context.Context, request *http.Request) (httpapi.Principal, error) {
 		switch request.Header.Get("Authorization") {
 		case "Bearer query":
-			return httpapi.Principal{Tenant: "demo", Subject: "analyst@example.com", Roles: []string{"analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionQuery}}, nil
+			return httpapi.Principal{Tenant: "demo", Subject: "analyst@example.com", DisplayName: "Analyst", Roles: []string{"analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionQuery}}, nil
 		case "Bearer other-query":
 			return httpapi.Principal{Tenant: "demo", Subject: "other@example.com", Roles: []string{"analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionQuery}}, nil
 		case "Bearer manage":
@@ -573,7 +680,8 @@ func newTestServerWithDependencies(t *testing.T, config httpapi.Config, engine *
 	}
 	server, err := httpapi.NewServer(config, httpapi.Dependencies{
 		Authenticator: authenticator, Readiness: readiness,
-		Management: management, Catalog: repository, CatalogSearch: catalogSearch, Queries: queries, Jobs: jobs,
+		Management: management, Catalog: repository, CatalogSearch: catalogSearch,
+		Bindings: bindings, Queries: queries, Jobs: jobs,
 		ExecutionCredential: credential,
 	}, nil)
 	if err != nil {

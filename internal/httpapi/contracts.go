@@ -31,6 +31,7 @@ const (
 type Principal struct {
 	Tenant      string
 	Subject     string
+	DisplayName string
 	Roles       []string
 	Permissions []Permission
 }
@@ -76,6 +77,7 @@ type CatalogReader interface {
 
 type CatalogSearcher interface {
 	SearchActive(context.Context, application.QueryScope, string, int) ([]application.MetricCatalogEntry, error)
+	ResolveActiveModel(context.Context, application.QueryScope, []string) (string, error)
 }
 
 type QueryService interface {
@@ -110,17 +112,35 @@ type Dependencies struct {
 	Management          ManagementService
 	Catalog             CatalogReader
 	CatalogSearch       CatalogSearcher
+	Bindings            application.BindingResolver
 	Queries             QueryService
 	Jobs                JobService
 	ExecutionCredential ExecutionCredentialProvider
 }
 
 type Config struct {
-	MaxBodyBytes   int64
-	ControlTimeout time.Duration
-	QueryTimeout   time.Duration
-	AllowedOrigin  string
-	RequestID      func() string
+	MaxBodyBytes          int64
+	ControlTimeout        time.Duration
+	QueryTimeout          time.Duration
+	AllowedOrigin         string
+	AuthenticationProfile string
+	UIModels              []UIModelRoute
+	RequestID             func() string
+}
+
+// UIModelRoute is the small, non-secret route list required by the embedded
+// product UI. Physical bindings and policy contents are never exposed.
+type UIModelRoute struct {
+	Namespace string `json:"namespace"`
+	ModelName string `json:"model_name"`
+}
+
+type UIContext struct {
+	AuthenticationProfile string         `json:"authentication_profile"`
+	DisplayName           string         `json:"display_name"`
+	Permissions           []Permission   `json:"permissions"`
+	Namespaces            []string       `json:"namespaces"`
+	Models                []UIModelRoute `json:"models,omitempty"`
 }
 
 type Problem struct {
@@ -139,6 +159,10 @@ type SaveDraftRequest struct {
 }
 
 type ValidateRequest struct {
+	Source model.SemanticSource `json:"source"`
+}
+
+type ReviewRequest struct {
 	Source model.SemanticSource `json:"source"`
 }
 

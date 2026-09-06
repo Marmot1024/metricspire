@@ -38,8 +38,8 @@ type Server struct {
 }
 
 func NewServer(config Config, dependencies Dependencies, logger *slog.Logger) (*Server, error) {
-	if dependencies.Authenticator == nil || dependencies.Readiness == nil || dependencies.Management == nil || dependencies.Catalog == nil || dependencies.CatalogSearch == nil || dependencies.Queries == nil || dependencies.Jobs == nil {
-		return nil, errors.New("authenticator, readiness checker, management service, catalog reader, catalog searcher, query service, and job service are required")
+	if dependencies.Authenticator == nil || dependencies.Readiness == nil || dependencies.Management == nil || dependencies.Catalog == nil || dependencies.CatalogSearch == nil || dependencies.Bindings == nil || dependencies.Queries == nil || dependencies.Jobs == nil {
+		return nil, errors.New("authenticator, readiness checker, management service, catalog reader, catalog searcher, binding resolver, query service, and job service are required")
 	}
 	if config.MaxBodyBytes == 0 {
 		config.MaxBodyBytes = DefaultMaxBodyBytes
@@ -72,18 +72,62 @@ func (server *Server) routes() {
 	}
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/draft", server.handleDraft)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/validate", server.handleValidate)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/review", server.handleReview)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/publish", server.handlePublish)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/releases", server.handleReleases)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/rollback", server.handleRollback)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/explain", server.handleExplain)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/plan", server.handlePlan)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/query", server.handleQuery)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/explain", server.handleMetricExplain)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/plan", server.handleMetricPlan)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/query", server.handleMetricQuery)
 	server.mux.HandleFunc(APIPrefix+"/catalog/search", server.handleCatalogSearch)
+	server.mux.HandleFunc(APIPrefix+"/ui/context", server.handleUIContext)
 	server.mux.HandleFunc(APIPrefix+"/jobs/{job}", server.handleJob)
 	server.mux.HandleFunc(APIPrefix+"/jobs/{job}/cancel", server.handleJobCancel)
 	server.mux.HandleFunc("/assets/app.js", server.handleUIAsset)
 	server.mux.HandleFunc("/assets/app.css", server.handleUIAsset)
 	server.mux.HandleFunc("/", server.handleRoot)
+}
+
+func (server *Server) handleUIContext(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		server.methodNotAllowed(response, request, http.MethodGet)
+		return
+	}
+	principal, ok := server.authenticate(response, request)
+	if !ok {
+		return
+	}
+	displayName := strings.TrimSpace(principal.DisplayName)
+	if displayName == "" {
+		displayName = principal.Subject
+	}
+	models := []UIModelRoute(nil)
+	if principal.Has(PermissionManage) {
+		models = append(models, server.config.UIModels...)
+	}
+	_ = writeJSON(response, http.StatusOK, UIContext{
+		AuthenticationProfile: server.config.AuthenticationProfile,
+		DisplayName:           displayName,
+		Permissions:           append([]Permission(nil), principal.Permissions...),
+		Namespaces:            configuredUINamespaces(server.config.UIModels),
+		Models:                models,
+	})
+}
+
+func configuredUINamespaces(routes []UIModelRoute) []string {
+	result := make([]string, 0, len(routes))
+	seen := make(map[string]struct{}, len(routes))
+	for _, route := range routes {
+		if _, exists := seen[route.Namespace]; exists {
+			continue
+		}
+		seen[route.Namespace] = struct{}{}
+		result = append(result, route.Namespace)
+	}
+	return result
 }
 
 func (server *Server) handleLiveness(response http.ResponseWriter, request *http.Request) {
@@ -246,6 +290,58 @@ func (server *Server) handleValidate(response http.ResponseWriter, request *http
 	})
 }
 
+func (server *Server) handleReview(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		server.methodNotAllowed(response, request, http.MethodPost)
+		return
+	}
+	principal, ok := server.authorize(response, request, PermissionManage)
+	if !ok {
+		return
+	}
+	var body ReviewRequest
+	if !server.decodeJSON(response, request, &body) {
+		return
+	}
+	namespace, name := request.PathValue("namespace"), request.PathValue("model")
+	if body.Source.Metadata.Name != name {
+		server.writeProblem(response, request, http.StatusUnprocessableEntity, "model_name_mismatch", "Model name mismatch", "source.metadata.name must match the model path", "source.metadata.name")
+		return
+	}
+	server.withTimeout(response, request, server.config.ControlTimeout, func(ctx context.Context) error {
+		var active *catalog.Release
+		current, err := server.deps.Catalog.GetActiveRelease(ctx, namespace, name)
+		switch {
+		case err == nil:
+			active = &current
+		case !errors.Is(err, catalog.ErrNotFound):
+			return err
+		}
+		resolverRelease := catalog.Release{Namespace: namespace, Name: name}
+		if active != nil {
+			resolverRelease = *active
+		}
+		binding, err := server.deps.Bindings.ResolveBinding(ctx, application.QueryScope{
+			Namespace: namespace, ModelName: name,
+			Context: model.RequestContext{
+				Tenant: principal.Tenant, Principal: principal.Subject, Roles: principal.Roles, RequestID: requestID(request),
+			},
+		}, resolverRelease)
+		var bindingPointer *model.SourceBinding
+		switch {
+		case err == nil:
+			bindingPointer = &binding
+		case !errors.Is(err, application.ErrResolutionNotFound):
+			return err
+		}
+		review, err := application.ReviewGovernance(body.Source, active, bindingPointer)
+		if err != nil {
+			return err
+		}
+		return writeJSON(response, http.StatusOK, review)
+	})
+}
+
 func (server *Server) handlePublish(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		server.methodNotAllowed(response, request, http.MethodPost)
@@ -331,6 +427,50 @@ func (server *Server) handleQuery(response http.ResponseWriter, request *http.Re
 	server.handleQueryOperation(response, request, "query")
 }
 
+func (server *Server) handleMetricExplain(response http.ResponseWriter, request *http.Request) {
+	server.handleMetricQueryOperation(response, request, "explain")
+}
+
+func (server *Server) handleMetricPlan(response http.ResponseWriter, request *http.Request) {
+	server.handleMetricQueryOperation(response, request, "plan")
+}
+
+func (server *Server) handleMetricQuery(response http.ResponseWriter, request *http.Request) {
+	server.handleMetricQueryOperation(response, request, "query")
+}
+
+// handleMetricQueryOperation is the product-facing, metric-first query
+// boundary. It resolves the internal active model from the requested metric
+// codes. The older /models/{model} routes remain available for compatibility.
+func (server *Server) handleMetricQueryOperation(response http.ResponseWriter, request *http.Request, operation string) {
+	if request.Method != http.MethodPost {
+		server.methodNotAllowed(response, request, http.MethodPost)
+		return
+	}
+	principal, ok := server.authorize(response, request, PermissionQuery)
+	if !ok {
+		return
+	}
+	var query model.SemanticQuery
+	if !server.decodeJSON(response, request, &query) {
+		return
+	}
+	namespace := request.PathValue("namespace")
+	ctx, cancel := context.WithTimeout(request.Context(), server.config.ControlTimeout)
+	defer cancel()
+	modelName, err := server.deps.CatalogSearch.ResolveActiveModel(ctx, application.QueryScope{
+		Namespace: namespace,
+		Context: model.RequestContext{
+			Tenant: principal.Tenant, Principal: principal.Subject, Roles: principal.Roles, RequestID: requestID(request),
+		},
+	}, query.Metrics)
+	if err != nil {
+		server.handleError(response, request, err)
+		return
+	}
+	server.executeQueryOperation(response, request, operation, principal, namespace, modelName, query)
+}
+
 func (server *Server) handleQueryOperation(response http.ResponseWriter, request *http.Request, operation string) {
 	if request.Method != http.MethodPost {
 		server.methodNotAllowed(response, request, http.MethodPost)
@@ -344,9 +484,13 @@ func (server *Server) handleQueryOperation(response http.ResponseWriter, request
 	if !server.decodeJSON(response, request, &query) {
 		return
 	}
+	server.executeQueryOperation(response, request, operation, principal, request.PathValue("namespace"), request.PathValue("model"), query)
+}
+
+func (server *Server) executeQueryOperation(response http.ResponseWriter, request *http.Request, operation string, principal Principal, namespace, modelName string, query model.SemanticQuery) {
 	input := application.QueryInput{
 		QueryScope: application.QueryScope{
-			Namespace: request.PathValue("namespace"), ModelName: request.PathValue("model"),
+			Namespace: namespace, ModelName: modelName,
 			Context: model.RequestContext{Tenant: principal.Tenant, Principal: principal.Subject, Roles: principal.Roles, RequestID: requestID(request)},
 		},
 		Query: query,
@@ -421,6 +565,18 @@ func (server *Server) handleJobCancel(response http.ResponseWriter, request *htt
 }
 
 func (server *Server) authorize(response http.ResponseWriter, request *http.Request, permission Permission) (Principal, bool) {
+	principal, ok := server.authenticate(response, request)
+	if !ok {
+		return Principal{}, false
+	}
+	if !principal.Has(permission) {
+		server.writeProblem(response, request, http.StatusForbidden, "permission_denied", "Permission denied", "the authenticated principal lacks the required permission", "")
+		return Principal{}, false
+	}
+	return principal, true
+}
+
+func (server *Server) authenticate(response http.ResponseWriter, request *http.Request) (Principal, bool) {
 	principal, err := server.deps.Authenticator.Authenticate(request.Context(), request)
 	if err != nil {
 		var diagnostic interface{ SafeAuthenticationReason() string }
@@ -433,10 +589,6 @@ func (server *Server) authorize(response http.ResponseWriter, request *http.Requ
 	if strings.TrimSpace(principal.Tenant) == "" || strings.TrimSpace(principal.Subject) == "" {
 		server.logger.Error("authenticator returned incomplete principal", "request_id", requestID(request))
 		server.writeProblem(response, request, http.StatusInternalServerError, "authentication_failed", "Authentication failed", "authentication provider returned an incomplete principal", "")
-		return Principal{}, false
-	}
-	if !principal.Has(permission) {
-		server.writeProblem(response, request, http.StatusForbidden, "permission_denied", "Permission denied", "the authenticated principal lacks the required permission", "")
 		return Principal{}, false
 	}
 	return principal, true

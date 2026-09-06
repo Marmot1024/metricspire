@@ -22,6 +22,8 @@ METRICSPIRE_APPS_LAKEBASE_ENDPOINT='projects/replace/branches/production/endpoin
 
 The result is `dist/databricks-apps`. The source templates contain no workspace ID, database host, warehouse ID, group ID, token, or credential. `app.yaml` reads the SQL warehouse ID from an App resource named `metricspire-warehouse`; the first Lakebase Autoscaling resource supplies the standard `PG*` connection variables automatically.
 
+`dist/` is intentionally ignored by Git. Do not use `databricks sync` for this generated package because ignore rules can leave an older remote binary while still reporting a completed sync. Upload it with `databricks workspace import-dir dist/databricks-apps <workspace-source> --overwrite`, verify both remote gzip sizes against the local files, and only then deploy the App from that workspace source.
+
 Before deployment, the staging App must be reviewed with exactly these resources:
 
 - one Lakebase Autoscaling database resource named `metricspire-postgres`, permission `CAN_CONNECT_AND_CREATE`;
