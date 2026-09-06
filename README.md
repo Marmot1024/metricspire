@@ -4,7 +4,7 @@
 
 MetricSpire is an open-source semantic metrics layer and governed data API. It compiles reviewed metric definitions into immutable releases, authorizes structured queries, and executes bounded plans through replaceable analytical-engine adapters.
 
-> Current status: Phase 2 passed on 2026-09-02. Phase 3 is implemented: trusted HTTP/auth/policy/binding resolution, bounded asynchronous queries, audit, a metric-first public query API, and a maintainer-oriented catalog/governance UI. The Databricks Apps staging publisher and ordinary query-user paths passed, and the redesigned UI plus public query route passed deployment smoke checks. A controlled Unity Catalog denial and an external OIDC deployment are deferred release-hardening checks. Production has not been exercised, so this is not a production-ready release.
+> Development preview, not a production-ready release. This README describes product usage and stable boundaries, not the project's execution log.
 
 ## Version names
 
@@ -25,6 +25,7 @@ MetricSpire is an open-source semantic metrics layer and governed data API. It c
 - verifies generic OIDC issuer/signature/expiry claims, separates the browser client audience from the API JWT access-token audience, and supports Authorization Code + PKCE browser login with encrypted, HTTP-only sessions;
 - supports a fail-closed Databricks Apps identity profile in which authenticated users receive query access, one stable publisher-group ID additionally grants management, and the forwarded user token exists only in the in-memory engine-execution context;
 - serves a dependency-free product UI for indicator discovery, structured basic-indicator maintenance, binding and change-impact review, immutable publication/rollback, and developer query validation; every action calls the same HTTP API rather than duplicating application logic.
+- offers an MCP stdio bridge for AI clients, using that same authenticated HTTP API without duplicating catalog or execution logic.
 
 ## Core flow
 
@@ -103,15 +104,68 @@ Platforms that allocate a port at runtime can pass `--http-address 0.0.0.0:<port
 
 Run `metricspire migrate` explicitly before starting the service. `serve` never migrates PostgreSQL on startup and never creates analytical tables. The current Databricks adapter emits bounded, parameterized `SELECT` statements only.
 
-The repository also provides a multi-stage OCI [`Dockerfile`](Dockerfile). The runtime image is a static binary plus CA certificates and license notices, runs as numeric non-root user `65532`, and contains no shell or credentials. Its local Phase 3 build produced a 4.28 MB image and ran the version command with a read-only root filesystem, all Linux capabilities removed, and privilege escalation disabled. Mount a reviewed runtime configuration and its policy/binding files read-only under `/etc/metricspire`; inject secret environment variables through the deployment platform. Run `metricspire migrate` as a separate one-shot deployment step before starting replicas. A successful local build is packaging evidence, not deployed-service acceptance.
+The repository also provides a multi-stage OCI [`Dockerfile`](Dockerfile). The runtime image is a static binary plus CA certificates and license notices, runs as numeric non-root user `65532`, and contains no shell or credentials. Mount a reviewed runtime configuration and its policy/binding files read-only under `/etc/metricspire`; inject secret environment variables through the deployment platform. Run `metricspire migrate` as a separate one-shot deployment step before starting replicas. A successful local build is packaging evidence, not deployed-service acceptance.
 
 Unauthenticated `GET /health/live` reports process liveness. `GET /health/ready` pings only the PostgreSQL control plane and returns a generic `503 not_ready` without connection details when unavailable; it never queries Databricks. These endpoints are intended for platform probes, not as acceptance evidence.
+
+## MCP client connection
+
+Build the CLI with `go build -o dist/metricspire ./cmd/metricspire`. Configure a
+stdio-capable MCP client to launch that binary with these arguments:
+
+```json
+{
+  "mcpServers": {
+    "metricspire": {
+      "command": "/absolute/path/to/metricspire",
+      "args": ["mcp", "--api-url", "https://metrics.example.com"]
+    }
+  }
+}
+```
+
+The launcher must inject `METRICSPIRE_API_TOKEN` through its secret/environment
+mechanism. Use an API access token accepted by the configured HTTP identity
+provider, not a browser ID token. Databricks Apps uses an authorized workspace
+API token. Do not paste tokens into prompts, arguments or checked-in client
+configuration. One process represents one principal; on token expiry, refresh
+it through the existing identity provider and restart the bridge. No new login
+system, App, database or MCP HTTP listener is required. Client configuration
+syntax varies; the command, arguments and environment are the contract.
+
+| Tool | Purpose |
+| --- | --- |
+| `list_namespaces` / `search_metrics` | Find business domains, metric codes, definitions, dimensions and examples |
+| `explain_query` | Validate and explain a `namespace` + `query` without running analytical SQL |
+| `submit_query` | Submit that `SemanticQuery`; creates a job and audit record and may incur query cost |
+| `get_query` / `cancel_query` | Read or cancel the returned `job_id` |
+
+Discover → explain intent → submit → poll. The AI client composes a structured
+candidate; MetricSpire does not host an LLM or guarantee natural-language
+accuracy. Catalog text and result cells are data, not executable instructions.
+The caller needs no internal model/table name or saved query template. Explain
+does not pin a future submission: the job records the release actually used.
+There are no SQL, publication, identity-override or management tools.
+
+The bridge allows HTTPS origins (HTTP only on loopback for local development),
+rejects redirects, and caps request/response bytes at 1/8 MiB with a 30-second
+HTTP timeout. Existing service permissions, query limits and audit still apply.
+After an uncertain submission failure, do not retry automatically. Canceling
+an MCP call stops that HTTP request, not an already accepted query job; use
+`cancel_query`. Decimal strings and integer JSON text are preserved.
+
+Opt-in integration: with a staging token, set
+`METRICSPIRE_RUN_MCP_ACCEPTANCE=staging-read-only`,
+`METRICSPIRE_MCP_TEST_URL` and absolute `METRICSPIRE_MCP_TEST_BINARY`, then run
+`go test ./cmd/metricspire -run '^TestMCPStagingAcceptance$' -v -count=1`.
+This requires the existing `acceptance` TPCH fixture; it queries, but never
+creates resources or modifies metric definitions or analytical tables.
 
 ## Distribution and deployment profiles
 
 MetricSpire has one product core and two deployment profiles. They are release adapters, not separate products:
 
-- **Open-source self-hosting**: the planned `v0.1.0` release will publish source, checksummed static Linux binaries, and versioned OCI images. The OCI image is the portable default for containers, Kubernetes, or a VM with a container runtime; the raw binary remains useful for minimal VM and local installations. PostgreSQL and analytical engines stay external. Release automation, an SBOM, provenance/signing, upgrade notes, and a clean-room/secret scan are Phase 5 release gates, not claims already satisfied by this development checkout. A Helm chart is intentionally deferred until real operators need one.
+- **Open-source self-hosting**: the planned `v0.1.0` release will publish source, checksummed static Linux binaries, and versioned OCI images. The OCI image is the portable default for containers, Kubernetes, or a VM with a container runtime; the raw binary remains useful for minimal VM and local installations. PostgreSQL and analytical engines stay external. Release automation, an SBOM, provenance/signing, upgrade notes, and a clean-room/secret scan are separate public-release gates, not claims already satisfied by this development checkout or prerequisites for internal trials. A Helm chart is intentionally deferred until real operators need one.
 - **Databricks Apps company profile**: the same Go service is intended to run behind Databricks Apps ingress and use a separately managed PostgreSQL-compatible control plane and a SQL warehouse resource. Databricks Apps deploys source with its own runtime and `app.yaml`; it does not consume this repository's OCI `Dockerfile`. The official development and dependency contract covers Python and Node.js, while custom commands leave packaged executables technically possible but do not make Go an officially documented runtime. On 2026-09-03, the acceptance-only [`deploy/databricks-apps-probe`](deploy/databricks-apps-probe) package ran in a resource-free staging custom App as an `amd64` Go 1.27.0 process. Authenticated `GET /health/live` returned 200, stop/start returned to 200, and the App was left stopped. Databricks ingress negotiated HTTP/2 externally but forwarded HTTP/1.1 to the process. This closes technical Go execution for that staging runtime; it does not establish official Go support or complete the full service identity/data acceptance.
 
 On 2026-09-04, the dedicated staging Lakebase project was bound to the full App. An explicitly approved one-shot migration created only the dedicated `metricspire` schema and its seven control-plane tables, after which the migration switch was removed and the normal package was redeployed. Short-lived OAuth database credentials worked without being persisted; a forced read-only reconciliation confirmed both registered migrations, two immutable releases, the final v1 active pointer, and the publication/rollback/query audit records. No analytical table was created or modified.
@@ -139,6 +193,7 @@ Important guarantees:
 ## Verification
 
 ```bash
+node --test internal/httpapi/ui/app_test.js
 go test ./...
 go test -race ./...
 go vet ./...
@@ -152,7 +207,7 @@ Read the [architecture note](docs/architecture.md), [Phase 1 acceptance](docs/ph
 
 ## Non-goals for v0.1
 
-MetricSpire is not an ETL platform, BI dashboard, data warehouse, arbitrary SQL gateway, cross-engine execution engine, or large-result export system. v0.1 does not include MCP, AI query generation, Redis, Kafka, a complex approval workflow, or simultaneous support for multiple analytical engines.
+MetricSpire is not an ETL platform, BI dashboard, data warehouse, arbitrary SQL gateway, cross-engine execution engine, or large-result export system. The current scope excludes a hosted LLM, remote MCP HTTP transport, SDK/template systems, Redis, Kafka, complex approvals, and simultaneous support for multiple analytical engines.
 
 ## License
 

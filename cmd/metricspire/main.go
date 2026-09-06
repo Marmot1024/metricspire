@@ -46,6 +46,8 @@ func runContext(ctx context.Context, arguments []string, stdout, stderr io.Write
 		return runPlan(arguments[1:], stderr)
 	case "serve":
 		return runServe(ctx, arguments[1:], stdout, stderr)
+	case "mcp":
+		return runMCP(ctx, arguments[1:], stdout, stderr)
 	case "migrate", "healthcheck", "draft-put", "draft-get", "publish", "rollback", "release-list", "release-events", "query-active":
 		return runPhase2(ctx, arguments[0], arguments[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -190,6 +192,9 @@ Usage:
 
 Product HTTP service:
   metricspire serve --config examples/runtime.example.yaml [--http-address host:port]
+
+MCP stdio bridge (METRICSPIRE_API_TOKEN supplied by the launcher):
+  metricspire mcp --api-url https://metrics.example.com
 
 Catalog and query workflow:
   metricspire migrate
