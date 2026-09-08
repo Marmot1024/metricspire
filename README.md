@@ -143,6 +143,17 @@ it through the existing identity provider and restart the bridge. No new login
 system, App, database or MCP HTTP listener is required. Client configuration
 syntax varies; the command, arguments and environment are the contract.
 
+Codex CLI 的对应配置如下；令牌由启动进程的环境提供，不写入 TOML：
+
+```toml
+[mcp_servers.metricspire]
+command = "/absolute/path/to/metricspire"
+args = ["mcp", "--api-url", "https://metrics.example.com"]
+env_vars = ["METRICSPIRE_API_TOKEN"]
+```
+
+交互使用时确认查询工具的执行请求。非交互 `codex exec` 无法弹出审批；仅对已明确授权的任务，可在本次进程配置 `mcp_servers.metricspire.tools.submit_query.approval_mode="approve"`。不要因此放开全局审批或沙盒。[Codex MCP 配置](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
+
 | Tool | Purpose |
 | --- | --- |
 | `list_namespaces` / `search_metrics` | Find business domains, metric codes, definitions, dimensions and examples |

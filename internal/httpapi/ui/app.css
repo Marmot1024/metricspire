@@ -95,7 +95,8 @@ textarea { resize: vertical; }
 .plain-textarea { min-height: 82px; font-family: inherit; line-height: 1.55; }
 .scope-picker select, .page-heading label select { min-width: 220px; }
 .search-bar { display: flex; gap: 10px; margin-bottom: 18px; }
-.search-bar input { min-height: 46px; background: var(--surface); }
+.search-bar input { flex: 1; min-width: 0; min-height: 46px; background: var(--surface); }
+.search-bar .button { flex-shrink: 0; white-space: nowrap; }
 
 .button { border: 0; border-radius: 10px; padding: 10px 15px; font-weight: 760; cursor: pointer; transition: transform .14s, background .14s, border-color .14s; }
 .button:hover:not(:disabled) { transform: translateY(-1px); }
