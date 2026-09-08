@@ -94,6 +94,77 @@ test("cancel button calls the existing job endpoint for the active job only", as
   assert.equal(calls.length, 1);
 });
 
+test("unapplied form edits cannot silently save or publish the old draft", async () => {
+  const {context, run} = editorContext();
+  let requests = 0;
+  context.requestJSON = async () => { requests++; };
+  run("bindEvents()");
+  context.document.getElementById("metric-form").handlers.input();
+  await run("saveDraft(); publishDraft()");
+  assert.equal(requests, 0);
+  assert.match(context.document.getElementById("editor-status").textContent, /尚未应用/);
+  run("state.editorDirty = false; state.dirty = true");
+  await run("publishDraft()");
+  assert.equal(requests, 0);
+  assert.match(context.document.getElementById("governance-status").textContent, /先保存草稿/);
+});
+
+test("cancelled navigation preserves unsaved draft and business domain", async () => {
+  const {context, run} = editorContext();
+  context.window = {confirm: () => false};
+  run("state.namespace = 'original'; state.dirty = true");
+  const original = run("state.draft");
+  await run("switchNamespace('other')");
+  assert.equal(run("state.draft"), original);
+  assert.equal(run("state.namespace"), "original");
+  assert.equal(context.document.getElementById("namespace-select").value, "original");
+});
+
+test("new query failure clears old results and unlocks controls without retry", async () => {
+  const {context, run} = editorContext();
+  const table = context.document.getElementById("result-table");
+  table.children = ["stale-result"];
+  context.document.getElementById("result-meta").textContent = "old release";
+  context.buildQuery = () => ({query: {metrics: ["revenue"]}});
+  let requests = 0;
+  context.requestJSON = async () => { requests++; throw {detail: "test failure"}; };
+  run("state.namespace = 'acceptance'");
+  await run("runQueryOperation('query')");
+  assert.equal(table.children.length, 0);
+  assert.equal(context.document.getElementById("result-meta").textContent, "");
+  assert.equal(context.document.getElementById("run-query-button").disabled, false);
+  assert.equal(requests, 1);
+  assert.match(context.document.getElementById("query-status").textContent, /test failure/);
+});
+
+test("one active query blocks duplicate submissions and namespace switching", async () => {
+  const {context, run} = editorContext();
+  context.buildQuery = () => ({query: {metrics: ["revenue"]}});
+  let finish;
+  let requests = 0;
+  context.requestJSON = () => { requests++; return new Promise((resolve) => { finish = resolve; }); };
+  run("state.namespace = 'acceptance'");
+  const pending = run("runQueryOperation('query')");
+  assert.equal(context.document.getElementById("run-query-button").disabled, true);
+  await run("runQueryOperation('query'); switchNamespace('other')");
+  assert.equal(requests, 1);
+  assert.equal(run("state.namespace"), "acceptance");
+  finish({job: {status: "failed", error: {message: "test stopped"}}});
+  await pending;
+  assert.equal(context.document.getElementById("run-query-button").disabled, false);
+  assert.equal(run("state.queryBusy"), false);
+});
+
+test("pending and cancelled snapshots never retain an earlier result table", () => {
+  const {context, run} = editorContext();
+  for (const status of ["pending", "cancelled"]) {
+    context.document.getElementById("result-table").children = ["old"];
+    run(`renderQueryResult({job: {status: '${status}'}})`);
+    assert.equal(context.document.getElementById("result-table").children.length, 0);
+    assert.match(context.document.getElementById("query-status").textContent, /等待执行|已取消/);
+  }
+});
+
 test("zoned midnight preserves the business timezone across DST", () => {
   assert.equal(zonedMidnightISO(2026, 9, 1, "Asia/Shanghai"), "2026-08-31T16:00:00.000Z");
   assert.equal(zonedMidnightISO(2026, 3, 8, "America/Los_Angeles"), "2026-03-08T08:00:00.000Z");

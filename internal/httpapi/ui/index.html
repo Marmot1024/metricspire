@@ -52,11 +52,16 @@
         <header class="page-heading">
           <div>
             <p class="eyebrow">可信指标目录</p>
-            <h1>找到正确指标，再开始开发</h1>
-            <p>按名称、业务定义、标签或负责人搜索。这里不暴露物理表、SQL 或内部模型路由。</p>
+            <h1>指标库</h1>
+            <p>先确认指标口径和可用维度，再把稳定的指标 code 用于应用或 AI 查询。</p>
           </div>
           <span id="catalog-count" class="count-badge">0 个指标</span>
         </header>
+
+        <details class="workspace-guide">
+          <summary>第一次使用：从找到指标到接入应用</summary>
+          <p>① 选择业务域并搜索指标 → ② 阅读定义、维度和时间口径 → ③ 点击“用于查询”验证结果并复制 API 请求。指标缺失或口径不符时联系负责人，不要用相近指标代替。</p>
+        </details>
 
         <div class="search-bar">
           <label class="sr-only" for="catalog-search">搜索指标</label>
@@ -105,13 +110,17 @@
         <header class="page-heading with-control">
           <div>
             <p class="eyebrow">维护者工作台</p>
-            <h1>定义、验证并安全发布</h1>
-            <p>只维护指标语义和发布版本；连接凭据与数据权限仍由运行环境和数据引擎管理。</p>
+            <h1>治理发布</h1>
+            <p>维护指标定义，检查变更影响，再决定发布。保存草稿不会改变线上查询。</p>
           </div>
           <label for="governance-route">维护对象
             <select id="governance-route"></select>
           </label>
         </header>
+
+        <div class="workflow-guide" aria-label="指标维护步骤">
+          <span><b>1</b> 编辑并应用</span><span><b>2</b> 检查影响、保存草稿</span><span><b>3</b> 填写说明、发布上线</span>
+        </div>
 
         <div class="status-grid">
           <article><span>当前线上版本</span><strong id="active-release-value">—</strong><small id="active-release-meta">尚未读取</small></article>
@@ -169,7 +178,9 @@
                 <label class="toggle"><input id="metric-deprecated" type="checkbox"><span>标记为已弃用</span></label>
               </fieldset>
 
-              <button id="apply-metric-button" class="button primary" type="submit">应用到当前草稿</button>
+              <p id="editor-status" class="result-status" role="status" aria-live="polite" hidden></p>
+              <button id="apply-metric-button" class="button primary" type="submit">应用编辑并检查</button>
+              <p class="muted">此步骤只更新当前页面。请继续“保存草稿”，确认后再“发布新版本”。</p>
             </form>
           </section>
 
@@ -196,7 +207,7 @@
             <button id="save-draft-button" class="button secondary" type="button">保存草稿</button>
             <button id="publish-button" class="button primary" type="button">发布新版本</button>
           </div>
-          <div id="governance-status" class="result-status" hidden></div>
+          <div id="governance-status" class="result-status" role="status" aria-live="polite" hidden></div>
           <div id="release-list" class="release-list"></div>
         </section>
       </section>
@@ -205,8 +216,8 @@
         <header class="page-heading">
           <div>
             <p class="eyebrow">开发者验证工具</p>
-            <h1>生成一条规范指标查询</h1>
-            <p>这里用于发布前后验证和复制 API 请求，不是报表或自由 SQL 工具。</p>
+            <h1>查询验证</h1>
+            <p>选择指标、分组和筛选条件，核对结果后复制 API 请求。后续调用不需要先保存查询模板。</p>
           </div>
         </header>
 
@@ -250,9 +261,9 @@
             <div class="action-row">
               <button id="copy-query-button" class="button secondary" type="button">复制 API 请求</button>
               <button id="run-query-button" class="button primary" type="button">运行查询</button>
-              <button id="cancel-job-button" class="button danger" type="button" disabled>取消</button>
+              <button id="cancel-job-button" class="button danger" type="button" disabled>取消当前查询</button>
             </div>
-            <div id="query-status" class="result-status" hidden></div>
+            <div id="query-status" class="result-status" role="status" aria-live="polite" hidden></div>
           </section>
 
           <aside class="panel request-panel">

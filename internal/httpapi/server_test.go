@@ -427,10 +427,11 @@ func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
 		t.Fatalf("UI response = %d %#v", response.StatusCode, response.Header)
 	}
 	body := readRawBody(t, response)
-	if !strings.Contains(body, "找到正确指标，再开始开发") || !strings.Contains(body, "/assets/app.js") ||
+	if !strings.Contains(body, "<h1>指标库</h1>") || !strings.Contains(body, "/assets/app.js") ||
 		!strings.Contains(body, "run-query-button") || !strings.Contains(body, "governance-tab") ||
-		!strings.Contains(body, "定义、验证并安全发布") {
-		t.Fatalf("UI body = %q", body)
+		!strings.Contains(body, "<h1>治理发布</h1>") || !strings.Contains(body, "editor-status") ||
+		!strings.Contains(body, "<h1>查询验证</h1>") {
+		t.Fatal("UI is missing a catalog, governance, query or feedback entry")
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)

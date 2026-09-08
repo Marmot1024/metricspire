@@ -9,6 +9,7 @@ const state = {
   queryMetricKeys: new Set(),
   filters: [],
   activeJobID: null,
+  queryBusy: false,
   governanceRoute: null,
   draft: null,
   review: null,
@@ -16,6 +17,7 @@ const state = {
   metricIndex: -1,
   creatingMetric: false,
   dirty: false,
+  editorDirty: false,
 };
 
 function setNotice(message, tone = "neutral") {
@@ -144,6 +146,15 @@ function initializeGovernanceRoutes() {
 }
 
 async function switchNamespace(namespace) {
+  if (state.queryBusy) {
+    byID("namespace-select").value = state.namespace;
+    setNotice("当前查询尚未结束，请等待结果或先取消查询，再切换业务域。", "warning");
+    return;
+  }
+  if (!confirmDiscardDraft()) {
+    byID("namespace-select").value = state.namespace;
+    return;
+  }
   state.namespace = namespace;
   byID("current-namespace").textContent = namespace || "没有配置业务域";
   state.catalog = [];
@@ -152,6 +163,8 @@ async function switchNamespace(namespace) {
   state.filters = [];
   state.draft = null;
   state.review = null;
+  state.dirty = false;
+  state.editorDirty = false;
   initializeGovernanceRoutes();
   await loadCatalog();
   if (!byID("governance-workspace").hidden && state.governanceRoute) await loadGovernance();
@@ -171,7 +184,7 @@ async function loadCatalog() {
     if (state.selectedCatalogIndex >= state.catalog.length) state.selectedCatalogIndex = -1;
     renderCatalog();
     updateQueryBuilder();
-    setNotice(`已载入 ${state.catalog.length} 个可查询指标。物理模型与数据位置由平台内部解析。`, "success");
+    setNotice(`已载入 ${state.catalog.length} 个已发布指标。选择指标查看口径与可用维度。`, "success");
   } catch (error) {
     state.catalog = [];
     renderCatalog();
@@ -187,7 +200,7 @@ function renderCatalog() {
   if (!state.catalog.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = "当前业务域没有匹配且有权查询的已发布指标。";
+    empty.textContent = "没有找到匹配的已发布指标。试试其他名称或清空搜索；仍为空时，请联系指标负责人确认发布情况和访问权限。";
     list.append(empty);
     renderMetricDetail(null);
     return;
@@ -526,7 +539,7 @@ async function copyQueryRequest() {
     ].join(" \\\n  ");
     if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(payload);
     else window.prompt("复制下面的 API 请求", payload);
-    setStatus("query-status", "已复制规范 API 请求。运行身份仍由平台登录态提供，不写入正文。", "success");
+    setStatus("query-status", "已复制 API 请求。请在运行终端提供 METRICSPIRE_TOKEN；请求中不包含令牌，也不会自动使用浏览器登录态。", "success");
   } catch (error) {
     setStatus("query-status", errorMessage(error), "error");
   }
@@ -538,7 +551,10 @@ function renderQueryResult(snapshot) {
   const job = snapshot.job || {};
   const result = snapshot.result;
   if (!result) {
-    setStatus("query-status", job.error?.message || (job.status ? `查询状态：${job.status}` : "查询已提交。"), job.status === "failed" ? "error" : "neutral");
+    byID("result-table").replaceChildren();
+    byID("result-meta").textContent = "";
+    const status = {pending: "等待执行", running: "正在查询", failed: "查询失败", cancelled: "已取消", succeeded: "已完成"};
+    setStatus("query-status", job.error?.message || (job.status ? `查询状态：${status[job.status] || job.status}` : "查询已提交。"), job.status === "failed" ? "error" : "neutral");
     return;
   }
   const columns = result.columns || [];
@@ -572,8 +588,16 @@ function renderQueryResult(snapshot) {
 }
 
 async function runQueryOperation(operation) {
+  if (state.queryBusy) return;
   try {
     const {query} = buildQuery();
+    state.queryBusy = true;
+    byID("run-query-button").disabled = true;
+    for (const button of document.querySelectorAll("[data-operation]")) button.disabled = true;
+    byID("result-table").replaceChildren();
+    byID("result-meta").textContent = "";
+    byID("query-output").textContent = "";
+    byID("result-panel").hidden = true;
     setStatus("query-status", operation === "query" ? "正在提交受控查询…" : "正在生成开发者检查结果…");
     const result = await requestJSON(publicQueryPath(operation), {method: "POST", body: JSON.stringify(query)});
     if (operation !== "query") {
@@ -591,9 +615,15 @@ async function runQueryOperation(operation) {
       await pollJob(result.job.id);
     }
   } catch (error) {
+    byID("result-table").replaceChildren();
+    byID("result-meta").textContent = "";
     byID("query-output").textContent = JSON.stringify(error, null, 2);
     byID("result-panel").hidden = false;
     setStatus("query-status", errorMessage(error), "error");
+  } finally {
+    state.queryBusy = false;
+    byID("run-query-button").disabled = false;
+    for (const button of document.querySelectorAll("[data-operation]")) button.disabled = false;
   }
 }
 
@@ -691,11 +721,13 @@ function clearMetricEditor() {
 }
 
 function renderMetricEditor(metric) {
+  state.editorDirty = false;
+  byID("editor-status").hidden = true;
   const aggregate = !metric || metric.kind === "aggregate";
   byID("editor-mode-note").textContent = state.creatingMetric
     ? "新增基础指标：只接受结构化聚合口径，不接受 SQL 片段。保存草稿前不会影响线上版本。"
     : aggregate
-      ? "已发布指标的执行口径已锁定；可安全维护名称、说明、负责人、标签、验证证据与弃用状态。"
+      ? "此表单锁定已有指标的计算口径；可维护名称、说明、负责人、标签、验证证据与弃用状态。"
       : `这是 ${metric.kind} 指标。当前界面只维护元数据；复合公式仍由版本化契约管理。`;
   byID("metric-code").value = metric?.name || "";
   byID("metric-display-name").value = metric?.display_name || "";
@@ -724,6 +756,7 @@ function renderMetricEditor(metric) {
 
 function newMetric() {
   if (!state.draft) return;
+  if (state.editorDirty && !window.confirm("当前表单的编辑尚未应用。放弃这些编辑并新增指标？")) return;
   state.creatingMetric = true;
   state.metricIndex = -1;
   byID("metric-select").value = "";
@@ -778,13 +811,30 @@ async function applyMetric(event) {
       state.draft.source.spec.metrics[index] = metric;
     }
     state.creatingMetric = false;
+    state.editorDirty = false;
     state.dirty = true;
     renderMetricSelect(index);
     await reviewGovernance();
+    setStatus("editor-status", state.review
+      ? "编辑已应用。请查看检查结果，修正问题后保存草稿。"
+      : "编辑已应用，但未取得检查结果。请重新检查后再保存。", state.review ? "success" : "warning");
     setStatus("governance-status", "变更已应用到浏览器中的当前草稿；点击“保存草稿”后才会写入控制面。", "warning");
   } catch (error) {
+    setStatus("editor-status", errorMessage(error), "error");
     setStatus("governance-status", errorMessage(error), "error");
   }
+}
+
+function confirmDiscardDraft() {
+  return (!state.dirty && !state.editorDirty) || window.confirm("存在尚未保存的修改。放弃本页修改并切换？已保存的草稿与线上版本不会改变。");
+}
+
+function requireAppliedEditor() {
+  if (!state.editorDirty) return true;
+  const message = "表单编辑尚未应用。请先点击“应用编辑并检查”，再保存草稿。";
+  setStatus("editor-status", message, "warning");
+  setStatus("governance-status", message, "warning");
+  return false;
 }
 
 function renderReview() {
@@ -952,6 +1002,7 @@ async function loadGovernance() {
 
 async function saveDraft() {
   if (!state.draft) return;
+  if (!requireAppliedEditor()) return;
   try {
     setStatus("governance-status", "正在校验并保存草稿…");
     const saved = await requestJSON(routePath(state.governanceRoute, "draft"), {
@@ -971,6 +1022,11 @@ async function saveDraft() {
 
 async function publishDraft() {
   if (!state.draft) return;
+  if (!requireAppliedEditor()) return;
+  if (state.dirty) {
+    setStatus("governance-status", "当前修改尚未保存。请先保存草稿，检查通过后再发布。", "warning");
+    return;
+  }
   const note = byID("release-note").value.trim();
   if (!note) {
     setStatus("governance-status", "发布说明必填：请说明本次为什么修改。", "error");
@@ -1017,6 +1073,10 @@ function bindEvents() {
   });
   byID("namespace-select").addEventListener("change", (event) => switchNamespace(event.target.value));
   byID("governance-route").addEventListener("change", async (event) => {
+    if (!confirmDiscardDraft()) {
+      event.target.value = String((state.context.models || []).filter((route) => route.namespace === state.namespace).indexOf(state.governanceRoute));
+      return;
+    }
     state.governanceRoute = (state.context.models || []).filter((route) => route.namespace === state.namespace)[Number(event.target.value)] || null;
     state.draft = null;
     await loadGovernance();
@@ -1025,6 +1085,10 @@ function bindEvents() {
   byID("catalog-search").addEventListener("keydown", (event) => { if (event.key === "Enter") loadCatalog(); });
   for (const button of document.querySelectorAll("[data-tab]")) button.addEventListener("click", () => activateTab(button.dataset.tab));
   byID("metric-select").addEventListener("change", (event) => {
+    if (state.editorDirty && !window.confirm("当前表单的编辑尚未应用。放弃这些编辑并切换指标？")) {
+      event.target.value = state.creatingMetric ? "" : String(state.metricIndex);
+      return;
+    }
     state.metricIndex = Number(event.target.value);
     state.creatingMetric = false;
     renderMetricEditor(governanceMetrics()[state.metricIndex]);
@@ -1035,6 +1099,16 @@ function bindEvents() {
     renderMetricDimensions(event.target.value);
   });
   byID("metric-form").addEventListener("submit", applyMetric);
+  byID("metric-form").addEventListener("input", () => {
+    state.editorDirty = true;
+    setStatus("editor-status", "有尚未应用的编辑，请先“应用编辑并检查”。", "warning");
+  });
+  if (typeof window !== "undefined" && window.addEventListener) window.addEventListener("beforeunload", (event) => {
+    if (state.dirty || state.editorDirty) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  });
   byID("review-draft-button").addEventListener("click", reviewGovernance);
   byID("save-draft-button").addEventListener("click", saveDraft);
   byID("publish-button").addEventListener("click", publishDraft);
