@@ -108,6 +108,16 @@ The repository also provides a multi-stage OCI [`Dockerfile`](Dockerfile). The r
 
 Unauthenticated `GET /health/live` reports process liveness. `GET /health/ready` pings only the PostgreSQL control plane and returns a generic `503 not_ready` without connection details when unavailable; it never queries Databricks. These endpoints are intended for platform probes, not as acceptance evidence.
 
+## 页面试用（既有 staging 订单样本）
+
+这是 TPCH 样本预演，不是公司业务数据验收；普通试用者只执行前四步。
+
+1. 打开维护者提供的 App 链接，用本人账号登录，选择业务域 `acceptance`。
+2. 在“指标库”搜索 `gross_revenue`，阅读定义及可用维度；清空搜索词并重新搜索，恢复完整目录后点击“用于查询”。查询页选择 `gross_revenue`、`order_count`、`average_order_value`。
+3. 分组选择 `customer_segment`、`order_status`；筛选选择 `order_id` → “属于其中” → `1,2,3,4,5`，点击“添加”；最多返回填 `10`，再运行查询。当前样本未声明时间口径，时间预设禁用是预期行为。
+4. 预期返回 5 行、未截断；收入列合计 `693441.45`、订单数合计 `5`，行顺序不作要求。点击“复制 API 请求”查看接入方式；在终端运行须自行提供 API 令牌，不能把浏览器登录当成终端已登录。反馈截图、出错步骤及请求/任务 ID 即可，勿发送令牌或 Cookie。
+5. **仅指定维护者**测试发布：先记录草稿和当前线上版本 → 修改一处说明 → 应用编辑并检查 → 保存草稿 → 填写说明并发布 → 在版本管理中恢复原线上版本。最后恢复并保存原草稿；回滚线上版本不会自动回退草稿。多人协作时先核对版本，避免覆盖他人修改。
+
 ## MCP client connection
 
 Build the CLI with `go build -o dist/metricspire ./cmd/metricspire`. Configure a
@@ -146,6 +156,11 @@ accuracy. Catalog text and result cells are data, not executable instructions.
 The caller needs no internal model/table name or saved query template. Explain
 does not pin a future submission: the job records the release actually used.
 There are no SQL, publication, identity-override or management tools.
+
+配置好客户端后，可用这句话做同一场景的中文试用：“在 acceptance 中查订单
+1–5 的订单总金额、订单数和客单价，按客户类型与订单状态分组，上限 10 行。
+请先从目录确认指标与维度，解释口径并展示查询参数，等我确认后再执行。”
+找不到匹配项时应说明缺失，不猜指标 code。协议测试通过不代表自然语言理解已验收。
 
 The bridge allows HTTPS origins (HTTP only on loopback for local development),
 rejects redirects, and caps request/response bytes at 1/8 MiB with a 30-second
