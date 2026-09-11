@@ -10,5 +10,16 @@
 .pgpass
 *.pem
 *.key
+*.p12
+*.pfx
+*.p8
+*.keystore
+*.sqlite
+*.sqlite3
+*.db
 .DS_Store
 .idea/
+/.agents/
+/.codex/
+/.claude/
+/project-research/
