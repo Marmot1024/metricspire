@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/marmot1024/metricspire/internal/planner"
@@ -120,8 +121,24 @@ func Compile(plan model.PhysicalPlan) (Statement, error) {
 		if err != nil {
 			return Statement{}, err
 		}
-		start := compiler.parameter("time_start", plan.TimeRange.Start, model.DataTypeTimestamp)
-		end := compiler.parameter("time_end", plan.TimeRange.End, model.DataTypeTimestamp)
+		parameterType := model.DataTypeTimestamp
+		startValue, endValue := plan.TimeRange.Start, plan.TimeRange.End
+		if dimension.DataType == model.DataTypeDate {
+			location, err := time.LoadLocation(dimension.CalendarTimezone)
+			if err != nil {
+				return Statement{}, problem("invalid_physical_plan", "physical_plan.dimensions", "date dimension has invalid calendar timezone")
+			}
+			startInstant, startErr := time.Parse(time.RFC3339Nano, startValue)
+			endInstant, endErr := time.Parse(time.RFC3339Nano, endValue)
+			if startErr != nil || endErr != nil {
+				return Statement{}, problem("invalid_physical_plan", "physical_plan.time_range", "date range contains invalid timestamps")
+			}
+			startValue = startInstant.In(location).Format(time.DateOnly)
+			endValue = endInstant.In(location).Format(time.DateOnly)
+			parameterType = model.DataTypeDate
+		}
+		start := compiler.parameter("time_start", startValue, parameterType)
+		end := compiler.parameter("time_end", endValue, parameterType)
 		predicates = append(predicates, fmt.Sprintf("%s >= :%s AND %s < :%s", column, start, column, end))
 	}
 	for _, filter := range plan.Filters {

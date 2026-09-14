@@ -107,7 +107,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	if err != nil {
 		return err
 	}
-	catalogSearch, err := application.NewCatalogService(store, policyResolver)
+	catalogSearch, err := application.NewCatalogService(store, policyResolver, bindingResolver)
 	if err != nil {
 		return err
 	}

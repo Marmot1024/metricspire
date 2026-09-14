@@ -44,7 +44,7 @@ All paths are under `/api/v1`.
 | `query:execute` | `GET /jobs/{job}` | read a job owned by the same tenant and principal |
 | `query:execute` | `POST /jobs/{job}/cancel` | cancel an owned pending/running job |
 
-The UI is served at `/` and calls these endpoints. All authenticated users can discover policy-authorized metrics without seeing internal model or physical-source names. Query validation uses metric codes, common dimensions, filters, explicit time presets/ranges, business timezone, grain, and a row limit; it renders typed rows, returns the resolved absolute interval, and can copy a normalized API request. Maintainers additionally get a structured basic-metric editor, current release and binding status, publication issues, semantic diff, transitive internal metric dependencies, immutable release history, publication, and rollback. Complex formulas and model structure remain versioned contract-import concerns rather than raw JSON fields in the page. The UI contains no parallel authorization, planning, or execution logic.
+The UI is served at `/` and calls these endpoints. All authenticated users can discover policy-authorized metrics and structured dimension metadata without seeing internal model or physical-source names. Query validation uses metric codes, common dimensions, filters, explicit time presets/ranges, business timezone, grain, and a row limit; a fixed calendar timezone from a date-backed source is shown and locked instead of pretending that the source supports dynamic business days. It renders typed rows, returns the resolved absolute interval, and can copy a normalized API request. Maintainers additionally get a structured basic-metric editor, current release and binding status, publication issues, semantic diff, transitive internal metric dependencies, immutable release history, publication, and rollback. Complex formulas and model structure remain versioned contract-import concerns rather than raw JSON fields in the page. The UI contains no parallel authorization, planning, or execution logic.
 
 `GET /health/live` and `GET /health/ready` are unauthenticated deployment probes outside `/api/v1`. Readiness checks only PostgreSQL and returns a generic `503 not_ready` on failure; neither probe contacts Databricks or exposes configuration details.
 
@@ -53,7 +53,8 @@ The UI is served at `/` and calls these endpoints. All authenticated users can d
 - JSON requests require `Content-Type: application/json`, reject duplicate/unknown fields, and default to a 1 MiB body limit.
 - Control operations default to 15 seconds. Query jobs default to two minutes and propagate cancellation to the engine adapter.
 - Catalog search returns at most 100 metrics per request.
-- Semantic query budgets from the planner and SQL/result budgets from the engine adapter remain mandatory.
+- Semantic query budgets from the planner remain mandatory, including a 366-calendar-day maximum. Seven-, 13-, and 30-day aggregate or grouped-trend windows are supported when the time contract is complete.
+- Remote MCP validation errors retain only allow-listed code, field path, bounded detail, repair guidance, and request ID; arbitrary adapter/upstream errors remain redacted.
 - Errors use `application/problem+json` with stable `code`, HTTP `status`, safe `detail`, optional `path`, and a server-generated `request_id`.
 - Responses set no-store, content-type, framing, referrer, and Content Security Policy headers. The runtime server also sets read-header, read, write, idle, and header-size limits.
 - Browser state changes with a foreign `Origin` are rejected before authentication or application logic.

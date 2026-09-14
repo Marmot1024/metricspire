@@ -70,11 +70,25 @@ func TestRemoteMCPAuthenticatesEveryRequestAndExposesSevenScopedTools(t *testing
 			t.Fatalf("unexpected tool: %#v", tool)
 		}
 	}
+	invalidTrend := readQuery(t)
+	invalidTrend.TimeGrouping = nil
+	invalidOutput := callRemoteMCP(t, session, "explain_query", map[string]any{"namespace": "demo", "query": invalidTrend}, true)
+	for _, expected := range []string{"invalid_time", "time_grouping", "provide time_grouping", "req_remote_mcp"} {
+		if !strings.Contains(invalidOutput, expected) {
+			t.Fatalf("actionable validation detail missing %q from %q", expected, invalidOutput)
+		}
+	}
 
 	query := readQuery(t)
+	catalogOutput := callRemoteMCP(t, session, "search_metrics", map[string]any{"namespace": "demo", "search": "gross"}, false)
+	for _, expected := range []string{`"dimension_details"`, `"name":"order_date"`, `"data_type":"timestamp"`} {
+		if !strings.Contains(catalogOutput, expected) {
+			t.Fatalf("catalog dimension metadata missing %q from %q", expected, catalogOutput)
+		}
+	}
 	outputs := []string{
 		callRemoteMCP(t, session, "list_namespaces", map[string]any{}, false),
-		callRemoteMCP(t, session, "search_metrics", map[string]any{"namespace": "demo", "search": "gross"}, false),
+		catalogOutput,
 		callRemoteMCP(t, session, "explain_query", map[string]any{"namespace": "demo", "query": query}, false),
 		callRemoteMCP(t, session, "plan_query", map[string]any{"namespace": "demo", "query": query}, false),
 	}
@@ -872,7 +886,7 @@ func newTestServerWithDependencies(t *testing.T, config httpapi.Config, engine *
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalogSearch, err := application.NewCatalogService(repository, policies)
+	catalogSearch, err := application.NewCatalogService(repository, policies, bindings)
 	if err != nil {
 		t.Fatal(err)
 	}

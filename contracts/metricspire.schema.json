@@ -221,7 +221,8 @@
       "required": ["name", "column"],
       "properties": {
         "name": {"$ref": "#/$defs/Name"},
-        "column": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_$]*$"}
+        "column": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_$]*$"},
+        "calendar_timezone": {"type": "string", "minLength": 1}
       }
     },
     "ResourceRef": {
@@ -504,7 +505,8 @@
         "resource": {"$ref": "#/$defs/ResourceRef"},
         "column": {"type": "string", "minLength": 1},
         "type": {"enum": ["categorical", "time"]},
-        "data_type": {"$ref": "#/$defs/DataType"}
+        "data_type": {"$ref": "#/$defs/DataType"},
+        "calendar_timezone": {"type": "string", "minLength": 1}
       }
     },
     "PhysicalField": {

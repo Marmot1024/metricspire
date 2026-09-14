@@ -225,8 +225,9 @@ const (
 )
 
 type FieldBinding struct {
-	Name   string `json:"name" yaml:"name"`
-	Column string `json:"column" yaml:"column"`
+	Name             string `json:"name" yaml:"name"`
+	Column           string `json:"column" yaml:"column"`
+	CalendarTimezone string `json:"calendar_timezone,omitempty" yaml:"calendar_timezone,omitempty"`
 }
 
 type PolicySource struct {
@@ -431,13 +432,14 @@ type PhysicalField struct {
 }
 
 type PhysicalDimension struct {
-	Name     string        `json:"name"`
-	Output   bool          `json:"output"`
-	Entity   string        `json:"entity"`
-	Resource ResourceRef   `json:"resource"`
-	Column   string        `json:"column"`
-	Type     DimensionType `json:"type"`
-	DataType DataType      `json:"data_type"`
+	Name             string        `json:"name"`
+	Output           bool          `json:"output"`
+	Entity           string        `json:"entity"`
+	Resource         ResourceRef   `json:"resource"`
+	Column           string        `json:"column"`
+	Type             DimensionType `json:"type"`
+	DataType         DataType      `json:"data_type"`
+	CalendarTimezone string        `json:"calendar_timezone,omitempty"`
 }
 
 type PhysicalJoin struct {

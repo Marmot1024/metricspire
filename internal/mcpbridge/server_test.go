@@ -197,6 +197,20 @@ func TestConfigurationRejectsUnsafeOriginsAndCredentials(t *testing.T) {
 	}
 }
 
+func TestSanitizedDomainErrorKeepsOnlyBoundedActionableValidationDetail(t *testing.T) {
+	t.Parallel()
+	got := SanitizedDomainError("invalid_time", "time_grouping", "provide matching day, week, or month grouping", "req_123")
+	for _, expected := range []string{"invalid_time", "time_grouping", "provide matching", "req_123"} {
+		if !strings.Contains(got.Error(), expected) {
+			t.Fatalf("error %q does not contain %q", got, expected)
+		}
+	}
+	unsafe := SanitizedDomainError("invalid_time", "bad path/token", "secret\nBearer credential", "bad request id")
+	if strings.Contains(unsafe.Error(), "secret") || strings.Contains(unsafe.Error(), "credential") || strings.Contains(unsafe.Error(), "bad path") || !strings.Contains(unsafe.Error(), "request_id=unavailable") {
+		t.Fatalf("unsafe error detail escaped: %q", unsafe)
+	}
+}
+
 func TestNamespaceIsEscapedWithoutInventingAnIdentifierRule(t *testing.T) {
 	const namespace = "产品.v1&a?"
 	cs := connect(t, func(w http.ResponseWriter, r *http.Request) {

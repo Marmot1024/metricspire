@@ -20,7 +20,7 @@
         {"name": "customer_id", "column": "o_custkey"},
         {"name": "order_status", "column": "o_orderstatus"},
         {"name": "total_price", "column": "o_totalprice"},
-        {"name": "order_date", "column": "o_orderdate"}
+        {"name": "order_date", "column": "o_orderdate", "calendar_timezone": "UTC"}
       ]
     },
     {

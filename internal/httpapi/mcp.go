@@ -157,10 +157,22 @@ func (backend *remoteMCPBackend) safeError(err error) error {
 		code = "conflict"
 	case errors.As(err, &domain):
 		code = domain.Code
+		if safeMCPDomainDetail(code) {
+			return mcpbridge.SanitizedDomainError(code, domain.Path, domain.Message, requestID(backend.request))
+		}
 	default:
 		// Do not log the raw error: an authentication or engine adapter error may
 		// contain a transient credential or an upstream response body.
 		backend.server.logger.Error("MCP operation failed", "request_id", requestID(backend.request), "code", code)
 	}
 	return mcpbridge.SanitizedAPIError(code, requestID(backend.request))
+}
+
+func safeMCPDomainDetail(code string) bool {
+	switch code {
+	case "required", "duplicate_value", "invalid_query", "invalid_time", "time_range_required", "time_range_exceeded", "unsupported_timezone", "limit_exceeded", "budget_exceeded":
+		return true
+	default:
+		return false
+	}
 }

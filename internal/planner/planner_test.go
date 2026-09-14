@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/marmot1024/metricspire/internal/compiler"
 	"github.com/marmot1024/metricspire/internal/contractio"
@@ -82,6 +83,116 @@ func TestTimeRangePreservesExplicitBusinessTimezone(t *testing.T) {
 	}
 	if logical.TimeRange.Timezone != "Asia/Shanghai" {
 		t.Fatalf("time range timezone = %q", logical.TimeRange.Timezone)
+	}
+}
+
+func TestMultiDayAggregateAndTrendStayWithinExplicitRangeBudget(t *testing.T) {
+	t.Parallel()
+	for _, days := range []int{7, 13, 30} {
+		days := days
+		t.Run(fmt.Sprintf("%d_days", days), func(t *testing.T) {
+			t.Parallel()
+			for _, trend := range []bool{false, true} {
+				values := loadFixture(t)
+				values.query.TimeRange.Start = "2026-09-01T00:00:00+08:00"
+				values.query.TimeRange.End = time.Date(2026, 9, 1+days, 0, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60)).Format(time.RFC3339)
+				values.query.TimeRange.Timezone = "Asia/Shanghai"
+				if trend {
+					values.query.GroupBy = []string{"order_date"}
+					values.query.TimeGrouping = &model.TimeGrouping{Dimension: "order_date", Timezone: "Asia/Shanghai", Granularity: model.GrainDay}
+				} else {
+					values.query.GroupBy = []string{"customer_segment"}
+					values.query.TimeGrouping = nil
+				}
+				if _, err := planner.BuildLogical(values.manifest, values.bundle, values.context, values.query); err != nil {
+					t.Fatalf("trend=%v: %v", trend, err)
+				}
+			}
+		})
+	}
+
+	values := loadFixture(t)
+	values.query.TimeRange.Start = "2025-01-01T00:00:00Z"
+	values.query.TimeRange.End = "2026-01-02T00:00:00Z"
+	values.query.TimeRange.Timezone = "UTC"
+	values.query.TimeGrouping.Timezone = "UTC"
+	if _, err := planner.BuildLogical(values.manifest, values.bundle, values.context, values.query); err != nil {
+		t.Fatalf("maximum supported range was rejected: %v", err)
+	}
+	values.query.TimeRange.End = "2026-01-03T00:00:00Z"
+	_, err := planner.BuildLogical(values.manifest, values.bundle, values.context, values.query)
+	assertProblem(t, err, "time_range_exceeded")
+}
+
+func TestDateBackedTimeDimensionIsFailClosedByCalendarTimezone(t *testing.T) {
+	t.Parallel()
+	dateFixture := func(t *testing.T) fixture {
+		t.Helper()
+		values := loadFixtureWithSource(t, func(source *model.SemanticSource) {
+			for datasetIndex := range source.Spec.Datasets {
+				for fieldIndex := range source.Spec.Datasets[datasetIndex].Fields {
+					if source.Spec.Datasets[datasetIndex].Fields[fieldIndex].Name == "order_ts" {
+						source.Spec.Datasets[datasetIndex].Fields[fieldIndex].DataType = model.DataTypeDate
+					}
+				}
+			}
+		})
+		values.query.TimeRange.Start = "2026-09-01T00:00:00Z"
+		values.query.TimeRange.End = "2026-09-08T00:00:00Z"
+		values.query.TimeRange.Timezone = "UTC"
+		values.query.TimeGrouping.Timezone = "UTC"
+		values.binding.ManifestFingerprint = values.manifest.Fingerprint
+		return values
+	}
+
+	t.Run("declared matching timezone", func(t *testing.T) {
+		values := dateFixture(t)
+		for datasetIndex := range values.binding.Datasets {
+			for fieldIndex := range values.binding.Datasets[datasetIndex].Fields {
+				if values.binding.Datasets[datasetIndex].Fields[fieldIndex].Name == "order_ts" {
+					values.binding.Datasets[datasetIndex].Fields[fieldIndex].CalendarTimezone = "UTC"
+				}
+			}
+		}
+		logical, err := planner.BuildLogical(values.manifest, values.bundle, values.context, values.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := planner.BuildPhysical(values.manifest, logical, values.binding, values.capabilities); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for _, test := range []struct {
+		name, timezone, start, code string
+		declare                     bool
+	}{
+		{name: "missing binding declaration", timezone: "UTC", start: "2026-09-01T00:00:00Z", code: "invalid_binding"},
+		{name: "mismatched request timezone", timezone: "Asia/Shanghai", start: "2026-08-31T16:00:00Z", code: "unsupported_timezone", declare: true},
+		{name: "non-midnight boundary", timezone: "UTC", start: "2026-09-01T12:00:00Z", code: "invalid_time", declare: true},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			values := dateFixture(t)
+			if test.declare {
+				for datasetIndex := range values.binding.Datasets {
+					for fieldIndex := range values.binding.Datasets[datasetIndex].Fields {
+						if values.binding.Datasets[datasetIndex].Fields[fieldIndex].Name == "order_ts" {
+							values.binding.Datasets[datasetIndex].Fields[fieldIndex].CalendarTimezone = "UTC"
+						}
+					}
+				}
+			}
+			values.query.TimeRange.Timezone = test.timezone
+			values.query.TimeRange.Start = test.start
+			values.query.TimeGrouping.Timezone = test.timezone
+			logical, err := planner.BuildLogical(values.manifest, values.bundle, values.context, values.query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = planner.BuildPhysical(values.manifest, logical, values.binding, values.capabilities)
+			assertProblem(t, err, test.code)
+		})
 	}
 }
 

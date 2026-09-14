@@ -129,6 +129,26 @@ func mcpCall(t *testing.T, session *mcp.ClientSession, name string, in, out any)
 	t.Fatalf("%s returned no JSON content", name)
 }
 
+func mcpCallError(t *testing.T, session *mcp.ClientSession, name string, in any) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 35*time.Second)
+	defer cancel()
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: in})
+	if err != nil {
+		t.Fatalf("%s protocol: %v", name, err)
+	}
+	if !result.IsError {
+		t.Fatalf("%s unexpectedly succeeded: %+v", name, result.Content)
+	}
+	var output strings.Builder
+	for _, content := range result.Content {
+		if content, ok := content.(*mcp.TextContent); ok {
+			output.WriteString(content.Text)
+		}
+	}
+	return output.String()
+}
+
 func TestMCPStdioCLI(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/ui/context" || r.Header.Get("Authorization") != "Bearer test-token" {
@@ -177,6 +197,64 @@ func TestMCPRemoteStagingAcceptance(t *testing.T) {
 	}
 	session := mcpHTTP(t, strings.TrimSuffix(origin, "/")+"/mcp", token)
 	verifyMCPStagingAcceptance(t, session, "remote HTTP")
+}
+
+// Explicit opt-in: this performs only discovery, explain, and plan calls. It
+// proves the hosted time contract without submitting a warehouse statement.
+func TestMCPRemoteStagingTimeContractAcceptance(t *testing.T) {
+	if os.Getenv("METRICSPIRE_RUN_MCP_ACCEPTANCE") != "staging-read-only" {
+		t.Skip("set METRICSPIRE_RUN_MCP_ACCEPTANCE=staging-read-only with staging URL and token")
+	}
+	origin, token := os.Getenv("METRICSPIRE_MCP_TEST_URL"), os.Getenv("METRICSPIRE_API_TOKEN")
+	if origin == "" || token == "" {
+		t.Fatal("staging origin and API token are required")
+	}
+	session := mcpHTTP(t, strings.TrimSuffix(origin, "/")+"/mcp", token)
+	var entries struct {
+		Metrics []application.MetricCatalogEntry `json:"metrics"`
+	}
+	mcpCall(t, session, "search_metrics", mcpbridge.SearchInput{Namespace: "acceptance", Search: "gross_revenue"}, &entries)
+	if len(entries.Metrics) != 1 {
+		t.Fatalf("unexpected metric discovery: %#v", entries.Metrics)
+	}
+	var orderDate *application.MetricDimensionEntry
+	for index := range entries.Metrics[0].DimensionDetails {
+		if entries.Metrics[0].DimensionDetails[index].Name == "order_date" {
+			orderDate = &entries.Metrics[0].DimensionDetails[index]
+			break
+		}
+	}
+	if orderDate == nil || orderDate.DataType != model.DataTypeDate || orderDate.CalendarTimezone != "UTC" {
+		t.Fatalf("date capability is incomplete: %#v", orderDate)
+	}
+	trend := mcpbridge.QueryInput{Namespace: "acceptance", Query: model.SemanticQuery{
+		APIVersion: model.APIVersion, Kind: model.KindSemanticQuery,
+		Metrics: []string{"gross_revenue"}, GroupBy: []string{"order_date"},
+		TimeRange:    &model.TimeRange{Dimension: "order_date", Start: "2026-08-02T00:00:00Z", End: "2026-09-01T00:00:00Z", Timezone: "UTC"},
+		TimeGrouping: &model.TimeGrouping{Dimension: "order_date", Timezone: "UTC", Granularity: model.GrainDay},
+		Limit:        30,
+	}}
+	var plan struct {
+		TimeRange    *model.TimeRange    `json:"time_range"`
+		TimeGrouping *model.TimeGrouping `json:"time_grouping"`
+		Limit        int                 `json:"limit"`
+	}
+	mcpCall(t, session, "explain_query", trend, &map[string]any{})
+	mcpCall(t, session, "plan_query", trend, &plan)
+	if plan.TimeRange == nil || plan.TimeGrouping == nil || plan.Limit != 30 || plan.TimeGrouping.Granularity != model.GrainDay {
+		t.Fatalf("30-day trend plan is incomplete: %#v", plan)
+	}
+	missingGrouping := trend
+	missingGrouping.Query.TimeGrouping = nil
+	if output := mcpCallError(t, session, "explain_query", missingGrouping); !strings.Contains(output, "invalid_time at time_grouping") || !strings.Contains(output, "provide time_grouping") {
+		t.Fatalf("missing-grouping error is not actionable: %q", output)
+	}
+	wrongTimezone := trend
+	wrongTimezone.Query.TimeRange = &model.TimeRange{Dimension: "order_date", Start: "2026-08-01T00:00:00Z", End: "2026-09-01T00:00:00Z", Timezone: "Asia/Shanghai"}
+	wrongTimezone.Query.TimeGrouping = &model.TimeGrouping{Dimension: "order_date", Timezone: "Asia/Shanghai", Granularity: model.GrainDay}
+	if output := mcpCallError(t, session, "plan_query", wrongTimezone); !strings.Contains(output, "unsupported_timezone at time_range.timezone") || !strings.Contains(output, `use "UTC"`) {
+		t.Fatalf("fixed-calendar error is not actionable: %q", output)
+	}
 }
 
 func verifyMCPStagingAcceptance(t *testing.T, session *mcp.ClientSession, transport string) {

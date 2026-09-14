@@ -97,20 +97,31 @@ type MetricCatalogEntry struct {
 	ValueType           model.DataType          `json:"value_type"`
 	Unit                string                  `json:"unit,omitempty"`
 	AllowedDimensions   []string                `json:"allowed_dimensions"`
+	DimensionDetails    []MetricDimensionEntry  `json:"dimension_details,omitempty"`
 	TimeDimension       string                  `json:"time_dimension,omitempty"`
 	TimeGranularities   []model.TimeGranularity `json:"time_granularities,omitempty"`
+}
+
+type MetricDimensionEntry struct {
+	Name              string                  `json:"name"`
+	Description       string                  `json:"description,omitempty"`
+	Type              model.DimensionType     `json:"type"`
+	DataType          model.DataType          `json:"data_type"`
+	TimeGranularities []model.TimeGranularity `json:"time_granularities,omitempty"`
+	CalendarTimezone  string                  `json:"calendar_timezone,omitempty"`
 }
 
 type CatalogService struct {
 	releases ActiveReleaseLister
 	policies PolicyResolver
+	bindings BindingResolver
 }
 
-func NewCatalogService(releases ActiveReleaseLister, policies PolicyResolver) (*CatalogService, error) {
-	if releases == nil || policies == nil {
-		return nil, errors.New("active release lister and policy resolver are required")
+func NewCatalogService(releases ActiveReleaseLister, policies PolicyResolver, bindings BindingResolver) (*CatalogService, error) {
+	if releases == nil || policies == nil || bindings == nil {
+		return nil, errors.New("active release lister, policy resolver, and binding resolver are required")
 	}
-	return &CatalogService{releases: releases, policies: policies}, nil
+	return &CatalogService{releases: releases, policies: policies, bindings: bindings}, nil
 }
 
 // SearchActive returns only metrics in active releases that the trusted
@@ -142,6 +153,10 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 		if err != nil {
 			return nil, err
 		}
+		resolvedBinding, err := service.bindings.ResolveBinding(ctx, modelScope, release)
+		if err != nil {
+			return nil, err
+		}
 		for _, metric := range release.Manifest.Definitions.Metrics {
 			candidate := model.SemanticQuery{Metrics: []string{metric.Name}}
 			if _, err := policy.Authorize(scope.Context, bundle, release.ManifestFingerprint, candidate); err != nil {
@@ -158,6 +173,7 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 			if err != nil {
 				return nil, err
 			}
+			dimensionDetails := catalogDimensionDetails(release.Manifest, resolvedBinding, authorizedDimensions)
 			var granularities []model.TimeGranularity
 			for _, dimension := range release.Manifest.Definitions.Dimensions {
 				if dimension.Name == metric.TimeDimension {
@@ -171,7 +187,7 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 				DisplayName: metric.DisplayName, Description: metric.Description, Owner: metric.Owner,
 				Tags: append([]string(nil), metric.Tags...), UsageExamples: append([]string(nil), metric.UsageExamples...), Deprecated: metric.Deprecated,
 				ValueType: metric.ValueType, Unit: metric.Unit,
-				AllowedDimensions: authorizedDimensions, TimeDimension: metric.TimeDimension,
+				AllowedDimensions: authorizedDimensions, DimensionDetails: dimensionDetails, TimeDimension: metric.TimeDimension,
 				TimeGranularities: granularities,
 			})
 			if len(results) == limit {
@@ -180,6 +196,50 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 		}
 	}
 	return results, nil
+}
+
+func catalogDimensionDetails(manifest model.SemanticManifest, binding model.SourceBinding, names []string) []MetricDimensionEntry {
+	dimensions := make(map[string]model.Dimension, len(manifest.Definitions.Dimensions))
+	entities := make(map[string]model.Entity, len(manifest.Definitions.Entities))
+	datasets := make(map[string]model.Dataset, len(manifest.Definitions.Datasets))
+	for _, dimension := range manifest.Definitions.Dimensions {
+		dimensions[dimension.Name] = dimension
+	}
+	for _, entity := range manifest.Definitions.Entities {
+		entities[entity.Name] = entity
+	}
+	for _, dataset := range manifest.Definitions.Datasets {
+		datasets[dataset.Name] = dataset
+	}
+	result := make([]MetricDimensionEntry, 0, len(names))
+	for _, name := range names {
+		dimension := dimensions[name]
+		entity := entities[dimension.Entity]
+		dataType := model.DataType("")
+		for _, field := range datasets[entity.Dataset].Fields {
+			if field.Name == dimension.Field {
+				dataType = field.DataType
+				break
+			}
+		}
+		entry := MetricDimensionEntry{
+			Name: name, Description: dimension.Description, Type: dimension.Type, DataType: dataType,
+			TimeGranularities: append([]model.TimeGranularity(nil), dimension.TimeGranularities...),
+		}
+		for _, dataset := range binding.Datasets {
+			if dataset.Name != entity.Dataset {
+				continue
+			}
+			for _, field := range dataset.Fields {
+				if field.Name == dimension.Field {
+					entry.CalendarTimezone = field.CalendarTimezone
+					break
+				}
+			}
+		}
+		result = append(result, entry)
+	}
+	return result
 }
 
 func catalogDimensions(context model.RequestContext, bundle model.PolicyBundle, manifestFingerprint string, metric model.Metric) ([]string, error) {

@@ -141,7 +141,7 @@ execution credential into its asynchronous job.
 
 | Tool | Purpose |
 | --- | --- |
-| `list_namespaces` / `search_metrics` | Find business domains, metric codes, definitions, dimensions and examples |
+| `list_namespaces` / `search_metrics` | Find business domains, metric codes, definitions, dimension descriptions/types, time grains, fixed calendar timezones and examples |
 | `explain_query` | Validate and explain a `namespace` + `query` without running analytical SQL |
 | `plan_query` | Resolve the governed engine, physical source and bounded query shape without executing it |
 | `submit_query` | Submit that `SemanticQuery`; creates a job and audit record and may incur query cost |
@@ -198,7 +198,8 @@ The `v1alpha1` schema registry is [`contracts/metricspire.schema.json`](contract
 
 Important guarantees:
 
-- time ranges are half-open `[start, end)`; grouping declares a business timezone and weekly queries declare their week start;
+- time ranges are explicit half-open `[start, end)` windows of at most 366 calendar days; a time dimension in `group_by` also requires matching `time_grouping`;
+- timestamp sources can be grouped in the requested IANA business timezone; date-backed sources declare `calendar_timezone` in the trusted binding and reject a different requested timezone rather than silently shifting calendar days;
 - v0.1 relationships are directed `many_to_one` joins, so grouping cannot silently multiply facts;
 - draft or inactive releases cannot be selected by a caller;
 - published metric codes cannot be silently removed or change execution semantics;

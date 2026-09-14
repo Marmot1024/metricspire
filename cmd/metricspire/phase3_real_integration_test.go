@@ -85,7 +85,7 @@ func TestPhase3RealHTTPAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalogSearch, err := application.NewCatalogService(store, policyResolver)
+	catalogSearch, err := application.NewCatalogService(store, policyResolver, bindingResolver)
 	if err != nil {
 		t.Fatal(err)
 	}

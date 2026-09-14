@@ -73,13 +73,13 @@ Fingerprints identify content; they are not signatures. A deployed control plane
 
 ## Query and execution budgets
 
-The planner limits metrics, dimensions, filters, values per filter, total parameters, SQL size, joins, and result rows before submission. The Databricks adapter carries the actual request row limit into the execution job, validates all result chunks cumulatively against the byte budget, and issues remote cancellation after caller cancellation or timeout.
+The planner limits metrics, dimensions, filters, values per filter, time windows (at most 366 calendar days), total parameters, SQL size, joins, and result rows before submission. Date-backed time fields declare a fixed `calendar_timezone` in the trusted source binding; planning rejects a different requested timezone or non-midnight boundary instead of implying a conversion the physical date cannot represent. Timestamp fields remain instant-based and may be grouped in an explicit IANA business timezone. The Databricks adapter carries the actual request row limit into the execution job, validates all result chunks cumulatively against the byte budget, and issues remote cancellation after caller cancellation or timeout.
 
 Small typed JSON results are the v0.1 boundary. Streaming export, external result locations, distributed cross-engine execution, and materialization are later capabilities.
 
 ## HTTP and UI boundary
 
-Management and query permissions are separate. Management endpoints validate, save drafts, publish, list releases, and rollback; query endpoints search the active catalog, explain, plan, submit jobs, fetch status, and cancel. Explain creates only an authorized logical plan. Plan may resolve a physical binding but never calls an analytical engine. Query submission is asynchronous, so network write deadlines are independent of query deadlines.
+Management and query permissions are separate. Management endpoints validate, save drafts, publish, list releases, and rollback; query endpoints search the active catalog, explain, plan, submit jobs, fetch status, and cancel. Catalog search includes authorized dimension descriptions, types, supported time grains, and fixed calendar timezones without exposing physical resources. Explain creates only an authorized logical plan. Plan may resolve a physical binding but never calls an analytical engine. Query submission is asynchronous, so network write deadlines are independent of query deadlines.
 
 All dynamic JSON is decoded with unknown-field and duplicate-key rejection plus a byte limit. Responses carry request IDs, no-store and browser security headers; cross-origin state changes are rejected. Errors use one `application/problem+json` shape. The embedded UI has no separate business logic, token field, or fake login; catalog, explain/plan/query, job cancellation, draft load/save/validation, publication, release listing, and rollback all call the same API and use the OIDC session.
 

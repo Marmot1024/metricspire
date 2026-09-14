@@ -19,12 +19,13 @@ import (
 )
 
 const (
-	DefaultLimit        = 1000
-	MaximumLimit        = 10000
-	MaximumMetrics      = 32
-	MaximumDimensions   = 16
-	MaximumFilters      = 32
-	MaximumFilterValues = 100
+	DefaultLimit         = 1000
+	MaximumLimit         = 10000
+	MaximumMetrics       = 32
+	MaximumDimensions    = 16
+	MaximumFilters       = 32
+	MaximumFilterValues  = 100
+	MaximumTimeRangeDays = 366
 )
 
 var physicalNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$]*$`)
@@ -251,15 +252,18 @@ func BuildPhysical(manifest model.SemanticManifest, logical model.LogicalPlan, b
 	for _, dimension := range logical.Dimensions {
 		entity := index.entities[dimension.Entity]
 		datasetBinding := bindingIndex[entity.Dataset]
-		column, ok := boundColumn(datasetBinding, dimension.Field)
+		fieldBinding, ok := boundField(datasetBinding, dimension.Field)
 		if !ok {
 			return model.PhysicalPlan{}, problem("binding_missing", "binding.datasets", "field %s.%s is not bound", entity.Dataset, dimension.Field)
 		}
 		physicalDimensions = append(physicalDimensions, model.PhysicalDimension{
 			Name: dimension.Name, Output: dimension.Output, Entity: dimension.Entity,
-			Resource: datasetBinding.Resource, Column: column, Type: dimension.Type,
-			DataType: dimension.DataType,
+			Resource: datasetBinding.Resource, Column: fieldBinding.Column, Type: dimension.Type,
+			DataType: dimension.DataType, CalendarTimezone: fieldBinding.CalendarTimezone,
 		})
+	}
+	if err := validatePhysicalTimeSemantics(logical.TimeRange, physicalDimensions); err != nil {
+		return model.PhysicalPlan{}, err
 	}
 	physicalJoins := make([]model.PhysicalJoin, 0, len(logical.Joins))
 	for _, join := range logical.Joins {
@@ -429,7 +433,7 @@ func normalizeTimeSemantics(index manifestIndex, query *model.SemanticQuery, roo
 	}
 	if query.TimeRange == nil {
 		if requiresTime {
-			return problem("time_range_required", "time_range", "time-bound metrics require an explicit [start, end) range")
+			return problem("time_range_required", "time_range", "time-bound metrics require dimension, RFC3339 start, exclusive end, and the business timezone when the source or grouping is calendar-based")
 		}
 		if query.TimeGrouping != nil {
 			return problem("invalid_time", "time_grouping", "time grouping requires a time range")
@@ -457,9 +461,15 @@ func normalizeTimeSemantics(index manifestIndex, query *model.SemanticQuery, roo
 	}
 	rangeValue.Timezone = strings.TrimSpace(rangeValue.Timezone)
 	if rangeValue.Timezone != "" {
-		if _, err := time.LoadLocation(rangeValue.Timezone); err != nil {
+		location, err := time.LoadLocation(rangeValue.Timezone)
+		if err != nil {
 			return problem("invalid_time", "time_range.timezone", "%q is not a valid IANA timezone", rangeValue.Timezone)
 		}
+		if end.After(start.In(location).AddDate(0, 0, MaximumTimeRangeDays)) {
+			return problem("time_range_exceeded", "time_range", "requested range spans approximately %.1f days; maximum is %d calendar days; split the request into smaller windows", end.Sub(start).Hours()/24, MaximumTimeRangeDays)
+		}
+	} else if end.Sub(start) > MaximumTimeRangeDays*24*time.Hour {
+		return problem("time_range_exceeded", "time_range", "requested range spans %.1f days; maximum is %d days; provide a timezone or split the request into smaller windows", end.Sub(start).Hours()/24, MaximumTimeRangeDays)
 	}
 	for _, metricName := range query.Metrics {
 		if value := index.metrics[metricName].TimeDimension; value != "" && value != rangeValue.Dimension {
@@ -495,7 +505,7 @@ func validateTimeGrouping(index manifestIndex, query *model.SemanticQuery) error
 		return nil
 	}
 	if query.TimeGrouping == nil {
-		return problem("invalid_time", "time_grouping", "grouped time dimensions require explicit grouping semantics")
+		return problem("invalid_time", "time_grouping", "group_by contains time dimension %q; provide time_grouping with the same dimension, an IANA timezone, and day, week, or month granularity", groupedTimeDimensions[0])
 	}
 	grouping := *query.TimeGrouping
 	if grouping.Dimension != groupedTimeDimensions[0] {
@@ -848,6 +858,15 @@ func normalizeAndValidateBinding(binding model.SourceBinding, manifest model.Sem
 			if !found {
 				return model.SourceBinding{}, nil, problem("unknown_reference", fieldPath+".name", "field %q does not exist", field.Name)
 			}
+			if field.CalendarTimezone != "" {
+				semanticField, _ := datasetField(semanticDataset, field.Name)
+				if semanticField.DataType != model.DataTypeDate {
+					return model.SourceBinding{}, nil, problem("invalid_binding", fieldPath+".calendar_timezone", "is only valid for date fields")
+				}
+				if _, err := time.LoadLocation(field.CalendarTimezone); err != nil {
+					return model.SourceBinding{}, nil, problem("invalid_binding", fieldPath+".calendar_timezone", "%q is not a valid IANA timezone", field.CalendarTimezone)
+				}
+			}
 		}
 		index[dataset.Name] = *dataset
 	}
@@ -940,12 +959,57 @@ func validateResource(resource model.ResourceRef, path string) error {
 }
 
 func boundColumn(binding model.DatasetBinding, name string) (string, bool) {
+	field, ok := boundField(binding, name)
+	return field.Column, ok
+}
+
+func boundField(binding model.DatasetBinding, name string) (model.FieldBinding, bool) {
 	for _, field := range binding.Fields {
 		if field.Name == name {
-			return field.Column, true
+			return field, true
 		}
 	}
-	return "", false
+	return model.FieldBinding{}, false
+}
+
+func validatePhysicalTimeSemantics(timeRange *model.TimeRange, dimensions []model.PhysicalDimension) error {
+	if timeRange == nil {
+		return nil
+	}
+	var dimension *model.PhysicalDimension
+	for index := range dimensions {
+		if dimensions[index].Name == timeRange.Dimension {
+			dimension = &dimensions[index]
+			break
+		}
+	}
+	if dimension == nil || dimension.DataType != model.DataTypeDate {
+		return nil
+	}
+	if dimension.CalendarTimezone == "" {
+		return problem("invalid_binding", "binding.datasets.fields.calendar_timezone", "date-backed time dimension %q must declare its physical calendar timezone", dimension.Name)
+	}
+	if timeRange.Timezone == "" {
+		return problem("invalid_time", "time_range.timezone", "date-backed time dimension %q requires timezone %q", dimension.Name, dimension.CalendarTimezone)
+	}
+	if timeRange.Timezone != dimension.CalendarTimezone {
+		return problem("unsupported_timezone", "time_range.timezone", "date-backed time dimension %q uses calendar timezone %q and cannot represent requested timezone %q; use %q or bind a timestamp source", dimension.Name, dimension.CalendarTimezone, timeRange.Timezone, dimension.CalendarTimezone)
+	}
+	location, _ := time.LoadLocation(dimension.CalendarTimezone)
+	for _, boundary := range []struct{ path, raw string }{
+		{path: "time_range.start", raw: timeRange.Start},
+		{path: "time_range.end", raw: timeRange.End},
+	} {
+		instant, err := time.Parse(time.RFC3339Nano, boundary.raw)
+		if err != nil {
+			return problem("invalid_time", boundary.path, "must be an RFC3339 timestamp with offset")
+		}
+		local := instant.In(location)
+		if local.Hour() != 0 || local.Minute() != 0 || local.Second() != 0 || local.Nanosecond() != 0 {
+			return problem("invalid_time", boundary.path, "date-backed time dimension %q requires midnight boundaries in timezone %q", dimension.Name, dimension.CalendarTimezone)
+		}
+	}
+	return nil
 }
 
 func datasetField(dataset model.Dataset, name string) (model.Field, bool) {

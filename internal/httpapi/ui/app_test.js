@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const {catalogStatusCounts, catalogStatusLabel, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, planSummaryRows, preferredTimeGranularity, resolvePresetRange, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
+const {catalogStatusCounts, catalogStatusLabel, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, planSummaryRows, preferredTimeGranularity, resolvePresetRange, sharedTimeMetadata, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
 const {execFileSync} = require("node:child_process");
 
 test("copied request preserves apostrophes and shell characters as literal JSON", () => {
@@ -98,6 +98,25 @@ test("time dimension has a deterministic safe grouping default", () => {
   assert.equal(preferredTimeGranularity(["month", "day", "week"]), "day");
   assert.equal(preferredTimeGranularity(["month"]), "month");
   assert.equal(preferredTimeGranularity([]), "");
+});
+
+test("date-backed metrics disclose and share one fixed calendar timezone", () => {
+  const metric = (name, timezone) => ({name, time_dimension: "date", time_granularities: ["day", "month"],
+    dimension_details: [{name: "date", type: "time", data_type: "date", calendar_timezone: timezone}]});
+  assert.deepEqual(sharedTimeMetadata([metric("revenue", "UTC"), metric("orders", "UTC")]), {
+    dimension: "date", granularities: ["day", "month"], calendarTimezone: "UTC",
+  });
+  assert.equal(sharedTimeMetadata([metric("revenue", "UTC"), metric("orders", "Asia/Shanghai")]).incompatible, true);
+});
+
+test("query form locks a date-backed metric to its declared calendar timezone", () => {
+  const {context, run} = editorContext();
+  context.document.getElementById("time-grain").options = [];
+  context.document.getElementById("business-timezone").value = "Asia/Shanghai";
+  run(`configureTimeControls({dimension: "date", granularities: ["day"], calendarTimezone: "UTC"})`);
+  assert.equal(context.document.getElementById("business-timezone").value, "UTC");
+  assert.equal(context.document.getElementById("business-timezone").readOnly, true);
+  assert.match(context.document.getElementById("business-timezone").title, /UTC/);
 });
 
 test("explain and plan have a human-readable summary independent of raw JSON", () => {

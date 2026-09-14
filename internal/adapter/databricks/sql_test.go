@@ -109,6 +109,66 @@ func TestCompileSupportsCommonAggregatesAndConstrainedMetricFilters(t *testing.T
 	}
 }
 
+func TestCompileUsesDateParametersForCalendarDateDimensions(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join("..", "..", "..", "examples", "orders")
+	var source model.SemanticSource
+	read(t, filepath.Join(root, "model.yaml"), &source)
+	for datasetIndex := range source.Spec.Datasets {
+		for fieldIndex := range source.Spec.Datasets[datasetIndex].Fields {
+			if source.Spec.Datasets[datasetIndex].Fields[fieldIndex].Name == "order_ts" {
+				source.Spec.Datasets[datasetIndex].Fields[fieldIndex].DataType = model.DataTypeDate
+			}
+		}
+	}
+	manifest, err := compiler.Compile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var policySource model.PolicySource
+	var context model.RequestContext
+	var query model.SemanticQuery
+	var binding model.SourceBinding
+	read(t, filepath.Join(root, "policy.yaml"), &policySource)
+	read(t, filepath.Join(root, "context.json"), &context)
+	read(t, filepath.Join(root, "query.json"), &query)
+	read(t, filepath.Join(root, "binding.json"), &binding)
+	policySource.ManifestFingerprint = ""
+	bundle, err := compiler.CompilePolicy(policySource, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query.TimeRange.Start = "2026-09-01T00:00:00Z"
+	query.TimeRange.End = "2026-09-08T00:00:00Z"
+	query.TimeRange.Timezone = "UTC"
+	query.TimeGrouping.Timezone = "UTC"
+	for datasetIndex := range binding.Datasets {
+		for fieldIndex := range binding.Datasets[datasetIndex].Fields {
+			if binding.Datasets[datasetIndex].Fields[fieldIndex].Name == "order_ts" {
+				binding.Datasets[datasetIndex].Fields[fieldIndex].CalendarTimezone = "UTC"
+			}
+		}
+	}
+	binding.ManifestFingerprint = manifest.Fingerprint
+	binding.Engine = databricks.EngineName
+	logical, err := planner.BuildLogical(manifest, bundle, context, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	physical, err := planner.BuildPhysical(manifest, logical, binding, databricks.Capabilities())
+	if err != nil {
+		t.Fatal(err)
+	}
+	statement, err := databricks.Compile(physical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statement.Parameters) < 2 || statement.Parameters[0].Type != "DATE" || statement.Parameters[1].Type != "DATE" ||
+		*statement.Parameters[0].Value != "2026-09-01" || *statement.Parameters[1].Value != "2026-09-08" {
+		t.Fatalf("date parameters = %#v", statement.Parameters)
+	}
+}
+
 func TestCompileRejectsTamperedPlan(t *testing.T) {
 	t.Parallel()
 	plan := buildPlan(t, nil, nil)

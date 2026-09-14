@@ -52,7 +52,7 @@ function errorMessage(error) {
     message = "当前账号没有执行此操作的权限。请联系平台管理员确认所属权限组。";
   } else if (code === "unauthorized" || error?.status === 401) {
     message = "登录状态已失效，请重新登录后再试。";
-  } else if (/grouped time dimensions require explicit grouping semantics/i.test(detail)) {
+  } else if ((code === "invalid_time" && error?.path === "time_grouping") || /grouped time dimensions require explicit grouping semantics|group_by contains time dimension/i.test(detail)) {
     message = "选择时间维度后必须指定时间粒度，请选择按日、按周或按月。";
   }
   return `${message}${error?.path ? `（${error.path}）` : ""}${error?.request_id ? ` · 请求 ${error.request_id}` : ""}`;
@@ -455,7 +455,7 @@ function renderMetricDetail(metric) {
   byID("detail-type").textContent = humanType(metric.value_type, metric.unit);
   byID("detail-release").textContent = draft ? "尚未发布 · 可试查" : pending ? "尚无安全查询定义" : metric.release_id;
   byID("detail-time").textContent = metric.time_dimension
-    ? `${metric.time_dimension} · ${(metric.time_granularities || []).map(humanGrain).join("/") || "未配置粒度"}`
+    ? `${metric.time_dimension} · ${(metric.time_granularities || []).map(humanGrain).join("/") || "未配置粒度"}${metricTimeDetail(metric)?.calendar_timezone ? ` · ${metricTimeDetail(metric).calendar_timezone} 日历` : ""}`
     : "非时间限定指标";
   const dimensions = byID("detail-dimensions");
   dimensions.replaceChildren();
@@ -501,10 +501,17 @@ function sharedTimeMetadata(metrics) {
   if (!timed.length) return {dimension: "", granularities: []};
   const dimension = timed[0].time_dimension;
   if (timed.some((metric) => metric.time_dimension !== dimension)) return {dimension: "", granularities: [], incompatible: true};
+  const fixedTimezones = [...new Set(timed.map((metric) => metricTimeDetail(metric)?.calendar_timezone || "").filter(Boolean))];
+  if (fixedTimezones.length > 1) return {dimension: "", granularities: [], incompatible: true};
   return {
     dimension,
     granularities: (timed[0].time_granularities || []).filter((grain) => timed.every((metric) => (metric.time_granularities || []).includes(grain))),
+    calendarTimezone: fixedTimezones[0] || "",
   };
+}
+
+function metricTimeDetail(metric) {
+  return (metric.dimension_details || []).find((dimension) => dimension.name === metric.time_dimension);
 }
 
 function renderMetricOptions() {
@@ -603,17 +610,22 @@ function configureTimeControls(time) {
   const preset = byID("time-preset");
   const grain = byID("time-grain");
   const enabled = Boolean(time.dimension);
+  const timezone = byID("business-timezone");
   preset.disabled = !enabled;
   grain.disabled = !enabled;
   if (!enabled) {
     preset.value = "none";
     grain.value = "";
   } else {
-    if (!byID("business-timezone").value.trim()) {
-      byID("business-timezone").value = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";
+    if (time.calendarTimezone) {
+      timezone.value = time.calendarTimezone;
+    } else if (!timezone.value.trim()) {
+      timezone.value = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";
     }
     if (preset.value === "none") preset.value = "yesterday";
   }
+  timezone.readOnly = Boolean(time.calendarTimezone);
+  timezone.title = time.calendarTimezone ? `该日期源固定使用 ${time.calendarTimezone} 日历，不能动态换算业务日。` : "使用 IANA 业务时区，例如 Asia/Shanghai";
   for (const option of grain.options) option.disabled = Boolean(option.value && !time.granularities.includes(option.value));
   if (grain.value && !time.granularities.includes(grain.value)) grain.value = "";
   const timeDimensionSelected = [...document.querySelectorAll("input[name='query-dimension']:checked")]
@@ -844,7 +856,7 @@ function updateQueryPreview() {
     byID("query-request-preview").textContent = JSON.stringify(built.query, null, 2);
     renderSummary(byID("query-summary"), querySummaryRows(built.query));
     byID("resolved-time").textContent = built.query.time_range
-      ? `实际请求范围：[${built.query.time_range.start}, ${built.query.time_range.end})`
+      ? `实际请求范围：[${built.query.time_range.start}, ${built.query.time_range.end})${sharedTimeMetadata(selectedQueryMetrics()).calendarTimezone ? ` · 日期源固定 ${sharedTimeMetadata(selectedQueryMetrics()).calendarTimezone} 日历` : ""}`
       : selectedQueryMetrics().some((metric) => metric.time_dimension)
         ? "请选择一个明确时间范围；时间口径指标不允许隐式全量查询。"
         : "所选指标不要求时间范围。";
@@ -1536,6 +1548,6 @@ async function initialize() {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = {catalogStatusCounts, catalogStatusLabel, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, shiftDate, timezoneParts, verificationLabel, zonedMidnightISO, shellQuote};
+  module.exports = {catalogStatusCounts, catalogStatusLabel, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricTimeDetail, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, sharedTimeMetadata, shiftDate, timezoneParts, verificationLabel, zonedMidnightISO, shellQuote};
 }
 if (typeof document !== "undefined") initialize();
