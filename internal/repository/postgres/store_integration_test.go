@@ -13,6 +13,7 @@ import (
 	"github.com/marmot1024/metricspire/internal/audit"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
+	"github.com/marmot1024/metricspire/internal/governance"
 	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/marmot1024/metricspire/internal/repository/postgres"
 )
@@ -120,6 +121,45 @@ SELECT event_kind, row_count FROM metricspire_query_audit WHERE request_id = $1`
 	}
 	if eventKind != string(audit.EventQuerySucceeded) || rowCount != 3 {
 		t.Fatalf("stored audit = %s rows=%d", eventKind, rowCount)
+	}
+	governanceService, err := governance.NewService(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := governance.MetricDefinition{
+		Code: "governed_metric", DisplayName: "治理指标", Description: "源定义", Owner: "test", Status: "unverified",
+		BusinessType: governance.BusinessDerived, SemanticReadiness: governance.ReadinessNeedsRemediation,
+		AuthoritativeSource: governance.SourceReference{Reference: "sheet:1", Resource: "daily", Field: "value"},
+		ValueType:           model.DataTypeDecimal, Verification: model.Verification{Status: model.VerificationUnverified},
+	}
+	firstImport, err := governanceService.Import(ctx, governance.ImportInput{
+		Namespace: namespace, SourceFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Actor: "test", Records: []governance.MetricDefinition{definition},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition.Description = "第二版源定义"
+	secondImport, err := governanceService.Import(ctx, governance.ImportInput{
+		Namespace: namespace, SourceFingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		ExpectedPreviousImportID: firstImport.ID, Actor: "test", Records: []governance.MetricDefinition{definition},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := governanceService.RollbackImport(ctx, namespace, secondImport.ID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	records, err := governanceService.List(ctx, namespace, "", 10)
+	if err != nil || len(records) != 1 || records[0].Definition.Description != "源定义" {
+		t.Fatalf("governance records after second rollback = %#v, %v", records, err)
+	}
+	if _, err := governanceService.RollbackImport(ctx, namespace, firstImport.ID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	records, err = governanceService.List(ctx, namespace, "", 10)
+	if err != nil || len(records) != 0 {
+		t.Fatalf("governance records after initial rollback = %#v, %v", records, err)
 	}
 	events, err := store.ListEvents(ctx, namespace, source.Metadata.Name)
 	if err != nil || len(events) != 3 || events[1].ToReleaseID != release2.ID || events[2].Kind != catalog.EventRollback {

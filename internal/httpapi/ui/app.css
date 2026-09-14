@@ -201,9 +201,17 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 pre { overflow: auto; max-height: 500px; margin: 0; padding: 15px; border-radius: 11px; background: #10251a; color: #d6eddd; font-size: .72rem; line-height: 1.55; }
 details { margin-top: 14px; color: var(--muted); font-size: .75rem; }
 summary { cursor: pointer; font-weight: 730; }
-.developer-actions { display: flex; gap: 12px; margin-top: 10px; }
-.developer-actions .text-button { color: var(--green); }
+.query-summary { display: grid; gap: 10px; color: var(--muted); font-size: .77rem; }
+.query-summary div { display: grid; gap: 3px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.query-summary div:last-child { padding-bottom: 0; border-bottom: 0; }
+.query-summary strong { color: var(--ink); font-size: .72rem; }
+.query-summary span { overflow-wrap: anywhere; }
 .result-panel { margin-top: 18px; }
+.result-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.result-summary article { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-soft); }
+.result-summary small, .result-summary strong { display: block; }
+.result-summary small { color: var(--muted); font-size: .67rem; }
+.result-summary strong { margin-top: 5px; overflow-wrap: anywhere; font-size: .8rem; }
 .table-wrap { overflow: auto; max-height: 520px; border: 1px solid var(--line); border-radius: 11px; }
 table { width: 100%; border-collapse: collapse; font-size: .77rem; }
 th, td { padding: 11px 13px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
@@ -241,7 +249,7 @@ tbody tr:hover { background: #fafcf9; }
   .scope-picker, .scope-picker select, .page-heading label select, .release-note-field { width: 100%; min-width: 0; }
   .catalog-layout { grid-template-columns: 1fr; }
   .detail-panel { position: static; }
-  .status-grid, .review-column, .metric-options { grid-template-columns: 1fr; }
+  .status-grid, .review-column, .metric-options, .result-summary { grid-template-columns: 1fr; }
   .form-grid.two, .form-grid.three, .form-grid.four { grid-template-columns: 1fr; }
   .filter-row, .action-row { align-items: stretch; flex-direction: column; }
   .filter-row label { min-width: 0; }

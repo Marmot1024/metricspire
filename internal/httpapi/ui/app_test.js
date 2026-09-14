@@ -4,12 +4,82 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const {resolvePresetRange, zonedMidnightISO, shellQuote} = require("./app.js");
+const {catalogStatusCounts, draftCatalogEntries, governanceCatalogEntries, matchesCatalogSearch, mergeCatalogEntries, planSummaryRows, preferredTimeGranularity, resolvePresetRange, zonedMidnightISO, shellQuote} = require("./app.js");
 const {execFileSync} = require("node:child_process");
 
 test("copied request preserves apostrophes and shell characters as literal JSON", () => {
   const payload = JSON.stringify({values: ["O'Reilly", "$(echo unintended)", "`echo unintended`", "$PATH", "a\nb"]});
   assert.equal(execFileSync("/bin/sh", ["-c", "printf %s " + shellQuote(payload)], {encoding: "utf8"}), payload);
+});
+
+test("maintainer catalog exposes unverified drafts without making them published", () => {
+  const draft = {source: {spec: {
+    dimensions: [{name: "date", time_granularities: ["day", "month"]}],
+    metrics: [{name: "iap_amount", display_name: "付费额", owner: "土拨鼠", tags: ["governance_unverified"],
+      value_type: "decimal", unit: "usd", allowed_dimensions: ["date"], time_dimension: "date",
+      verification: {status: "unverified"}}],
+  }}};
+  const entries = draftCatalogEntries({namespace: "mm", model_name: "player_daily_behavior"}, draft);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].catalog_status, "draft");
+  assert.equal(entries[0].release_id, "");
+  assert.deepEqual(entries[0].time_granularities, ["day", "month"]);
+  assert.equal(matchesCatalogSearch(entries[0], "付费"), true);
+  assert.equal(matchesCatalogSearch(entries[0], "收入"), false);
+});
+
+test("published metric wins over a same-code draft in the catalog view", () => {
+  const published = [{name: "iap_amount", release_id: "rel_1"}];
+  const drafts = [{name: "iap_amount", catalog_status: "draft"}, {name: "level_count", catalog_status: "draft"}];
+  assert.deepEqual(mergeCatalogEntries(published, drafts), [
+    {name: "iap_amount", release_id: "rel_1", catalog_status: "published"},
+    {name: "level_count", catalog_status: "draft"},
+  ]);
+});
+
+test("catalog status counts do not double count drafts shadowed by a published metric", () => {
+  const view = mergeCatalogEntries(
+    [{name: "iap_amount", release_id: "rel_1"}],
+    [{name: "iap_amount", catalog_status: "draft"}, {name: "level_count", catalog_status: "governance"}],
+  );
+  assert.deepEqual(catalogStatusCounts(view), {published: 1, draft: 0, governance: 1});
+});
+
+test("governance catalog keeps all records but only marks executable definitions as draft previews", () => {
+  const records = [
+    {namespace: "mm", revision: 1, definition: {code: "ready", display_name: "可试查", description: "ready",
+      semantic_readiness: "executable_unverified", semantic_model_name: "daily", test_dimensions: ["date"], verification: {status: "unverified"}}},
+    {namespace: "mm", revision: 1, definition: {code: "pending", display_name: "待治理", description: "pending",
+      semantic_readiness: "needs_semantic_remediation", test_dimensions: ["date"], verification: {status: "unverified"}}},
+  ];
+  const entries = governanceCatalogEntries(records, [{name: "ready", model_name: "daily", time_granularities: ["day"]}]);
+  assert.deepEqual(entries.map((entry) => entry.catalog_status), ["draft", "governance"]);
+  assert.equal(entries[0].semantic_model_name, "daily");
+  assert.equal(entries[1].semantic_model_name, "");
+});
+
+test("time dimension has a deterministic safe grouping default", () => {
+  assert.equal(preferredTimeGranularity(["month", "day", "week"]), "day");
+  assert.equal(preferredTimeGranularity(["month"]), "month");
+  assert.equal(preferredTimeGranularity([]), "");
+});
+
+test("explain and plan have a human-readable summary independent of raw JSON", () => {
+  const rows = Object.fromEntries(planSummaryRows("plan", {
+    release: {id: "rel_test"},
+    logical_plan: {
+      root_entity: "player_day",
+      metrics: [{name: "game_start_count", output: true}],
+      dimensions: [{name: "date", output: true}],
+      time_range: {start: "2026-09-01T00:00:00Z", end: "2026-09-02T00:00:00Z", timezone: "Asia/Shanghai"},
+      filters: [], limit: 10, lineage: {datasets: ["player_daily"]},
+    },
+    physical_plan: {engine: "databricks", root: {resource: {catalog: "main", schema: "gold", table: "player_daily"}}},
+  }, [{name: "game_start_count", display_name: "游戏启动次数"}]));
+  assert.equal(rows["指标"], "游戏启动次数 (game_start_count)");
+  assert.equal(rows["执行引擎"], "databricks");
+  assert.equal(rows["数据来源"], "main.gold.player_daily");
+  assert.equal(rows["筛选"], "无（筛选条件可选）");
 });
 
 // Exercise the actual form handlers without adding a production DOM dependency.
@@ -38,6 +108,21 @@ function editorContext() {
   }}}; state.creatingMetric = true;`, context);
   return {context, elements, run: (code) => vm.runInContext(code, context)};
 }
+
+test("query builder automatically completes grouped time semantics and keeps filters optional", () => {
+  const {context, run} = editorContext();
+  run(`state.catalog = [{name: 'game_start_count', display_name: '游戏启动次数', catalog_status: 'published',
+    allowed_dimensions: ['date'], time_dimension: 'date', time_granularities: ['day', 'month']}];
+    state.queryMetricKeys = new Set(['game_start_count']); state.filters = [];`);
+  context.document.querySelectorAll = (selector) => selector === "input[name='query-dimension']:checked" ? [{value: "date", checked: true}] : [];
+  const values = {"row-limit": "10", "time-preset": "custom", "time-grain": "",
+    "business-timezone": "Asia/Shanghai", "time-start": "2026-09-01", "time-end": "2026-09-02"};
+  for (const [id, value] of Object.entries(values)) context.document.getElementById(id).value = value;
+  const query = run("buildQuery().query");
+  assert.deepEqual(JSON.parse(JSON.stringify(query.time_grouping)), {dimension: "date", timezone: "Asia/Shanghai", granularity: "day"});
+  assert.equal(query.filters.length, 0);
+  assert.deepEqual(Array.from(query.group_by), ["date"]);
+});
 
 test("new metric form submits an entity-qualified expression, not a physical dataset", () => {
   const {context, run} = editorContext();

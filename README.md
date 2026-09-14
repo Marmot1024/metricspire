@@ -25,7 +25,7 @@ MetricSpire is an open-source semantic metrics layer and governed data API. It c
 - verifies generic OIDC issuer/signature/expiry claims, separates the browser client audience from the API JWT access-token audience, and supports Authorization Code + PKCE browser login with encrypted, HTTP-only sessions;
 - supports a fail-closed Databricks Apps identity profile in which authenticated users receive query access, one stable publisher-group ID additionally grants management, and the forwarded user token exists only in the in-memory engine-execution context;
 - serves a dependency-free product UI for indicator discovery, structured basic-indicator maintenance, binding and change-impact review, immutable publication/rollback, and developer query validation; every action calls the same HTTP API rather than duplicating application logic.
-- offers an MCP stdio bridge for AI clients, using that same authenticated HTTP API without duplicating catalog or execution logic.
+- exposes the same seven governed query tools through hosted Streamable HTTP MCP and a development-only stdio compatibility bridge.
 
 ## Core flow
 
@@ -120,37 +120,22 @@ Unauthenticated `GET /health/live` reports process liveness. `GET /health/ready`
 
 ## MCP client connection
 
-Build the CLI with `go build -o dist/metricspire ./cmd/metricspire`. Configure a
-stdio-capable MCP client to launch that binary with these arguments:
-
-```json
-{
-  "mcpServers": {
-    "metricspire": {
-      "command": "/absolute/path/to/metricspire",
-      "args": ["mcp", "--api-url", "https://metrics.example.com"]
-    }
-  }
-}
-```
-
-The launcher must inject `METRICSPIRE_API_TOKEN` through its secret/environment
-mechanism. Use an API access token accepted by the configured HTTP identity
-provider, not a browser ID token. Databricks Apps uses an authorized workspace
-API token. Do not paste tokens into prompts, arguments or checked-in client
-configuration. One process represents one principal; on token expiry, refresh
-it through the existing identity provider and restart the bridge. No new login
-system, App, database or MCP HTTP listener is required. Client configuration
-syntax varies; the command, arguments and environment are the contract.
-
-Codex CLI 的对应配置如下；令牌由启动进程的环境提供，不写入 TOML：
+`metricspire serve` exposes a stateless Streamable HTTP endpoint at `/mcp`.
+External clients connect to that URL; they do not clone this repository or run
+a local MetricSpire binary. For Codex, configure the endpoint as follows:
 
 ```toml
 [mcp_servers.metricspire]
-command = "/absolute/path/to/metricspire"
-args = ["mcp", "--api-url", "https://metrics.example.com"]
-env_vars = ["METRICSPIRE_API_TOKEN"]
+url = "https://metrics.example.com/mcp"
+bearer_token_env_var = "METRICSPIRE_API_TOKEN"
 ```
+
+Inject an API access token accepted by the deployment's existing identity
+provider. Do not paste tokens into prompts, URLs, arguments, or checked-in
+configuration. The server authenticates every MCP request, requires query
+permission, and scopes job reads and cancellation to that request's tenant and
+principal. Only `submit_query` may forward the current request's short-lived
+execution credential into its asynchronous job.
 
 交互使用时确认查询工具的执行请求。非交互 `codex exec` 无法弹出审批；仅对已明确授权的任务，可在本次进程配置 `mcp_servers.metricspire.tools.submit_query.approval_mode="approve"`。不要因此放开全局审批或沙盒。[Codex MCP 配置](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
 
@@ -158,6 +143,7 @@ env_vars = ["METRICSPIRE_API_TOKEN"]
 | --- | --- |
 | `list_namespaces` / `search_metrics` | Find business domains, metric codes, definitions, dimensions and examples |
 | `explain_query` | Validate and explain a `namespace` + `query` without running analytical SQL |
+| `plan_query` | Resolve the governed engine, physical source and bounded query shape without executing it |
 | `submit_query` | Submit that `SemanticQuery`; creates a job and audit record and may incur query cost |
 | `get_query` / `cancel_query` | Read or cancel the returned `job_id` |
 
@@ -173,19 +159,23 @@ There are no SQL, publication, identity-override or management tools.
 请先从目录确认指标与维度，解释口径并展示查询参数，等我确认后再执行。”
 找不到匹配项时应说明缺失，不猜指标 code。协议测试通过不代表自然语言理解已验收。
 
-The bridge allows HTTPS origins (HTTP only on loopback for local development),
-rejects redirects, and caps request/response bytes at 1/8 MiB with a 30-second
-HTTP timeout. Existing service permissions, query limits and audit still apply.
-After an uncertain submission failure, do not retry automatically. Canceling
-an MCP call stops that HTTP request, not an already accepted query job; use
-`cancel_query`. Decimal strings and integer JSON text are preserved.
+The hosted endpoint is request/response-only and keeps no principal-bound MCP
+session. It caps request/response bytes at 1/8 MiB; existing permissions, query
+limits, deadlines and audit still apply. After an uncertain submission failure,
+do not retry automatically. Canceling an MCP request does not cancel an already
+accepted query job; use `cancel_query`. Decimal strings and integer JSON text
+are preserved.
 
 Opt-in integration: with a staging token, set
 `METRICSPIRE_RUN_MCP_ACCEPTANCE=staging-read-only`,
-`METRICSPIRE_MCP_TEST_URL` and absolute `METRICSPIRE_MCP_TEST_BINARY`, then run
-`go test ./cmd/metricspire -run '^TestMCPStagingAcceptance$' -v -count=1`.
+`METRICSPIRE_MCP_TEST_URL` and `METRICSPIRE_API_TOKEN`, then run
+`go test ./cmd/metricspire -run '^TestMCPRemoteStagingAcceptance$' -v -count=1`.
 This requires the existing `acceptance` TPCH fixture; it queries, but never
 creates resources or modifies metric definitions or analytical tables.
+
+For local development compatibility, `metricspire mcp --api-url <origin>` still
+runs a stdio-to-HTTP bridge using `METRICSPIRE_API_TOKEN`. It is not the default
+external delivery path.
 
 ## Distribution and deployment profiles
 
@@ -233,7 +223,7 @@ Read the [architecture note](docs/architecture.md), [Phase 1 acceptance](docs/ph
 
 ## Non-goals for v0.1
 
-MetricSpire is not an ETL platform, BI dashboard, data warehouse, arbitrary SQL gateway, cross-engine execution engine, or large-result export system. The current scope excludes a hosted LLM, remote MCP HTTP transport, SDK/template systems, Redis, Kafka, complex approvals, and simultaneous support for multiple analytical engines.
+MetricSpire is not an ETL platform, BI dashboard, data warehouse, arbitrary SQL gateway, cross-engine execution engine, or large-result export system. The current scope excludes a hosted LLM, SDK/template systems, Redis, Kafka, complex approvals, and simultaneous support for multiple analytical engines.
 
 ## License
 

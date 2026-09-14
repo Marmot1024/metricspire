@@ -22,6 +22,8 @@ import (
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/compiler"
 	"github.com/marmot1024/metricspire/internal/contractio"
+	"github.com/marmot1024/metricspire/internal/governance"
+	"github.com/marmot1024/metricspire/internal/mcpbridge"
 	"github.com/marmot1024/metricspire/internal/model"
 )
 
@@ -34,12 +36,13 @@ type Server struct {
 	config Config
 	deps   Dependencies
 	mux    *http.ServeMux
+	mcp    http.Handler
 	logger *slog.Logger
 }
 
 func NewServer(config Config, dependencies Dependencies, logger *slog.Logger) (*Server, error) {
-	if dependencies.Authenticator == nil || dependencies.Readiness == nil || dependencies.Management == nil || dependencies.Catalog == nil || dependencies.CatalogSearch == nil || dependencies.Bindings == nil || dependencies.Queries == nil || dependencies.Jobs == nil {
-		return nil, errors.New("authenticator, readiness checker, management service, catalog reader, catalog searcher, binding resolver, query service, and job service are required")
+	if dependencies.Authenticator == nil || dependencies.Readiness == nil || dependencies.Management == nil || dependencies.Catalog == nil || dependencies.CatalogSearch == nil || dependencies.Governance == nil || dependencies.Bindings == nil || dependencies.Queries == nil || dependencies.Jobs == nil {
+		return nil, errors.New("authenticator, readiness checker, management service, catalog reader, catalog searcher, governance service, binding resolver, query service, and job service are required")
 	}
 	if config.MaxBodyBytes == 0 {
 		config.MaxBodyBytes = DefaultMaxBodyBytes
@@ -56,10 +59,17 @@ func NewServer(config Config, dependencies Dependencies, logger *slog.Logger) (*
 	if config.MaxBodyBytes < 1 || config.ControlTimeout <= 0 || config.QueryTimeout <= 0 {
 		return nil, errors.New("HTTP body limit and timeouts must be positive")
 	}
+	if strings.TrimSpace(config.MCPVersion) == "" {
+		config.MCPVersion = "dev"
+	}
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	server := &Server{config: config, deps: dependencies, mux: http.NewServeMux(), logger: logger}
+	server.mcp = mcpbridge.NewStreamableHTTPHandler(config.MCPVersion, func(request *http.Request) mcpbridge.Backend {
+		backend, _ := request.Context().Value(remoteMCPBackendKey{}).(mcpbridge.Backend)
+		return backend
+	})
 	server.routes()
 	return server, nil
 }
@@ -67,6 +77,7 @@ func NewServer(config Config, dependencies Dependencies, logger *slog.Logger) (*
 func (server *Server) routes() {
 	server.mux.HandleFunc("/health/live", server.handleLiveness)
 	server.mux.HandleFunc("/health/ready", server.handleReadiness)
+	server.mux.HandleFunc("/mcp", server.handleMCP)
 	if server.deps.AuthEndpoints != nil {
 		server.mux.Handle("/auth/", server.deps.AuthEndpoints)
 	}
@@ -79,6 +90,13 @@ func (server *Server) routes() {
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/explain", server.handleExplain)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/plan", server.handlePlan)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/query", server.handleQuery)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/draft-explain", server.handleDraftExplain)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/draft-plan", server.handleDraftPlan)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/draft-query", server.handleDraftQuery)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/governance/metrics", server.handleGovernanceMetrics)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/governance/imports", server.handleGovernanceImports)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/governance/imports/{import}", server.handleGovernanceImport)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/governance/imports/{import}/rollback", server.handleGovernanceImportRollback)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/explain", server.handleMetricExplain)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/plan", server.handleMetricPlan)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/query", server.handleMetricQuery)
@@ -427,6 +445,104 @@ func (server *Server) handleQuery(response http.ResponseWriter, request *http.Re
 	server.handleQueryOperation(response, request, "query")
 }
 
+func (server *Server) handleDraftExplain(response http.ResponseWriter, request *http.Request) {
+	server.handleDraftQueryOperation(response, request, "explain")
+}
+
+func (server *Server) handleDraftPlan(response http.ResponseWriter, request *http.Request) {
+	server.handleDraftQueryOperation(response, request, "plan")
+}
+
+func (server *Server) handleDraftQuery(response http.ResponseWriter, request *http.Request) {
+	server.handleDraftQueryOperation(response, request, "query")
+}
+
+func (server *Server) handleGovernanceMetrics(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		server.methodNotAllowed(response, request, http.MethodGet)
+		return
+	}
+	if _, ok := server.authorize(response, request, PermissionManage); !ok {
+		return
+	}
+	limit := governance.MaxImportRecords
+	if raw := request.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > governance.MaxImportRecords {
+			server.writeProblem(response, request, http.StatusBadRequest, "invalid_request", "Invalid request", "limit must be between 1 and 1000", "limit")
+			return
+		}
+		limit = parsed
+	}
+	server.withTimeout(response, request, server.config.ControlTimeout, func(ctx context.Context) error {
+		records, err := server.deps.Governance.List(ctx, request.PathValue("namespace"), request.URL.Query().Get("q"), limit)
+		if err != nil {
+			return err
+		}
+		return writeJSON(response, http.StatusOK, records)
+	})
+}
+
+func (server *Server) handleGovernanceImports(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		server.methodNotAllowed(response, request, http.MethodPost)
+		return
+	}
+	principal, ok := server.authorize(response, request, PermissionManage)
+	if !ok {
+		return
+	}
+	var body GovernanceImportRequest
+	if !server.decodeJSON(response, request, &body) {
+		return
+	}
+	server.withTimeout(response, request, server.config.ControlTimeout, func(ctx context.Context) error {
+		batch, err := server.deps.Governance.Import(ctx, governance.ImportInput{
+			Namespace: request.PathValue("namespace"), SourceFingerprint: body.SourceFingerprint,
+			ExpectedPreviousImportID: body.ExpectedPreviousImportID, Records: body.Records, Actor: principal.Subject,
+		})
+		if err != nil {
+			return err
+		}
+		return writeJSON(response, http.StatusCreated, batch)
+	})
+}
+
+func (server *Server) handleGovernanceImport(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		server.methodNotAllowed(response, request, http.MethodGet)
+		return
+	}
+	if _, ok := server.authorize(response, request, PermissionManage); !ok {
+		return
+	}
+	server.withTimeout(response, request, server.config.ControlTimeout, func(ctx context.Context) error {
+		batch, err := server.deps.Governance.GetImport(ctx, request.PathValue("namespace"), request.PathValue("import"))
+		if err != nil {
+			return err
+		}
+		return writeJSON(response, http.StatusOK, batch)
+	})
+}
+
+func (server *Server) handleGovernanceImportRollback(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		server.methodNotAllowed(response, request, http.MethodPost)
+		return
+	}
+	principal, ok := server.authorize(response, request, PermissionManage)
+	if !ok {
+		return
+	}
+	server.withTimeout(response, request, server.config.ControlTimeout, func(ctx context.Context) error {
+		batch, err := server.deps.Governance.RollbackImport(ctx, request.PathValue("namespace"), request.PathValue("import"), principal.Subject)
+		if err != nil {
+			return err
+		}
+		return writeJSON(response, http.StatusOK, batch)
+	})
+}
+
 func (server *Server) handleMetricExplain(response http.ResponseWriter, request *http.Request) {
 	server.handleMetricQueryOperation(response, request, "explain")
 }
@@ -485,6 +601,65 @@ func (server *Server) handleQueryOperation(response http.ResponseWriter, request
 		return
 	}
 	server.executeQueryOperation(response, request, operation, principal, request.PathValue("namespace"), request.PathValue("model"), query)
+}
+
+func (server *Server) handleDraftQueryOperation(response http.ResponseWriter, request *http.Request, operation string) {
+	if request.Method != http.MethodPost {
+		server.methodNotAllowed(response, request, http.MethodPost)
+		return
+	}
+	principal, ok := server.authorize(response, request, PermissionManage)
+	if !ok {
+		return
+	}
+	if !principal.Has(PermissionQuery) {
+		server.writeProblem(response, request, http.StatusForbidden, "permission_denied", "Permission denied", "draft preview requires both model management and query execution permission", "")
+		return
+	}
+	var query model.SemanticQuery
+	if !server.decodeJSON(response, request, &query) {
+		return
+	}
+	input := application.QueryInput{
+		QueryScope: application.QueryScope{
+			Namespace: request.PathValue("namespace"), ModelName: request.PathValue("model"),
+			Context: model.RequestContext{Tenant: principal.Tenant, Principal: principal.Subject, Roles: principal.Roles, RequestID: requestID(request)},
+		},
+		Query: query,
+	}
+	server.withTimeout(response, request, server.config.QueryTimeout, func(ctx context.Context) error {
+		switch operation {
+		case "explain":
+			output, err := server.deps.Queries.ExplainDraft(ctx, input)
+			if err != nil {
+				return err
+			}
+			return writeJSON(response, http.StatusOK, output)
+		case "plan":
+			output, err := server.deps.Queries.PlanDraft(ctx, input)
+			if err != nil {
+				return err
+			}
+			return writeJSON(response, http.StatusOK, output)
+		default:
+			executionContext := ctx
+			if server.deps.ExecutionCredential != nil {
+				var err error
+				executionContext, err = server.deps.ExecutionCredential.AddToContext(ctx, request, principal)
+				if err != nil {
+					return err
+				}
+				if executionContext == nil {
+					return errors.New("execution credential provider returned a nil context")
+				}
+			}
+			output, err := server.deps.Queries.ExecuteDraft(executionContext, input)
+			if err != nil {
+				return err
+			}
+			return writeJSON(response, http.StatusOK, output)
+		}
+	})
 }
 
 func (server *Server) executeQueryOperation(response http.ResponseWriter, request *http.Request, operation string, principal Principal, namespace, modelName string, query model.SemanticQuery) {
@@ -641,10 +816,16 @@ func (server *Server) handleError(response http.ResponseWriter, request *http.Re
 		server.writeProblem(response, request, http.StatusUnauthorized, "unauthenticated", "Authentication required", "valid authentication and execution authorization are required", "")
 	case errors.Is(err, catalog.ErrNotFound):
 		server.writeProblem(response, request, http.StatusNotFound, "not_found", "Not found", "the requested resource was not found", "")
+	case errors.Is(err, governance.ErrNotFound):
+		server.writeProblem(response, request, http.StatusNotFound, "not_found", "Not found", "the requested governance resource was not found", "")
 	case errors.Is(err, application.ErrJobNotFound):
 		server.writeProblem(response, request, http.StatusNotFound, "job_not_found", "Job not found", "the query job was not found", "")
 	case errors.Is(err, catalog.ErrConflict):
 		server.writeProblem(response, request, http.StatusConflict, "conflict", "Conflict", "the resource changed; refresh and retry", "")
+	case errors.Is(err, governance.ErrConflict):
+		server.writeProblem(response, request, http.StatusConflict, "conflict", "Conflict", "the governance import changed; refresh and retry", "")
+	case errors.Is(err, governance.ErrInvalid):
+		server.writeProblem(response, request, http.StatusUnprocessableEntity, "invalid_request", "Invalid governance request", "the governance request failed validation", "")
 	case errors.Is(err, catalog.ErrNotPublishable):
 		server.writeProblem(response, request, http.StatusUnprocessableEntity, "not_publishable", "Model is not publishable", err.Error(), "")
 	case errors.As(err, &domain):

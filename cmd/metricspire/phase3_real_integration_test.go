@@ -17,6 +17,7 @@ import (
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
+	"github.com/marmot1024/metricspire/internal/governance"
 	"github.com/marmot1024/metricspire/internal/httpapi"
 	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/marmot1024/metricspire/internal/repository/postgres"
@@ -107,6 +108,10 @@ func TestPhase3RealHTTPAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	governanceService, err := governance.NewService(store)
+	if err != nil {
+		t.Fatal(err)
+	}
 	jobs, err := application.NewJobManager(ctx, queries, 5*time.Minute, 10, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +127,8 @@ func TestPhase3RealHTTPAcceptance(t *testing.T) {
 			return principal, nil
 		}),
 		Readiness: store, Management: management, Catalog: store, CatalogSearch: catalogSearch,
-		Bindings: bindingResolver, Queries: queries, Jobs: jobs,
+		Governance: governanceService,
+		Bindings:   bindingResolver, Queries: queries, Jobs: jobs,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)

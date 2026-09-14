@@ -39,6 +39,17 @@ type manifestIndex struct {
 }
 
 func BuildLogical(manifest model.SemanticManifest, bundle model.PolicyBundle, context model.RequestContext, query model.SemanticQuery) (model.LogicalPlan, error) {
+	return buildLogical(manifest, bundle, context, query, false)
+}
+
+// BuildLogicalPreview permits unverified metrics for the protected maintainer
+// draft-preview use case. All structural, policy, budget, deprecation,
+// dimension, time, and physical-planning checks remain unchanged.
+func BuildLogicalPreview(manifest model.SemanticManifest, bundle model.PolicyBundle, context model.RequestContext, query model.SemanticQuery) (model.LogicalPlan, error) {
+	return buildLogical(manifest, bundle, context, query, true)
+}
+
+func buildLogical(manifest model.SemanticManifest, bundle model.PolicyBundle, context model.RequestContext, query model.SemanticQuery, allowUnverified bool) (model.LogicalPlan, error) {
 	if err := compiler.VerifyManifest(manifest); err != nil {
 		return model.LogicalPlan{}, err
 	}
@@ -74,7 +85,7 @@ func BuildLogical(manifest model.SemanticManifest, bundle model.PolicyBundle, co
 		if !exists {
 			return model.LogicalPlan{}, problem("unknown_reference", fmt.Sprintf("metrics[%d]", i), "metric %q does not exist", name)
 		}
-		if metric.Verification.Status != model.VerificationVerified {
+		if !allowUnverified && metric.Verification.Status != model.VerificationVerified {
 			return model.LogicalPlan{}, problem("metric_not_verified", fmt.Sprintf("metrics[%d]", i), "metric %q is not verified", name)
 		}
 		if metric.Deprecated {
@@ -107,7 +118,7 @@ func BuildLogical(manifest model.SemanticManifest, bundle model.PolicyBundle, co
 		return model.LogicalPlan{}, err
 	}
 
-	plannedMetrics, metricLineage, err := planMetrics(index, normalizedQuery.Metrics)
+	plannedMetrics, metricLineage, err := planMetrics(index, normalizedQuery.Metrics, allowUnverified)
 	if err != nil {
 		return model.LogicalPlan{}, err
 	}
@@ -536,7 +547,7 @@ func validateOrder(query model.SemanticQuery) error {
 	return nil
 }
 
-func planMetrics(index manifestIndex, outputs []string) ([]model.PlannedMetric, []string, error) {
+func planMetrics(index manifestIndex, outputs []string, allowUnverified bool) ([]model.PlannedMetric, []string, error) {
 	outputSet := make(map[string]bool, len(outputs))
 	for _, name := range outputs {
 		outputSet[name] = true
@@ -552,7 +563,7 @@ func planMetrics(index manifestIndex, outputs []string) ([]model.PlannedMetric, 
 		if !exists {
 			return problem("unknown_reference", "metrics", "metric %q does not exist", name)
 		}
-		if metric.Verification.Status != model.VerificationVerified {
+		if !allowUnverified && metric.Verification.Status != model.VerificationVerified {
 			return problem("metric_not_verified", "metrics", "dependency metric %q is not verified", name)
 		}
 		if metric.Deprecated {

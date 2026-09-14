@@ -25,6 +25,7 @@ import (
 	"github.com/marmot1024/metricspire/internal/auth/oidcauth"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
+	"github.com/marmot1024/metricspire/internal/governance"
 	"github.com/marmot1024/metricspire/internal/httpapi"
 	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/marmot1024/metricspire/internal/runtimeconfig"
@@ -94,6 +95,10 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	if err != nil {
 		return err
 	}
+	governanceService, err := governance.NewService(store)
+	if err != nil {
+		return err
+	}
 	policyResolver, err := application.NewConfiguredPolicyResolver(policies)
 	if err != nil {
 		return err
@@ -141,11 +146,12 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	handler, err := httpapi.NewServer(httpapi.Config{
 		MaxBodyBytes: config.HTTP.MaxBodyBytes, ControlTimeout: controlTimeout,
 		QueryTimeout: queryTimeout, AllowedOrigin: config.HTTP.PublicURL,
-		AuthenticationProfile: config.Authentication.Provider, UIModels: configuredUIModels(config.Bindings),
+		AuthenticationProfile: config.Authentication.Provider, MCPVersion: version,
+		UIModels: configuredUIModels(config.Bindings),
 	}, httpapi.Dependencies{
 		Authenticator: authenticator, AuthEndpoints: authEndpoints,
 		Readiness:  store,
-		Management: management, Catalog: store, CatalogSearch: catalogSearch,
+		Management: management, Catalog: store, CatalogSearch: catalogSearch, Governance: governanceService,
 		Bindings: bindingResolver, Queries: queries, Jobs: jobs, ExecutionCredential: executionCredential,
 	}, logger)
 	if err != nil {

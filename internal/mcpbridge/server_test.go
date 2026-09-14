@@ -85,6 +85,8 @@ func TestProtocolToolsUseOnlyExistingAPI(t *testing.T) {
 			fmt.Fprint(w, `[{"name":"revenue","description":"Sum of paid orders","allowed_dimensions":["channel"],"model_name":"private_route"}]`)
 		case "/api/v1/namespaces/acceptance/explain":
 			fmt.Fprint(w, `{"release":{"id":"rel_a","manifest_fingerprint":"sha256:a","name":"private_route","manifest":{"definitions":{"metrics":[{"name":"revenue","description":"Sum of paid orders","value_type":"decimal"},{"name":"secret_metric","description":"not authorized"}]}}},"logical_plan":{"limit":10,"metrics":[{"name":"revenue","output":true},{"name":"secret_metric","output":false}]}}`)
+		case "/api/v1/namespaces/acceptance/plan":
+			fmt.Fprint(w, `{"release":{"id":"rel_a","manifest_fingerprint":"sha256:a"},"logical_plan":{"limit":10,"metrics":[{"name":"revenue","output":true},{"name":"secret_metric","output":false}],"dimensions":[{"name":"channel","output":true}]},"physical_plan":{"fingerprint":"sha256:p","engine":"databricks_sql","root":{"resource":{"kind":"table","catalog":"main","schema":"gold","table":"orders"}}}}`)
 		case "/api/v1/namespaces/acceptance/query":
 			var got map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
@@ -109,7 +111,7 @@ func TestProtocolToolsUseOnlyExistingAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantNames := map[string]bool{"list_namespaces": true, "search_metrics": true, "explain_query": true, "submit_query": false, "get_query": true, "cancel_query": false}
+	wantNames := map[string]bool{"list_namespaces": true, "search_metrics": true, "explain_query": true, "plan_query": true, "submit_query": false, "get_query": true, "cancel_query": false}
 	if len(listed.Tools) != len(wantNames) {
 		t.Fatalf("tools=%d", len(listed.Tools))
 	}
@@ -127,6 +129,7 @@ func TestProtocolToolsUseOnlyExistingAPI(t *testing.T) {
 		{"list_namespaces", map[string]any{}, `"acceptance"`},
 		{"search_metrics", SearchInput{Namespace: "acceptance", Search: "a&b"}, `"Sum of paid orders"`},
 		{"explain_query", queryArgs(), `"release_id":"rel_a"`},
+		{"plan_query", queryArgs(), `"engine":"databricks_sql"`},
 		{"submit_query", queryArgs(), `"status":"running"`},
 		{"get_query", JobInput{JobID: "job_1"}, `9007199254740993,"228570.520000000000"`},
 		{"cancel_query", JobInput{JobID: "job_1"}, `"status":"succeeded"`},
@@ -138,7 +141,7 @@ func TestProtocolToolsUseOnlyExistingAPI(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	wantRoutes := []string{"GET /api/v1/ui/context", "GET /api/v1/catalog/search", "POST /api/v1/namespaces/acceptance/explain", "POST /api/v1/namespaces/acceptance/query", "GET /api/v1/jobs/job_1", "POST /api/v1/jobs/job_1/cancel"}
+	wantRoutes := []string{"GET /api/v1/ui/context", "GET /api/v1/catalog/search", "POST /api/v1/namespaces/acceptance/explain", "POST /api/v1/namespaces/acceptance/plan", "POST /api/v1/namespaces/acceptance/query", "GET /api/v1/jobs/job_1", "POST /api/v1/jobs/job_1/cancel"}
 	if !reflect.DeepEqual(routes, wantRoutes) {
 		t.Fatalf("routes=%v", routes)
 	}
@@ -165,6 +168,7 @@ func TestProtocolRejectsIdentitySQLRoutingAndUnknownFields(t *testing.T) {
 	in["namespace"] = "../other"
 	call(t, cs, "submit_query", in, true)
 	call(t, cs, "get_query", JobInput{JobID: "../admin"}, true)
+	call(t, cs, "search_metrics", SearchInput{Namespace: "acceptance", Limit: 101}, true)
 	in = queryArgs()
 	in["query"].(map[string]any)["metrics"] = []string{strings.Repeat("x", maxRequestBytes)}
 	if got := call(t, cs, "submit_query", in, true); !strings.Contains(got, "size limit") {

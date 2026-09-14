@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,9 +20,164 @@ import (
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
 	"github.com/marmot1024/metricspire/internal/executionauth"
+	"github.com/marmot1024/metricspire/internal/governance"
 	"github.com/marmot1024/metricspire/internal/httpapi"
 	"github.com/marmot1024/metricspire/internal/model"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+func TestRemoteMCPAuthenticatesEveryRequestAndExposesSevenScopedTools(t *testing.T) {
+	const requestToken = "secret-mcp-request-token"
+	const executionToken = "secret-mcp-execution-token"
+	var credentialCalls atomic.Int32
+	recorder := audit.NewMemoryRecorder()
+	credential := httpapi.ExecutionCredentialFunc(func(ctx context.Context, request *http.Request, principal httpapi.Principal) (context.Context, error) {
+		credentialCalls.Add(1)
+		if request.Header.Get("Authorization") != "Bearer "+requestToken || principal.Subject != "analyst@example.com" {
+			t.Fatalf("credential request was not scoped to the authenticated MCP user")
+		}
+		return executionauth.WithAccessToken(ctx, executionToken)
+	})
+	handler, engine, _ := newTestServerWithDependencies(t, httpapi.Config{
+		RequestID: func() string { return "req_remote_mcp" }, MCPVersion: "test",
+		UIModels: []httpapi.UIModelRoute{{Namespace: "demo", ModelName: "commerce"}},
+	}, nil, recorder, nil, credential)
+
+	for _, test := range []struct {
+		token string
+		want  int
+		code  string
+	}{{"", http.StatusUnauthorized, "unauthenticated"}, {"manage", http.StatusForbidden, "permission_denied"}} {
+		response := performMCPInitialize(handler, test.token)
+		assertProblem(t, response, test.want, test.code)
+	}
+
+	session := connectRemoteMCP(t, handler, requestToken)
+	listed, err := session.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTools := map[string]bool{
+		"list_namespaces": true, "search_metrics": true, "explain_query": true, "plan_query": true,
+		"submit_query": false, "get_query": true, "cancel_query": false,
+	}
+	if len(listed.Tools) != len(wantTools) {
+		t.Fatalf("tools=%d, want %d", len(listed.Tools), len(wantTools))
+	}
+	for _, tool := range listed.Tools {
+		readOnly, ok := wantTools[tool.Name]
+		if !ok || tool.Annotations == nil || tool.Annotations.ReadOnlyHint != readOnly || *tool.Annotations.DestructiveHint {
+			t.Fatalf("unexpected tool: %#v", tool)
+		}
+	}
+
+	query := readQuery(t)
+	outputs := []string{
+		callRemoteMCP(t, session, "list_namespaces", map[string]any{}, false),
+		callRemoteMCP(t, session, "search_metrics", map[string]any{"namespace": "demo", "search": "gross"}, false),
+		callRemoteMCP(t, session, "explain_query", map[string]any{"namespace": "demo", "query": query}, false),
+		callRemoteMCP(t, session, "plan_query", map[string]any{"namespace": "demo", "query": query}, false),
+	}
+	if credentialCalls.Load() != 0 || engine.executionCount() != 0 {
+		t.Fatal("discovery, explain, or plan requested an execution credential or ran the engine")
+	}
+	submitted := callRemoteMCP(t, session, "submit_query", map[string]any{"namespace": "demo", "query": query}, false)
+	outputs = append(outputs, submitted)
+	var submission application.QueryJobSnapshot
+	if err := json.Unmarshal([]byte(submitted), &submission); err != nil || submission.Job.ID == "" {
+		t.Fatalf("invalid submission: %q, %v", submitted, err)
+	}
+
+	other := connectRemoteMCP(t, handler, "other-query")
+	for _, name := range []string{"get_query", "cancel_query"} {
+		out := callRemoteMCP(t, other, name, map[string]any{"job_id": submission.Job.ID}, true)
+		if !strings.Contains(out, "job_not_found") {
+			t.Fatalf("%s cross-user response=%q", name, out)
+		}
+		outputs = append(outputs, out)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		out := callRemoteMCP(t, session, "get_query", map[string]any{"job_id": submission.Job.ID}, false)
+		outputs = append(outputs, out)
+		var snapshot application.QueryJobSnapshot
+		if err := json.Unmarshal([]byte(out), &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.Job.Status == model.JobSucceeded {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job did not finish: %s", out)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	outputs = append(outputs, callRemoteMCP(t, session, "cancel_query", map[string]any{"job_id": submission.Job.ID}, false))
+
+	if credentialCalls.Load() != 1 || engine.executionTokenValue() != executionToken {
+		t.Fatalf("credential calls=%d, execution token=%q", credentialCalls.Load(), engine.executionTokenValue())
+	}
+	encodedAudit, err := json.Marshal(recorder.Events())
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientOutput := strings.Join(outputs, "\n")
+	if strings.Contains(clientOutput, requestToken) || strings.Contains(clientOutput, executionToken) || strings.Contains(clientOutput, `"model_name"`) {
+		t.Fatal("MCP response or audit exposed a credential or internal model route")
+	}
+	if strings.Contains(string(encodedAudit), requestToken) || strings.Contains(string(encodedAudit), executionToken) {
+		t.Fatal("query audit exposed an MCP or execution credential")
+	}
+}
+
+func TestRemoteMCPDoesNotExposeExecutionCredentialErrors(t *testing.T) {
+	const secret = "credential-secret-must-not-escape"
+	handler, _, _ := newTestServerWithCredential(t, httpapi.Config{RequestID: func() string { return "req_mcp_secret" }}, nil,
+		httpapi.ExecutionCredentialFunc(func(context.Context, *http.Request, httpapi.Principal) (context.Context, error) {
+			return nil, errors.New(secret)
+		}))
+	session := connectRemoteMCP(t, handler, "query")
+	output := callRemoteMCP(t, session, "submit_query", map[string]any{"namespace": "demo", "query": readQuery(t)}, true)
+	if strings.Contains(output, secret) || !strings.Contains(output, "internal_error") || !strings.Contains(output, "req_mcp_secret") {
+		t.Fatalf("unsafe remote MCP error: %q", output)
+	}
+}
+
+func TestRemoteMCPRejectsOversizedRequests(t *testing.T) {
+	handler, _, _ := newTestServer(t, httpapi.Config{})
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(strings.Repeat("x", (1<<20)+1)))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("Authorization", "Bearer query")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d, want %d; body=%s", recorder.Code, http.StatusRequestEntityTooLarge, recorder.Body.String())
+	}
+}
+
+func TestRemoteMCPWorksBehindAuthenticatedReverseProxy(t *testing.T) {
+	handler, _, _ := newTestServer(t, httpapi.Config{})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"proxy-test","version":"1"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Host = "192.0.2.10:8000"
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("Authorization", "Bearer query")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d, want %d; body=%s", response.StatusCode, http.StatusOK, readBody(t, response))
+	}
+}
 
 func TestHTTPBoundaryRejectsUnauthenticatedUnauthorizedAndUntrustedFields(t *testing.T) {
 	handler, engine, _ := newTestServer(t, httpapi.Config{RequestID: func() string { return "req_contract" }})
@@ -312,6 +468,69 @@ func TestHTTPManagementUsesAuthenticatedActorAndReturnsReleaseSummaries(t *testi
 	decodeResponse(t, response, &rolledBack)
 	if rolledBack.ID != releases[0].ID {
 		t.Fatalf("rolled-back release = %#v", rolledBack)
+	}
+}
+
+func TestHTTPGovernanceImportIsVersionedAndRollbackRemovesInitialBatch(t *testing.T) {
+	t.Parallel()
+	handler, _, _ := newTestServer(t, httpapi.Config{})
+	definition := governance.MetricDefinition{
+		Code: "pending_metric", DisplayName: "待治理指标", Description: "保留来源定义，不补造公式。",
+		Owner: "owner", Status: "unverified", BusinessType: governance.BusinessDerived,
+		SemanticReadiness:   governance.ReadinessNeedsRemediation,
+		AuthoritativeSource: governance.SourceReference{Reference: "sheet:1", Resource: "daily", Field: "metric_value"},
+		ValueType:           model.DataTypeDecimal, Verification: model.Verification{Status: model.VerificationUnverified},
+	}
+	path := "/api/v1/namespaces/game/governance/imports"
+	response := performJSON(handler, http.MethodPost, path, "manage", httpapi.GovernanceImportRequest{
+		SourceFingerprint: "not-a-fingerprint", Records: []governance.MetricDefinition{definition},
+	})
+	assertProblem(t, response, http.StatusUnprocessableEntity, "invalid_request")
+	response = performJSON(handler, http.MethodPost, path, "manage", httpapi.GovernanceImportRequest{
+		SourceFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Records:           []governance.MetricDefinition{definition},
+	})
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("import status = %d, body = %s", response.StatusCode, readRawBody(t, response))
+	}
+	var batch governance.ImportBatch
+	decodeResponse(t, response, &batch)
+	if batch.RecordCount != 1 || batch.CreatedBy != "manager@example.com" {
+		t.Fatalf("import batch = %#v", batch)
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/namespaces/game/governance/metrics?limit=1000", "manage", nil)
+	var records []governance.MetricRecord
+	decodeResponse(t, response, &records)
+	if len(records) != 1 || records[0].Definition.Code != definition.Code {
+		t.Fatalf("governance records = %#v", records)
+	}
+	response = performJSON(handler, http.MethodPost, path+"/"+batch.ID+"/rollback", "manage", map[string]any{})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("rollback status = %d, body = %s", response.StatusCode, readRawBody(t, response))
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/namespaces/game/governance/metrics?limit=1000", "manage", nil)
+	decodeResponse(t, response, &records)
+	if len(records) != 0 {
+		t.Fatalf("records after rollback = %#v", records)
+	}
+}
+
+func TestHTTPDraftPreviewRequiresBothPermissionsAndDoesNotPublish(t *testing.T) {
+	t.Parallel()
+	handler, engine, _ := newTestServer(t, httpapi.Config{})
+	path := modelPath("draft-query")
+	response := performJSON(handler, http.MethodPost, path, "manage", readQuery(t))
+	assertProblem(t, response, http.StatusForbidden, "permission_denied")
+	response = performJSON(handler, http.MethodPost, path, "query", readQuery(t))
+	assertProblem(t, response, http.StatusForbidden, "permission_denied")
+	response = performJSON(handler, http.MethodPost, path, "preview", readQuery(t))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("preview status = %d, body = %s", response.StatusCode, readRawBody(t, response))
+	}
+	var output application.QueryOutput
+	decodeResponse(t, response, &output)
+	if output.Release.ID != "draft:r1" || output.Execution.Job.Status != model.JobSucceeded || engine.executionCount() != 1 {
+		t.Fatalf("draft preview output = %#v, executions = %d", output, engine.executionCount())
 	}
 }
 
@@ -664,14 +883,22 @@ func newTestServerWithDependencies(t *testing.T, config httpapi.Config, engine *
 		t.Fatal(err)
 	}
 	t.Cleanup(jobs.Close)
+	governanceService, err := governance.NewService(governance.NewMemoryRepository())
+	if err != nil {
+		t.Fatal(err)
+	}
 	authenticator := httpapi.AuthenticatorFunc(func(_ context.Context, request *http.Request) (httpapi.Principal, error) {
 		switch request.Header.Get("Authorization") {
 		case "Bearer query":
+			return httpapi.Principal{Tenant: "demo", Subject: "analyst@example.com", DisplayName: "Analyst", Roles: []string{"analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionQuery}}, nil
+		case "Bearer secret-mcp-request-token":
 			return httpapi.Principal{Tenant: "demo", Subject: "analyst@example.com", DisplayName: "Analyst", Roles: []string{"analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionQuery}}, nil
 		case "Bearer other-query":
 			return httpapi.Principal{Tenant: "demo", Subject: "other@example.com", Roles: []string{"analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionQuery}}, nil
 		case "Bearer manage":
 			return httpapi.Principal{Tenant: "demo", Subject: "manager@example.com", Roles: []string{"manager"}, Permissions: []httpapi.Permission{httpapi.PermissionManage}}, nil
+		case "Bearer preview":
+			return httpapi.Principal{Tenant: "demo", Subject: "manager@example.com", Roles: []string{"manager"}, Permissions: []httpapi.Permission{httpapi.PermissionManage, httpapi.PermissionQuery}}, nil
 		default:
 			return httpapi.Principal{}, httpapi.ErrUnauthenticated
 		}
@@ -682,7 +909,8 @@ func newTestServerWithDependencies(t *testing.T, config httpapi.Config, engine *
 	server, err := httpapi.NewServer(config, httpapi.Dependencies{
 		Authenticator: authenticator, Readiness: readiness,
 		Management: management, Catalog: repository, CatalogSearch: catalogSearch,
-		Bindings: bindings, Queries: queries, Jobs: jobs,
+		Governance: governanceService,
+		Bindings:   bindings, Queries: queries, Jobs: jobs,
 		ExecutionCredential: credential,
 	}, nil)
 	if err != nil {
@@ -746,6 +974,64 @@ func performJSON(handler http.Handler, method, path, token string, body any) *ht
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	return recorder.Result()
+}
+
+func performMCPInitialize(handler http.Handler, token string) *http.Response {
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder.Result()
+}
+
+type bearerRoundTripper struct {
+	token string
+	base  http.RoundTripper
+}
+
+func (transport bearerRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	request = request.Clone(request.Context())
+	request.Header = request.Header.Clone()
+	request.Header.Set("Authorization", "Bearer "+transport.token)
+	return transport.base.RoundTrip(request)
+}
+
+func connectRemoteMCP(t *testing.T, handler http.Handler, token string) *mcp.ClientSession {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	client := mcp.NewClient(&mcp.Implementation{Name: "remote-test", Version: "1"}, nil)
+	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{
+		Endpoint: server.URL + "/mcp", HTTPClient: &http.Client{Transport: bearerRoundTripper{token: token, base: http.DefaultTransport}},
+		DisableStandaloneSSE: true, MaxRetries: -1,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	return session
+}
+
+func callRemoteMCP(t *testing.T, session *mcp.ClientSession, name string, arguments any, wantError bool) string {
+	t.Helper()
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: arguments})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError != wantError {
+		t.Fatalf("%s IsError=%v: %#v", name, result.IsError, result.Content)
+	}
+	var output strings.Builder
+	for _, content := range result.Content {
+		if text, ok := content.(*mcp.TextContent); ok {
+			output.WriteString(text.Text)
+		}
+	}
+	return output.String()
 }
 
 func awaitJob(t *testing.T, handler http.Handler, id, token string) application.QueryJobSnapshot {

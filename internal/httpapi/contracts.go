@@ -8,6 +8,7 @@ import (
 
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/catalog"
+	"github.com/marmot1024/metricspire/internal/governance"
 	"github.com/marmot1024/metricspire/internal/model"
 )
 
@@ -84,6 +85,16 @@ type QueryService interface {
 	ExplainActive(context.Context, application.QueryInput) (application.ExplainOutput, error)
 	PlanActive(context.Context, application.QueryInput) (application.PlanOutput, error)
 	ExecuteActive(context.Context, application.QueryInput) (application.QueryOutput, error)
+	ExplainDraft(context.Context, application.QueryInput) (application.ExplainOutput, error)
+	PlanDraft(context.Context, application.QueryInput) (application.PlanOutput, error)
+	ExecuteDraft(context.Context, application.QueryInput) (application.QueryOutput, error)
+}
+
+type GovernanceService interface {
+	Import(context.Context, governance.ImportInput) (governance.ImportBatch, error)
+	List(context.Context, string, string, int) ([]governance.MetricRecord, error)
+	GetImport(context.Context, string, string) (governance.ImportBatch, error)
+	RollbackImport(context.Context, string, string, string) (governance.ImportBatch, error)
 }
 
 type JobService interface {
@@ -112,6 +123,7 @@ type Dependencies struct {
 	Management          ManagementService
 	Catalog             CatalogReader
 	CatalogSearch       CatalogSearcher
+	Governance          GovernanceService
 	Bindings            application.BindingResolver
 	Queries             QueryService
 	Jobs                JobService
@@ -124,6 +136,7 @@ type Config struct {
 	QueryTimeout          time.Duration
 	AllowedOrigin         string
 	AuthenticationProfile string
+	MCPVersion            string
 	UIModels              []UIModelRoute
 	RequestID             func() string
 }
@@ -174,6 +187,12 @@ type PublishRequest struct {
 type RollbackRequest struct {
 	ReleaseID string `json:"release_id"`
 	Note      string `json:"note,omitempty"`
+}
+
+type GovernanceImportRequest struct {
+	SourceFingerprint        string                        `json:"source_fingerprint"`
+	ExpectedPreviousImportID string                        `json:"expected_previous_import_id,omitempty"`
+	Records                  []governance.MetricDefinition `json:"records"`
 }
 
 type ReleaseSummary struct {

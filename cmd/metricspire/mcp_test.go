@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +53,12 @@ func mcpProcess(t *testing.T, command *exec.Cmd) *mcp.ClientSession {
 		t.Fatalf("MCP initialize: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Close() })
+	assertMCPTools(t, session)
+	return session
+}
+
+func assertMCPTools(t *testing.T, session *mcp.ClientSession) {
+	t.Helper()
 	listed, err := session.ListTools(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -61,9 +68,39 @@ func mcpProcess(t *testing.T, command *exec.Cmd) *mcp.ClientSession {
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if !reflect.DeepEqual(names, []string{"cancel_query", "explain_query", "get_query", "list_namespaces", "search_metrics", "submit_query"}) {
+	if !reflect.DeepEqual(names, []string{"cancel_query", "explain_query", "get_query", "list_namespaces", "plan_query", "search_metrics", "submit_query"}) {
 		t.Fatalf("unexpected tools: %v", names)
 	}
+}
+
+type remoteMCPBearerTransport struct {
+	token string
+	base  http.RoundTripper
+}
+
+func (transport remoteMCPBearerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	request = request.Clone(request.Context())
+	request.Header = request.Header.Clone()
+	request.Header.Set("Authorization", "Bearer "+transport.token)
+	return transport.base.RoundTrip(request)
+}
+
+func mcpHTTP(t *testing.T, endpoint, token string) *mcp.ClientSession {
+	t.Helper()
+	client := mcp.NewClient(&mcp.Implementation{Name: "metricspire-remote-acceptance", Version: "1"}, nil)
+	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{
+		Endpoint: endpoint,
+		HTTPClient: &http.Client{Transport: remoteMCPBearerTransport{
+			token: token, base: http.DefaultTransport,
+		}},
+		DisableStandaloneSSE: true,
+		MaxRetries:           -1,
+	}, nil)
+	if err != nil {
+		t.Fatalf("remote MCP initialize: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	assertMCPTools(t, session)
 	return session
 }
 
@@ -125,6 +162,25 @@ func TestMCPStagingAcceptance(t *testing.T) {
 	command := exec.Command(binary, "mcp", "--api-url", origin)
 	command.Env = os.Environ()
 	session := mcpProcess(t, command)
+	verifyMCPStagingAcceptance(t, session, "stdio -> HTTP")
+}
+
+// Explicit opt-in: this verifies that an external client can use the hosted
+// Streamable HTTP endpoint without a local MetricSpire process.
+func TestMCPRemoteStagingAcceptance(t *testing.T) {
+	if os.Getenv("METRICSPIRE_RUN_MCP_ACCEPTANCE") != "staging-read-only" {
+		t.Skip("set METRICSPIRE_RUN_MCP_ACCEPTANCE=staging-read-only with staging URL and token")
+	}
+	origin, token := os.Getenv("METRICSPIRE_MCP_TEST_URL"), os.Getenv("METRICSPIRE_API_TOKEN")
+	if origin == "" || token == "" {
+		t.Fatal("staging origin and API token are required")
+	}
+	session := mcpHTTP(t, strings.TrimSuffix(origin, "/")+"/mcp", token)
+	verifyMCPStagingAcceptance(t, session, "remote HTTP")
+}
+
+func verifyMCPStagingAcceptance(t *testing.T, session *mcp.ClientSession, transport string) {
+	t.Helper()
 	var namespaces struct {
 		Namespaces []string `json:"namespaces"`
 	}
@@ -166,6 +222,18 @@ func TestMCPStagingAcceptance(t *testing.T) {
 	if explanation.ReleaseID != entries.Metrics[0].ReleaseID || len(explanation.Metrics) != 3 || !reflect.DeepEqual(explanation.Query, query) {
 		t.Fatal("explanation differs from published query")
 	}
+	var plan struct {
+		ReleaseID  string            `json:"release_id"`
+		Engine     string            `json:"engine"`
+		Source     model.ResourceRef `json:"source"`
+		Metrics    []string          `json:"metrics"`
+		Dimensions []string          `json:"dimensions"`
+		Limit      int               `json:"limit"`
+	}
+	mcpCall(t, session, "plan_query", input, &plan)
+	if plan.ReleaseID != explanation.ReleaseID || plan.Engine != "databricks_sql" || plan.Source.Table == "" || plan.Limit != query.Limit || len(plan.Metrics) != 3 || len(plan.Dimensions) != 2 {
+		t.Fatal("plan differs from the governed published query")
+	}
 	var job application.QueryJobSnapshot
 	mcpCall(t, session, "submit_query", input, &job)
 	if job.Job.ID == "" {
@@ -203,5 +271,5 @@ func TestMCPStagingAcceptance(t *testing.T) {
 	if !reflect.DeepEqual(after, job) {
 		t.Fatal("cancel changed a finished job")
 	}
-	t.Logf("MCP stdio -> existing HTTP -> engine: job=%s release=%s rows=%d truncated=%v; six tools passed", jobID, job.ReleaseID, len(job.Result.Rows), job.Result.Truncated)
+	t.Logf("MCP %s -> engine: job=%s release=%s rows=%d truncated=%v; seven tools passed", transport, jobID, job.ReleaseID, len(job.Result.Rows), job.Result.Truncated)
 }

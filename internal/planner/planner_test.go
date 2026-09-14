@@ -85,6 +85,35 @@ func TestTimeRangePreservesExplicitBusinessTimezone(t *testing.T) {
 	}
 }
 
+func TestDraftPreviewAloneCanPlanAnUnverifiedMetric(t *testing.T) {
+	t.Parallel()
+	values := loadFixture(t)
+	source := model.SemanticSource{
+		APIVersion: model.APIVersion, Kind: model.KindSemanticModel,
+		Metadata: values.manifest.Metadata, Spec: values.manifest.Definitions,
+	}
+	for index := range source.Spec.Metrics {
+		source.Spec.Metrics[index].Verification.Status = model.VerificationUnverified
+	}
+	manifest, err := compiler.Compile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var policySource model.PolicySource
+	read(t, filepath.Join("..", "..", "examples", "orders", "policy.yaml"), &policySource)
+	policySource.ManifestFingerprint = ""
+	bundle, err := compiler.CompilePolicy(policySource, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := planner.BuildLogical(manifest, bundle, values.context, values.query); err == nil {
+		t.Fatal("regular planning accepted an unverified metric")
+	}
+	if _, err := planner.BuildLogicalPreview(manifest, bundle, values.context, values.query); err != nil {
+		t.Fatalf("draft preview planning failed: %v", err)
+	}
+}
+
 func TestPlannerRejectsMissingTimezoneCapabilityAndBinding(t *testing.T) {
 	t.Parallel()
 	t.Run("timezone", func(t *testing.T) {

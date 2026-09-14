@@ -18,6 +18,7 @@ import (
 const auditCompletionTimeout = 5 * time.Second
 
 type ReleaseReader interface {
+	GetDraft(context.Context, string, string) (catalog.Draft, error)
 	GetActiveRelease(context.Context, string, string) (catalog.Release, error)
 }
 
@@ -111,11 +112,52 @@ func (s *QueryService) ExplainActive(ctx context.Context, input QueryInput) (Exp
 	if err != nil {
 		return ExplainOutput{}, fmt.Errorf("resolve policy for active release: %w", err)
 	}
+	return explainRelease(input, release, policySource, false)
+}
+
+// ExplainDraft is a maintainer-only use case. The transport must require both
+// model:manage and query:execute before calling it. It compiles the latest
+// draft in memory and never activates or publishes a release.
+func (s *QueryService) ExplainDraft(ctx context.Context, input QueryInput) (ExplainOutput, error) {
+	if input.Namespace == "" || input.ModelName == "" {
+		return ExplainOutput{}, errors.New("namespace and model name are required")
+	}
+	draft, err := s.releases.GetDraft(ctx, input.Namespace, input.ModelName)
+	if err != nil {
+		return ExplainOutput{}, fmt.Errorf("get draft: %w", err)
+	}
+	manifest, err := compiler.Compile(draft.Source)
+	if err != nil {
+		return ExplainOutput{}, fmt.Errorf("compile draft: %w", err)
+	}
+	release := catalog.Release{
+		ID: "draft:r" + fmt.Sprint(draft.Revision), Namespace: draft.Namespace, Name: draft.Name,
+		SourceRevision: draft.Revision, ManifestFingerprint: manifest.Fingerprint, Manifest: manifest,
+		CreatedBy: draft.UpdatedBy, Note: "maintainer draft preview", CreatedAt: draft.UpdatedAt,
+	}
+	policySource := model.PolicySource{
+		APIVersion: model.APIVersion, Kind: model.KindPolicySource,
+		Metadata:            model.Metadata{Name: "draft_preview", Version: fmt.Sprint(draft.Revision)},
+		ManifestFingerprint: manifest.Fingerprint, Tenant: input.Context.Tenant,
+		Rules: []model.PolicyRule{{
+			Name: "maintainer_preview", Effect: model.EffectAllow,
+			Principals: []string{input.Context.Principal}, Metrics: []string{"*"}, Dimensions: []string{"*"},
+		}},
+	}
+	return explainRelease(input, release, policySource, true)
+}
+
+func explainRelease(input QueryInput, release catalog.Release, policySource model.PolicySource, allowUnverified bool) (ExplainOutput, error) {
 	bundle, err := compiler.CompilePolicy(policySource, release.Manifest)
 	if err != nil {
-		return ExplainOutput{}, fmt.Errorf("compile policy for active release: %w", err)
+		return ExplainOutput{}, fmt.Errorf("compile query policy: %w", err)
 	}
-	logical, err := planner.BuildLogical(release.Manifest, bundle, input.Context, input.Query)
+	var logical model.LogicalPlan
+	if allowUnverified {
+		logical, err = planner.BuildLogicalPreview(release.Manifest, bundle, input.Context, input.Query)
+	} else {
+		logical, err = planner.BuildLogical(release.Manifest, bundle, input.Context, input.Query)
+	}
 	if err != nil {
 		return ExplainOutput{}, fmt.Errorf("build logical plan: %w", err)
 	}
@@ -128,9 +170,21 @@ func (s *QueryService) PlanActive(ctx context.Context, input QueryInput) (PlanOu
 	if err != nil {
 		return PlanOutput{}, err
 	}
+	return s.planExplained(ctx, input, explained)
+}
+
+func (s *QueryService) PlanDraft(ctx context.Context, input QueryInput) (PlanOutput, error) {
+	explained, err := s.ExplainDraft(ctx, input)
+	if err != nil {
+		return PlanOutput{}, err
+	}
+	return s.planExplained(ctx, input, explained)
+}
+
+func (s *QueryService) planExplained(ctx context.Context, input QueryInput, explained ExplainOutput) (PlanOutput, error) {
 	binding, err := s.bindings.ResolveBinding(ctx, input.QueryScope, explained.Release)
 	if err != nil {
-		return PlanOutput{}, fmt.Errorf("resolve binding for active release: %w", err)
+		return PlanOutput{}, fmt.Errorf("resolve query binding: %w", err)
 	}
 	physical, err := planner.BuildPhysical(explained.Release.Manifest, explained.Logical, binding, s.engine.Capabilities())
 	if err != nil {
@@ -151,6 +205,21 @@ func (s *QueryService) ExecuteActive(ctx context.Context, input QueryInput) (Que
 	if err != nil {
 		return QueryOutput{}, err
 	}
+	return s.executePlanned(ctx, controlContext, input, planned)
+}
+
+// ExecuteDraft runs a bounded preview against the latest draft without
+// creating or activating a release. Callers must enforce maintainer access.
+func (s *QueryService) ExecuteDraft(ctx context.Context, input QueryInput) (QueryOutput, error) {
+	controlContext := executionauth.WithoutAccessToken(ctx)
+	planned, err := s.PlanDraft(controlContext, input)
+	if err != nil {
+		return QueryOutput{}, err
+	}
+	return s.executePlanned(ctx, controlContext, input, planned)
+}
+
+func (s *QueryService) executePlanned(ctx, controlContext context.Context, input QueryInput, planned PlanOutput) (QueryOutput, error) {
 	baseEvent := audit.QueryEvent{
 		RequestID: input.Context.RequestID, Tenant: input.Context.Tenant, Principal: input.Context.Principal,
 		Namespace: input.Namespace, ModelName: input.ModelName, ReleaseID: planned.Release.ID,

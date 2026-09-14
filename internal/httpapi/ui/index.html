@@ -53,7 +53,7 @@
           <div>
             <p class="eyebrow">可信指标目录</p>
             <h1>指标库</h1>
-            <p>先确认指标口径和可用维度，再把稳定的指标 code 用于应用或 AI 查询。</p>
+            <p>维护者可同时验收未发布草稿；只有已发布指标才能用于应用或 AI 查询。</p>
           </div>
           <span id="catalog-count" class="count-badge">0 个指标</span>
         </header>
@@ -217,9 +217,13 @@
           <div>
             <p class="eyebrow">开发者验证工具</p>
             <h1>查询验证</h1>
-            <p>选择指标、分组和筛选条件，核对结果后复制 API 请求。后续调用不需要先保存查询模板。</p>
+            <p>从指标语义到真实结果走同一条受控链路；筛选条件可选，时间指标默认查询昨日。</p>
           </div>
         </header>
+
+        <div class="workflow-guide" aria-label="查询验证步骤">
+          <span><b>1</b> 选择指标和分析维度</span><span><b>2</b> 解释口径并检查执行计划</span><span><b>3</b> 运行查询并复制 API 请求</span>
+        </div>
 
         <div class="query-layout">
           <section class="panel">
@@ -259,23 +263,26 @@
             </fieldset>
 
             <div class="action-row">
-              <button id="copy-query-button" class="button secondary" type="button">复制 API 请求</button>
+              <button data-operation="explain" class="button secondary" type="button">解释指标口径</button>
+              <button data-operation="plan" class="button secondary" type="button">查看执行计划</button>
               <button id="run-query-button" class="button primary" type="button">运行查询</button>
+              <button id="copy-query-button" class="button secondary" type="button">复制 API 请求</button>
               <button id="cancel-job-button" class="button danger" type="button" disabled>取消当前查询</button>
             </div>
             <div id="query-status" class="result-status" role="status" aria-live="polite" hidden></div>
           </section>
 
           <aside class="panel request-panel">
-            <div class="panel-heading"><div><p class="step">02 · 规范请求</p><h2>SemanticQuery</h2></div></div>
-            <pre id="query-request-preview">选择指标后生成请求。</pre>
-            <details><summary>开发者检查</summary><div class="developer-actions"><button data-operation="explain" class="text-button" type="button">语义解释</button><button data-operation="plan" class="text-button" type="button">执行计划</button></div></details>
+            <div class="panel-heading"><div><p class="step">02 · 当前请求</p><h2>查询摘要</h2></div></div>
+            <div id="query-summary" class="query-summary">选择指标后显示本次查询内容。</div>
+            <details class="raw-details"><summary>查看 SemanticQuery JSON</summary><pre id="query-request-preview">选择指标后生成请求。</pre></details>
           </aside>
         </div>
 
         <section id="result-panel" class="panel result-panel" hidden>
-          <div class="panel-heading"><div><p class="step">03 · 查询结果</p><h2>结果预览</h2></div><span id="result-meta" class="badge"></span></div>
-          <div class="table-wrap"><table id="result-table"></table></div>
+          <div class="panel-heading"><div><p class="step">03 · 验证结果</p><h2 id="result-title">结果预览</h2></div><span id="result-meta" class="badge"></span></div>
+          <div id="result-summary" class="result-summary" hidden></div>
+          <div id="result-table-wrap" class="table-wrap"><table id="result-table"></table></div>
           <details class="raw-details"><summary>查看原始响应</summary><pre id="query-output"></pre></details>
         </section>
       </section>
