@@ -6,6 +6,7 @@ const state = {
   namespace: "",
   catalog: [],
   catalogView: [],
+  catalogLoadSequence: 0,
   selectedCatalogIndex: -1,
   queryMetricKeys: new Set(),
   filters: [],
@@ -32,6 +33,15 @@ function setStatus(id, message, tone = "neutral") {
   target.hidden = false;
   target.textContent = message;
   target.dataset.tone = tone;
+}
+
+function resetQueryFeedback() {
+  byID("query-status").hidden = true;
+  byID("query-status").textContent = "";
+  byID("result-table").replaceChildren();
+  byID("result-meta").textContent = "";
+  byID("query-output").textContent = "";
+  byID("result-panel").hidden = true;
 }
 
 function errorMessage(error) {
@@ -303,6 +313,9 @@ async function switchNamespace(namespace) {
   state.queryMetricKeys.clear();
   byID("query-metric-search").value = "";
   state.filters = [];
+  resetQueryFeedback();
+  renderCatalog();
+  updateQueryBuilder();
   state.draft = null;
   state.review = null;
   state.dirty = false;
@@ -313,6 +326,8 @@ async function switchNamespace(namespace) {
 }
 
 async function loadCatalog() {
+  const loadSequence = ++state.catalogLoadSequence;
+  const namespace = state.namespace;
   if (!state.namespace || (!hasPermission("query:execute") && !hasPermission("model:manage"))) {
     state.catalog = [];
     state.catalogView = [];
@@ -323,13 +338,14 @@ async function loadCatalog() {
   setNotice(hasPermission("model:manage") ? "正在读取已发布指标和待治理草稿…" : "正在读取当前业务域的已发布指标…");
   try {
     const publishedRequest = hasPermission("query:execute")
-      ? requestJSON(`/api/v1/catalog/search?namespace=${escapePath(state.namespace)}&q=${encodeURIComponent(search)}&limit=100`)
+      ? requestJSON(`/api/v1/catalog/search?namespace=${escapePath(namespace)}&q=${encodeURIComponent(search)}&limit=100`)
       : Promise.resolve([]);
-    const draftRequest = hasPermission("model:manage") ? loadDraftCatalog("") : Promise.resolve([]);
+    const draftRequest = hasPermission("model:manage") ? loadDraftCatalog("", namespace) : Promise.resolve([]);
     const governanceRequest = hasPermission("model:manage")
-      ? requestJSON(`/api/v1/namespaces/${escapePath(state.namespace)}/governance/metrics?q=${encodeURIComponent(search)}&limit=1000`)
+      ? requestJSON(`/api/v1/namespaces/${escapePath(namespace)}/governance/metrics?q=${encodeURIComponent(search)}&limit=1000`)
       : Promise.resolve([]);
     const [published, drafts, governanceRecords] = await Promise.all([publishedRequest, draftRequest, governanceRequest]);
+    if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
     const governed = governanceCatalogEntries(governanceRecords, drafts).filter((metric) => matchesCatalogSearch(metric, search));
     state.catalogView = mergeCatalogEntries(published, governed);
     state.catalog = state.catalogView.filter((metric) => metric.catalog_status !== "governance");
@@ -342,6 +358,7 @@ async function loadCatalog() {
       ? `已载入 ${counts.published} 个已发布指标、${counts.draft} 个可试查草稿和 ${counts.governance} 个待治理指标。`
       : `已载入 ${published.length} 个已发布指标。选择指标查看口径与可用维度。`, "success");
   } catch (error) {
+    if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
     state.catalog = [];
     state.catalogView = [];
     renderCatalog();
@@ -350,8 +367,8 @@ async function loadCatalog() {
   }
 }
 
-async function loadDraftCatalog(search) {
-  const routes = (state.context.models || []).filter((route) => route.namespace === state.namespace);
+async function loadDraftCatalog(search, namespace = state.namespace) {
+  const routes = (state.context.models || []).filter((route) => route.namespace === namespace);
   const drafts = await Promise.all(routes.map(async (route) => {
     try {
       const draft = await requestJSON(routePath(route, "draft"));

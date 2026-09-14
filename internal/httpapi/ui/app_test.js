@@ -245,12 +245,39 @@ test("successful namespace switching clears the previous query metric search", a
   const {context, run} = editorContext();
   context.window = {confirm: () => true};
   context.loadCatalog = async () => {};
+  context.updateQueryBuilder = () => {};
   context.initializeGovernanceRoutes = () => {};
   context.document.getElementById("query-metric-search").value = "old-domain-metric";
+  context.document.getElementById("query-status").hidden = false;
+  context.document.getElementById("query-status").textContent = "old query succeeded";
+  context.document.getElementById("result-panel").hidden = false;
   run("state.namespace = 'original'");
   await run("switchNamespace('other')");
   assert.equal(run("state.namespace"), "other");
   assert.equal(context.document.getElementById("query-metric-search").value, "");
+  assert.equal(context.document.getElementById("query-status").hidden, true);
+  assert.equal(context.document.getElementById("query-status").textContent, "");
+  assert.equal(context.document.getElementById("result-panel").hidden, true);
+  assert.equal(context.document.getElementById("catalog-list").children.length, 1);
+  assert.match(context.document.getElementById("catalog-list").children[0].textContent, /没有找到匹配/);
+});
+
+test("a stale catalog response cannot overwrite a newer namespace", async () => {
+  const {context, run} = editorContext();
+  const pending = new Map();
+  context.requestJSON = (path) => new Promise((resolve) => pending.set(path, resolve));
+  context.renderCatalog = () => {};
+  context.updateQueryBuilder = () => {};
+  run("state.context = {permissions: ['query:execute'], models: []}; state.namespace = 'old'");
+  const oldLoad = run("loadCatalog()");
+  run("state.namespace = 'new'");
+  const newLoad = run("loadCatalog()");
+  const metric = (name) => ({name, display_name: name, description: name, owner: 'owner', value_type: 'integer', unit: 'times', allowed_dimensions: [], tags: [], examples: []});
+  pending.get("/api/v1/catalog/search?namespace=new&q=&limit=100")([metric("new_metric")]);
+  await newLoad;
+  pending.get("/api/v1/catalog/search?namespace=old&q=&limit=100")([metric("old_metric")]);
+  await oldLoad;
+  assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalog.map((entry) => entry.name)"))), ["new_metric"]);
 });
 
 test("new query failure clears old results and unlocks controls without retry", async () => {
