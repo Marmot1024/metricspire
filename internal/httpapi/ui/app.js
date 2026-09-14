@@ -35,10 +35,17 @@ function setStatus(id, message, tone = "neutral") {
 }
 
 function errorMessage(error) {
-  if (error && error.detail) {
-    return `${error.detail}${error.path ? `（${error.path}）` : ""}${error.request_id ? ` · 请求 ${error.request_id}` : ""}`;
+  const detail = error?.detail || (error instanceof Error ? error.message : "");
+  const code = error?.code || "";
+  let message = detail || "请求失败，请稍后重试。";
+  if (code === "permission_denied" || error?.status === 403) {
+    message = "当前账号没有执行此操作的权限。请联系平台管理员确认所属权限组。";
+  } else if (code === "unauthorized" || error?.status === 401) {
+    message = "登录状态已失效，请重新登录后再试。";
+  } else if (/grouped time dimensions require explicit grouping semantics/i.test(detail)) {
+    message = "选择时间维度后必须指定时间粒度，请选择按日、按周或按月。";
   }
-  return error instanceof Error ? error.message : "请求失败，请稍后重试。";
+  return `${message}${error?.path ? `（${error.path}）` : ""}${error?.request_id ? ` · 请求 ${error.request_id}` : ""}`;
 }
 
 async function requestJSON(path, options = {}) {
@@ -153,11 +160,58 @@ function catalogStatusCounts(metrics) {
   }, {published: 0, draft: 0, governance: 0});
 }
 
+function filterCatalogEntries(metrics, status = "queryable") {
+  if (status === "all") return metrics;
+  if (status === "governance") return metrics.filter((metric) => metric.catalog_status === "governance");
+  return metrics.filter((metric) => metric.catalog_status === "published" || metric.catalog_status === "draft");
+}
+
+function isBusinessUnverified(metric) {
+  return metric?.verification?.status === "unverified" || (metric?.tags || []).includes("governance_unverified");
+}
+
+function catalogStatusLabel(metric) {
+  if (metric.catalog_status === "draft") return "未验证草稿";
+  if (metric.catalog_status === "governance") return "待治理";
+  if (metric.deprecated) return "已弃用";
+  return isBusinessUnverified(metric) ? "已发布 · 业务待验证" : "已发布";
+}
+
+function verificationLabel(metric) {
+  return isBusinessUnverified(metric) ? "技术试查证据已登记" : "口径已经验证";
+}
+
+function humanTag(tag) {
+  return ({
+    business_type_atomic: "原子指标",
+    business_type_derived: "派生指标",
+    business_type_composite: "复合指标",
+    governance_unverified: "业务待验证",
+    feishu_documented: "有治理来源",
+  })[tag] || tag;
+}
+
 function matchesCatalogSearch(metric, search) {
   if (!search) return true;
   const text = [metric.name, metric.display_name, metric.description, metric.owner, ...(metric.tags || [])]
     .filter(Boolean).join(" ").toLocaleLowerCase();
   return text.includes(search.toLocaleLowerCase());
+}
+
+function matchingQueryMetrics(metrics, search, selectedKeys, limit = 12) {
+  const selected = metrics.filter((metric) => selectedKeys.has(metricKey(metric)));
+  if (!search) return selected;
+  const matches = metrics.filter((metric) => matchesCatalogSearch(metric, search));
+  const seen = new Set();
+  const combined = [];
+  for (const metric of [...selected, ...matches]) {
+    const key = metricKey(metric);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    combined.push(metric);
+    if (combined.length >= Math.max(limit, selected.length)) break;
+  }
+  return combined;
 }
 
 function selectedQueryMetrics() {
@@ -203,6 +257,7 @@ function activateTab(name) {
   for (const workspace of document.querySelectorAll("[data-workspace]")) {
     workspace.hidden = workspace.dataset.workspace !== name;
   }
+  if (typeof window !== "undefined" && window.scrollTo) window.scrollTo({top: 0, behavior: "auto"});
   if (name === "governance" && state.governanceRoute && !state.draft) loadGovernance();
   if (name === "query") updateQueryBuilder();
 }
@@ -246,6 +301,7 @@ async function switchNamespace(namespace) {
   state.catalogView = [];
   state.selectedCatalogIndex = -1;
   state.queryMetricKeys.clear();
+  byID("query-metric-search").value = "";
   state.filters = [];
   state.draft = null;
   state.review = null;
@@ -311,22 +367,29 @@ async function loadDraftCatalog(search) {
 function renderCatalog() {
   const counts = catalogStatusCounts(state.catalogView);
   const {published: publishedCount, draft: draftCount, governance: governanceCount} = counts;
+  const statusFilter = byID("catalog-status-filter").value || "queryable";
+  const visibleEntries = filterCatalogEntries(state.catalogView, statusFilter);
   byID("catalog-count").textContent = publishedCount || draftCount || governanceCount
-    ? `${state.catalogView.length} 个指标 · ${publishedCount} 个已发布 · ${draftCount} 个可试查 · ${governanceCount} 个待治理`
+    ? `显示 ${visibleEntries.length} / ${state.catalogView.length} · ${publishedCount} 已发布 · ${draftCount} 可试查 · ${governanceCount} 待治理`
     : `${state.catalogView.length} 个指标`;
   const list = byID("catalog-list");
   list.replaceChildren();
-  if (!state.catalogView.length) {
+  if (!visibleEntries.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = hasPermission("model:manage")
-      ? "没有找到匹配的已发布指标或草稿。请确认业务域、搜索词和草稿录入情况。"
-      : "没有找到匹配的已发布指标。试试其他名称或清空搜索；仍为空时，请联系指标负责人确认发布情况和访问权限。";
+    empty.textContent = state.catalogView.length
+      ? "当前状态筛选下没有匹配指标。请切换显示状态或调整搜索词。"
+      : hasPermission("model:manage")
+        ? "没有找到匹配的已发布指标或草稿。请确认业务域、搜索词和草稿录入情况。"
+        : "没有找到匹配的已发布指标。试试其他名称或清空搜索；仍为空时，请联系指标负责人确认发布情况和访问权限。";
     list.append(empty);
     renderMetricDetail(null);
     return;
   }
-  state.catalogView.forEach((metric, index) => {
+  const selected = state.catalogView[state.selectedCatalogIndex];
+  if (!visibleEntries.includes(selected)) state.selectedCatalogIndex = state.catalogView.indexOf(visibleEntries[0]);
+  visibleEntries.forEach((metric) => {
+    const index = state.catalogView.indexOf(metric);
     const button = document.createElement("button");
     button.type = "button";
     button.className = `catalog-item${index === state.selectedCatalogIndex ? " active" : ""}`;
@@ -340,7 +403,7 @@ function renderCatalog() {
     const description = document.createElement("p");
     description.textContent = metric.description || "暂无业务定义";
     const meta = document.createElement("small");
-    const status = metric.catalog_status === "draft" ? "未验证草稿" : metric.catalog_status === "governance" ? "待治理" : "已发布";
+    const status = catalogStatusLabel(metric);
     meta.textContent = [status, metric.owner && `负责人 ${metric.owner}`, humanType(metric.value_type, metric.unit)].filter(Boolean).join(" · ");
     button.append(heading, description, meta);
     button.addEventListener("click", () => {
@@ -351,8 +414,8 @@ function renderCatalog() {
     list.append(button);
   });
   if (state.selectedCatalogIndex < 0) {
-    state.selectedCatalogIndex = 0;
-    renderMetricDetail(state.catalogView[0]);
+    state.selectedCatalogIndex = state.catalogView.indexOf(visibleEntries[0]);
+    renderMetricDetail(visibleEntries[0]);
     list.firstElementChild?.classList.add("active");
   } else {
     renderMetricDetail(state.catalogView[state.selectedCatalogIndex]);
@@ -365,8 +428,9 @@ function renderMetricDetail(metric) {
   if (!metric) return;
   const draft = metric.catalog_status === "draft";
   const pending = metric.catalog_status === "governance";
-  byID("detail-status").textContent = draft ? "未验证草稿" : pending ? "待治理" : metric.deprecated ? "已弃用" : "已发布";
-  byID("detail-status").className = `badge${draft || pending || metric.deprecated ? " warning" : ""}`;
+  const businessUnverified = isBusinessUnverified(metric);
+  byID("detail-status").textContent = catalogStatusLabel(metric);
+  byID("detail-status").className = `badge${draft || pending || metric.deprecated || businessUnverified ? " warning" : ""}`;
   byID("detail-name").textContent = metric.display_name || metric.name;
   byID("detail-code").textContent = metric.name;
   byID("detail-description").textContent = metric.description || "暂无业务定义。";
@@ -382,7 +446,7 @@ function renderMetricDetail(metric) {
   if (!metric.allowed_dimensions.length) appendChip(dimensions, "无分组维度");
   const tags = byID("detail-tags");
   tags.replaceChildren();
-  for (const tag of metric.tags || []) appendChip(tags, tag);
+  for (const tag of metric.tags || []) appendChip(tags, humanTag(tag));
   if (!(metric.tags || []).length) appendChip(tags, "未设置标签");
   const examples = byID("detail-examples");
   examples.replaceChildren();
@@ -404,6 +468,7 @@ function addMetricToQuery(metric) {
     (metric.catalog_status === "draft" && candidate.semantic_model_name !== metric.semantic_model_name));
   if (incompatible) state.queryMetricKeys.clear();
   state.queryMetricKeys.add(metricKey(metric));
+  byID("query-metric-search").value = "";
   activateTab("query");
   updateQueryBuilder();
   setStatus("query-status", `已选择“${metric.display_name || metric.name}”，可继续选择维度和时间。`, "success");
@@ -428,6 +493,11 @@ function sharedTimeMetadata(metrics) {
 function renderMetricOptions() {
   const container = byID("query-metric-options");
   container.replaceChildren();
+  const selected = selectedQueryMetrics();
+  const search = byID("query-metric-search").value.trim();
+  byID("query-metric-selection-status").textContent = selected.length
+    ? `已选择 ${selected.length} 个指标。输入名称或 code 可继续添加。`
+    : "先从指标库带入指标，或在这里输入名称或 code 搜索。";
   if (!state.catalog.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
@@ -435,7 +505,17 @@ function renderMetricOptions() {
     container.append(empty);
     return;
   }
-  for (const metric of state.catalog) {
+  const visibleMetrics = matchingQueryMetrics(state.catalog, search, state.queryMetricKeys);
+  if (!visibleMetrics.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = search
+      ? "没有找到匹配的可查询指标。请调整名称或 code。"
+      : "尚未选择指标。建议先在指标库确认口径，再点击“用于查询”。";
+    container.append(empty);
+    return;
+  }
+  for (const metric of visibleMetrics) {
     const label = document.createElement("label");
     label.className = "metric-option";
     const input = document.createElement("input");
@@ -450,7 +530,7 @@ function renderMetricOptions() {
     const name = document.createElement("strong");
     name.textContent = metric.display_name || metric.name;
     const meta = document.createElement("small");
-    meta.textContent = metric.name;
+    meta.textContent = `${metric.name}${isBusinessUnverified(metric) ? " · 业务待验证" : ""}`;
     text.append(name, meta);
     label.append(input, text);
     container.append(label);
@@ -837,7 +917,11 @@ async function runQueryOperation(operation) {
     byID("result-meta").textContent = "";
     byID("query-output").textContent = "";
     byID("result-panel").hidden = true;
-    setStatus("query-status", operation === "query" ? "正在提交受控查询…" : "正在生成开发者检查结果…");
+    setStatus("query-status", ({
+      query: "正在提交受控查询…",
+      explain: "正在解释指标口径…",
+      plan: "正在生成执行计划…",
+    })[operation] || "正在处理请求…");
     const mode = queryMode();
     const path = mode.kind === "draft"
       ? routePath({namespace: state.namespace, model_name: mode.modelName}, `draft-${operation}`)
@@ -986,7 +1070,13 @@ function renderMetricEditor(metric) {
   byID("metric-examples").value = (metric?.usage_examples || []).join("\n");
   byID("metric-evidence").value = (metric?.verification?.evidence || []).join("；");
   byID("metric-verified").checked = metric?.verification?.status === "verified";
+  byID("metric-verification-label").textContent = verificationLabel(metric);
   byID("metric-deprecated").checked = Boolean(metric?.deprecated);
+  const verificationNote = byID("business-verification-note");
+  verificationNote.hidden = !isBusinessUnverified(metric);
+  verificationNote.textContent = isBusinessUnverified(metric)
+    ? "当前勾选只表示 staging 技术试查证据已登记；业务口径仍待确认。测试发布不等于业务验证通过。"
+    : "";
   const entities = state.draft.source.spec.entities.map((entity) => entity.name);
   fillSelect(byID("metric-entity"), entities, metric?.entity || "", "没有可用实体");
   byID("metric-operation").value = metric?.expression?.op || "sum";
@@ -1331,6 +1421,11 @@ function bindEvents() {
   });
   byID("catalog-search-button").addEventListener("click", loadCatalog);
   byID("catalog-search").addEventListener("keydown", (event) => { if (event.key === "Enter") loadCatalog(); });
+  byID("catalog-status-filter").addEventListener("change", () => {
+    state.selectedCatalogIndex = -1;
+    renderCatalog();
+  });
+  byID("query-metric-search").addEventListener("input", renderMetricOptions);
   for (const button of document.querySelectorAll("[data-tab]")) button.addEventListener("click", () => activateTab(button.dataset.tab));
   byID("metric-select").addEventListener("change", (event) => {
     if (state.editorDirty && !window.confirm("当前表单的编辑尚未应用。放弃这些编辑并切换指标？")) {
@@ -1424,6 +1519,6 @@ async function initialize() {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = {catalogStatusCounts, draftCatalogEntries, governanceCatalogEntries, matchesCatalogSearch, mergeCatalogEntries, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, shiftDate, timezoneParts, zonedMidnightISO, shellQuote};
+  module.exports = {catalogStatusCounts, catalogStatusLabel, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, shiftDate, timezoneParts, verificationLabel, zonedMidnightISO, shellQuote};
 }
 if (typeof document !== "undefined") initialize();

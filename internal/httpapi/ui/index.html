@@ -63,10 +63,19 @@
           <p>① 选择业务域并搜索指标 → ② 阅读定义、维度和时间口径 → ③ 点击“用于查询”验证结果并复制 API 请求。指标缺失或口径不符时联系负责人，不要用相近指标代替。</p>
         </details>
 
-        <div class="search-bar">
-          <label class="sr-only" for="catalog-search">搜索指标</label>
-          <input id="catalog-search" type="search" placeholder="例如：付费订单数、收入、活跃用户" autocomplete="off">
-          <button id="catalog-search-button" class="button secondary" type="button">搜索</button>
+        <div class="catalog-controls">
+          <div class="search-bar">
+            <label class="sr-only" for="catalog-search">搜索指标</label>
+            <input id="catalog-search" type="search" placeholder="例如：付费订单数、收入、活跃用户" autocomplete="off">
+            <button id="catalog-search-button" class="button secondary" type="button">搜索</button>
+          </div>
+          <label class="catalog-status-filter" for="catalog-status-filter">显示状态
+            <select id="catalog-status-filter">
+              <option value="queryable">可查询或试查</option>
+              <option value="governance">待治理</option>
+              <option value="all">全部指标</option>
+            </select>
+          </label>
         </div>
 
         <div class="catalog-layout">
@@ -173,9 +182,10 @@
                 <legend>发布信息</legend>
                 <div class="form-grid two">
                   <label>验证证据<input id="metric-evidence" placeholder="例如：与财务报表对账通过"></label>
-                  <label class="toggle"><input id="metric-verified" type="checkbox"><span>口径已经验证</span></label>
+                  <label class="toggle"><input id="metric-verified" type="checkbox"><span id="metric-verification-label">口径已经验证</span></label>
                 </div>
                 <label class="toggle"><input id="metric-deprecated" type="checkbox"><span>标记为已弃用</span></label>
+                <p id="business-verification-note" class="inline-note warning-note" hidden></p>
               </fieldset>
 
               <p id="editor-status" class="result-status" role="status" aria-live="polite" hidden></p>
@@ -228,6 +238,10 @@
         <div class="query-layout">
           <section class="panel">
             <div class="panel-heading"><div><p class="step">01 · 选择指标</p><h2>查询内容</h2></div></div>
+            <label class="query-metric-search" for="query-metric-search">添加指标
+              <input id="query-metric-search" type="search" placeholder="输入中文名称或指标 code" autocomplete="off">
+            </label>
+            <p id="query-metric-selection-status" class="muted"></p>
             <div id="query-metric-options" class="metric-options"></div>
             <div id="query-examples" class="inline-note">选择指标后显示维护者提供的常见使用方式。</div>
 
@@ -252,7 +266,7 @@
             </fieldset>
 
             <fieldset class="form-section">
-              <legend>筛选条件</legend>
+              <legend>筛选条件（可选）</legend>
               <div class="filter-row">
                 <label>维度<select id="filter-dimension"></select></label>
                 <label>条件<select id="filter-operator"><option value="eq">等于</option><option value="in">属于其中</option></select></label>

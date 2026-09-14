@@ -647,6 +647,8 @@ func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
 	}
 	body := readRawBody(t, response)
 	if !strings.Contains(body, "<h1>指标库</h1>") || !strings.Contains(body, "/assets/app.js") ||
+		!strings.Contains(body, "catalog-status-filter") || !strings.Contains(body, "query-metric-search") ||
+		!strings.Contains(body, "business-verification-note") ||
 		!strings.Contains(body, "run-query-button") || !strings.Contains(body, "governance-tab") ||
 		!strings.Contains(body, "<h1>治理发布</h1>") || !strings.Contains(body, "editor-status") ||
 		!strings.Contains(body, "<h1>查询验证</h1>") {

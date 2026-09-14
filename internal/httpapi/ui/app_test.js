@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const {catalogStatusCounts, draftCatalogEntries, governanceCatalogEntries, matchesCatalogSearch, mergeCatalogEntries, planSummaryRows, preferredTimeGranularity, resolvePresetRange, zonedMidnightISO, shellQuote} = require("./app.js");
+const {catalogStatusCounts, catalogStatusLabel, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, planSummaryRows, preferredTimeGranularity, resolvePresetRange, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
 const {execFileSync} = require("node:child_process");
 
 test("copied request preserves apostrophes and shell characters as literal JSON", () => {
@@ -43,6 +43,42 @@ test("catalog status counts do not double count drafts shadowed by a published m
     [{name: "iap_amount", catalog_status: "draft"}, {name: "level_count", catalog_status: "governance"}],
   );
   assert.deepEqual(catalogStatusCounts(view), {published: 1, draft: 0, governance: 1});
+});
+
+test("catalog defaults to queryable entries and keeps governance records explicitly reachable", () => {
+  const metrics = [
+    {name: "published", catalog_status: "published"},
+    {name: "draft", catalog_status: "draft"},
+    {name: "pending", catalog_status: "governance"},
+  ];
+  assert.deepEqual(filterCatalogEntries(metrics).map((metric) => metric.name), ["published", "draft"]);
+  assert.deepEqual(filterCatalogEntries(metrics, "governance").map((metric) => metric.name), ["pending"]);
+  assert.equal(filterCatalogEntries(metrics, "all").length, 3);
+});
+
+test("test-published metrics remain visibly business-unverified", () => {
+  const metric = {catalog_status: "published", tags: ["governance_unverified"]};
+  assert.equal(catalogStatusLabel(metric), "已发布 · 业务待验证");
+  assert.equal(verificationLabel(metric), "技术试查证据已登记");
+  assert.equal(verificationLabel({verification: {status: "verified"}}), "口径已经验证");
+  assert.equal(humanTag("business_type_atomic"), "原子指标");
+  assert.equal(humanTag("governance_unverified"), "业务待验证");
+});
+
+test("query chooser shows selected metrics first and searches instead of listing the whole catalog", () => {
+  const metrics = [
+    {name: "iap_amount", display_name: "付费金额"},
+    {name: "game_start_count", display_name: "游戏启动次数"},
+    {name: "level_pass_count", display_name: "过关次数"},
+  ];
+  assert.deepEqual(matchingQueryMetrics(metrics, "", new Set(["iap_amount"])).map((metric) => metric.name), ["iap_amount"]);
+  assert.deepEqual(matchingQueryMetrics(metrics, "次数", new Set(["iap_amount"]), 2).map((metric) => metric.name), ["iap_amount", "game_start_count"]);
+  assert.deepEqual(matchingQueryMetrics(metrics, "missing", new Set()).map((metric) => metric.name), []);
+});
+
+test("common authorization and time-grouping failures explain the recovery action", () => {
+  assert.match(errorMessage({status: 403, request_id: "req_1"}), /权限组.*req_1/);
+  assert.match(errorMessage({detail: "grouped time dimensions require explicit grouping semantics", request_id: "req_2"}), /选择按日、按周或按月.*req_2/);
 });
 
 test("governance catalog keeps all records but only marks executable definitions as draft previews", () => {
@@ -203,6 +239,18 @@ test("cancelled navigation preserves unsaved draft and business domain", async (
   assert.equal(run("state.draft"), original);
   assert.equal(run("state.namespace"), "original");
   assert.equal(context.document.getElementById("namespace-select").value, "original");
+});
+
+test("successful namespace switching clears the previous query metric search", async () => {
+  const {context, run} = editorContext();
+  context.window = {confirm: () => true};
+  context.loadCatalog = async () => {};
+  context.initializeGovernanceRoutes = () => {};
+  context.document.getElementById("query-metric-search").value = "old-domain-metric";
+  run("state.namespace = 'original'");
+  await run("switchNamespace('other')");
+  assert.equal(run("state.namespace"), "other");
+  assert.equal(context.document.getElementById("query-metric-search").value, "");
 });
 
 test("new query failure clears old results and unlocks controls without retry", async () => {
