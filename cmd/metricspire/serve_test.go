@@ -179,6 +179,20 @@ func TestConfiguredUIModelsKeepsRouteOrderAndRemovesDuplicates(t *testing.T) {
 	}
 }
 
+func TestMCPAuthorizationServerFollowsAuthenticationProvider(t *testing.T) {
+	oidc := runtimeconfig.Config{Authentication: runtimeconfig.AuthenticationConfig{
+		Provider: runtimeconfig.AuthenticationOIDC,
+		OIDC:     &runtimeconfig.OIDCConfig{IssuerURL: "https://identity.example.com/"},
+	}}
+	if got := mcpAuthorizationServer(oidc, serveEnvironment{databricksHost: "https://workspace.example.com"}); got != "https://identity.example.com/" {
+		t.Fatalf("OIDC authorization server = %q", got)
+	}
+	apps := runtimeconfig.Config{Authentication: runtimeconfig.AuthenticationConfig{Provider: runtimeconfig.AuthenticationDatabricksApps}}
+	if got := mcpAuthorizationServer(apps, serveEnvironment{databricksHost: "https://workspace.example.com/"}); got != "https://workspace.example.com/oidc" {
+		t.Fatalf("Apps authorization server = %q", got)
+	}
+}
+
 func TestServeStartsOIDCLoginAndStopsGracefullyWithPostgres(t *testing.T) {
 	databaseURL := os.Getenv("METRICSPIRE_TEST_DATABASE_URL")
 	if databaseURL == "" {

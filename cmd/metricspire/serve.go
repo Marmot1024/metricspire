@@ -146,7 +146,8 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	handler, err := httpapi.NewServer(httpapi.Config{
 		MaxBodyBytes: config.HTTP.MaxBodyBytes, ControlTimeout: controlTimeout,
 		QueryTimeout: queryTimeout, AllowedOrigin: config.HTTP.PublicURL,
-		AuthenticationProfile: config.Authentication.Provider, MCPVersion: version,
+		MCPAuthorizationServer: mcpAuthorizationServer(config, environment),
+		AuthenticationProfile:  config.Authentication.Provider, MCPVersion: version,
 		UIModels: configuredUIModels(config.Bindings),
 	}, httpapi.Dependencies{
 		Authenticator: authenticator, AuthEndpoints: authEndpoints,
@@ -191,6 +192,16 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		}
 		return writeServeStatus(stdout, "stopped", listener.Addr().String(), config.HTTP.PublicURL)
 	}
+}
+
+func mcpAuthorizationServer(config runtimeconfig.Config, environment serveEnvironment) string {
+	if config.Authentication.Provider == runtimeconfig.AuthenticationOIDC && config.Authentication.OIDC != nil {
+		return strings.TrimSpace(config.Authentication.OIDC.IssuerURL)
+	}
+	if config.Authentication.Provider == runtimeconfig.AuthenticationDatabricksApps {
+		return strings.TrimSuffix(strings.TrimSpace(environment.databricksHost), "/") + "/oidc"
+	}
+	return ""
 }
 
 func configuredUIModels(routes []runtimeconfig.BindingRoute) []httpapi.UIModelRoute {

@@ -163,6 +163,10 @@ func TestCompileUsesDateParametersForCalendarDateDimensions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.Contains(statement.SQL, "CAST(date_trunc('DAY', t0.`order_ts`) AS DATE) AS `order_date`") ||
+		!strings.Contains(statement.SQL, "GROUP BY CAST(date_trunc('DAY', t0.`order_ts`) AS DATE)") {
+		t.Fatalf("grouped DATE dimension changed its public result type:\n%s", statement.SQL)
+	}
 	if len(statement.Parameters) < 2 || statement.Parameters[0].Type != "DATE" || statement.Parameters[1].Type != "DATE" ||
 		*statement.Parameters[0].Value != "2026-09-01" || *statement.Parameters[1].Value != "2026-09-08" {
 		t.Fatalf("date parameters = %#v", statement.Parameters)

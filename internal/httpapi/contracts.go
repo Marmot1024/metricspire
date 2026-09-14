@@ -131,14 +131,15 @@ type Dependencies struct {
 }
 
 type Config struct {
-	MaxBodyBytes          int64
-	ControlTimeout        time.Duration
-	QueryTimeout          time.Duration
-	AllowedOrigin         string
-	AuthenticationProfile string
-	MCPVersion            string
-	UIModels              []UIModelRoute
-	RequestID             func() string
+	MaxBodyBytes           int64
+	ControlTimeout         time.Duration
+	QueryTimeout           time.Duration
+	AllowedOrigin          string
+	MCPAuthorizationServer string
+	AuthenticationProfile  string
+	MCPVersion             string
+	UIModels               []UIModelRoute
+	RequestID              func() string
 }
 
 // UIModelRoute is the small, non-secret route list required by the embedded

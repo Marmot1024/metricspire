@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -23,6 +24,13 @@ func TestJobManagerCancelsAndIsolatesJobsByPrincipal(t *testing.T) {
 	submitted, err := manager.Submit(context.Background(), input)
 	if err != nil || submitted.Job.Status != model.JobPending {
 		t.Fatalf("Submit() = %#v, %v", submitted, err)
+	}
+	encoded, err := json.Marshal(submitted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "physical_fingerprint") || strings.Contains(string(encoded), "row_limit") {
+		t.Fatalf("pending job exposed unresolved execution metadata: %s", encoded)
 	}
 	<-executor.started
 	if executor.input.JobID != submitted.Job.ID {
@@ -139,6 +147,13 @@ func TestJobManagerReportsTheResolvedTimeSemantics(t *testing.T) {
 		finished.ResolvedTimeGrouping == nil || finished.ResolvedTimeGrouping.Timezone != "Asia/Shanghai" {
 		t.Fatalf("resolved time snapshot = %#v", finished)
 	}
+	encoded, err := json.Marshal(finished)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"physical_fingerprint":"sha256:resolved"`) || !strings.Contains(string(encoded), `"row_limit":100`) {
+		t.Fatalf("finished job omitted resolved execution metadata: %s", encoded)
+	}
 }
 
 type blockingExecutor struct {
@@ -174,7 +189,7 @@ func (resolvedTimeExecutor) ExecuteActive(context.Context, application.QueryInpu
 			TimeRange:    &model.TimeRange{Dimension: "order_date", Start: "2026-08-31T16:00:00Z", End: "2026-09-01T16:00:00Z"},
 			TimeGrouping: &model.TimeGrouping{Dimension: "order_date", Timezone: "Asia/Shanghai", Granularity: model.GrainDay},
 		},
-		Physical: model.PhysicalPlan{Limit: 100},
+		Physical: model.PhysicalPlan{Fingerprint: "sha256:resolved", Limit: 100},
 		Execution: model.ExecutionSnapshot{
 			Job:    model.ExecutionJob{Status: model.JobSucceeded},
 			Result: &model.TypedResult{},

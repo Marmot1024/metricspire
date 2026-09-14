@@ -145,6 +145,37 @@ func TestRemoteMCPAuthenticatesEveryRequestAndExposesSevenScopedTools(t *testing
 	}
 }
 
+func TestRemoteMCPPublishesOAuthProtectedResourceMetadataAndChallenge(t *testing.T) {
+	handler, _, _ := newTestServer(t, httpapi.Config{
+		AllowedOrigin:          "https://metrics.example.com",
+		MCPAuthorizationServer: "https://identity.example.com/",
+		RequestID:              func() string { return "req_mcp_oauth" },
+	})
+
+	response := performMCPInitialize(handler, "")
+	assertProblem(t, response, http.StatusUnauthorized, "unauthenticated")
+	if got, want := response.Header.Get("WWW-Authenticate"), `Bearer resource_metadata="https://metrics.example.com/.well-known/oauth-protected-resource/mcp"`; got != want {
+		t.Fatalf("WWW-Authenticate = %q, want %q", got, want)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource/mcp", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("metadata status=%d; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var metadata struct {
+		Resource             string   `json:"resource"`
+		AuthorizationServers []string `json:"authorization_servers"`
+	}
+	if err := json.NewDecoder(recorder.Result().Body).Decode(&metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.Resource != "https://metrics.example.com/mcp" || len(metadata.AuthorizationServers) != 1 || metadata.AuthorizationServers[0] != "https://identity.example.com/" {
+		t.Fatalf("protected resource metadata = %#v", metadata)
+	}
+}
+
 func TestRemoteMCPDoesNotExposeExecutionCredentialErrors(t *testing.T) {
 	const secret = "credential-secret-must-not-escape"
 	handler, _, _ := newTestServerWithCredential(t, httpapi.Config{RequestID: func() string { return "req_mcp_secret" }}, nil,

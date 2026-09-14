@@ -137,6 +137,14 @@ permission, and scopes job reads and cancellation to that request's tenant and
 principal. Only `submit_query` may forward the current request's short-lived
 execution credential into its asynchronous job.
 
+The self-hosted service publishes OAuth protected-resource metadata at
+`/.well-known/oauth-protected-resource/mcp`; when a request reaches MetricSpire
+directly, an unauthenticated `/mcp` response also advertises that URL through
+`WWW-Authenticate`. A managed ingress may publish the metadata and issue the
+401 itself. Interactive OAuth still requires a client registration supported
+by the deployment identity provider; a short-lived bearer token remains the
+simplest staging trial path.
+
 交互使用时确认查询工具的执行请求。非交互 `codex exec` 无法弹出审批；仅对已明确授权的任务，可在本次进程配置 `mcp_servers.metricspire.tools.submit_query.approval_mode="approve"`。不要因此放开全局审批或沙盒。[Codex MCP 配置](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
 
 | Tool | Purpose |

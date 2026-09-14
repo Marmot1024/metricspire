@@ -383,10 +383,19 @@ func (c *expressionCompiler) dimensionExpression(dimension model.PhysicalDimensi
 		local = fmt.Sprintf("from_utc_timestamp(%s, :%s)", column, timezone)
 	}
 	grain := strings.ToUpper(string(grouping.Granularity))
+	var grouped string
 	if grouping.Granularity == model.GrainWeek && grouping.WeekStart == model.WeekStartSunday {
-		return fmt.Sprintf("date_trunc('WEEK', %s + INTERVAL 1 DAY) - INTERVAL 1 DAY", local), nil
+		grouped = fmt.Sprintf("date_trunc('WEEK', %s + INTERVAL 1 DAY) - INTERVAL 1 DAY", local)
+	} else {
+		grouped = fmt.Sprintf("date_trunc('%s', %s)", grain, local)
 	}
-	return fmt.Sprintf("date_trunc('%s', %s)", grain, local), nil
+	// Databricks date_trunc always returns TIMESTAMP. Preserve a calendar-date
+	// dimension's public DATE contract instead of changing its result type only
+	// because the caller requested day, week, or month grouping.
+	if dimension.DataType == model.DataTypeDate {
+		grouped = fmt.Sprintf("CAST(%s AS DATE)", grouped)
+	}
+	return grouped, nil
 }
 
 func (c *expressionCompiler) dimensionColumn(dimension model.PhysicalDimension) (string, error) {

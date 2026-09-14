@@ -466,8 +466,8 @@ const (
 type ExecutionJob struct {
 	ID                  string     `json:"id"`
 	Status              JobStatus  `json:"status"`
-	PhysicalFingerprint string     `json:"physical_fingerprint"`
-	RowLimit            int64      `json:"row_limit"`
+	PhysicalFingerprint string     `json:"physical_fingerprint,omitempty"`
+	RowLimit            int64      `json:"row_limit,omitempty"`
 	SubmittedAt         time.Time  `json:"submitted_at"`
 	StartedAt           *time.Time `json:"started_at,omitempty"`
 	FinishedAt          *time.Time `json:"finished_at,omitempty"`

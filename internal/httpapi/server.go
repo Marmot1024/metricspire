@@ -77,6 +77,8 @@ func NewServer(config Config, dependencies Dependencies, logger *slog.Logger) (*
 func (server *Server) routes() {
 	server.mux.HandleFunc("/health/live", server.handleLiveness)
 	server.mux.HandleFunc("/health/ready", server.handleReadiness)
+	server.mux.HandleFunc("/.well-known/oauth-protected-resource", server.handleMCPProtectedResourceMetadata)
+	server.mux.HandleFunc("/.well-known/oauth-protected-resource/mcp", server.handleMCPProtectedResourceMetadata)
 	server.mux.HandleFunc("/mcp", server.handleMCP)
 	if server.deps.AuthEndpoints != nil {
 		server.mux.Handle("/auth/", server.deps.AuthEndpoints)
@@ -758,6 +760,7 @@ func (server *Server) authenticate(response http.ResponseWriter, request *http.R
 		if errors.As(err, &diagnostic) {
 			server.logger.Warn("authentication rejected", "request_id", requestID(request), "reason", diagnostic.SafeAuthenticationReason())
 		}
+		server.setMCPAuthenticationChallenge(response, request)
 		server.writeProblem(response, request, http.StatusUnauthorized, "unauthenticated", "Authentication required", "valid authentication is required", "")
 		return Principal{}, false
 	}
@@ -767,6 +770,48 @@ func (server *Server) authenticate(response http.ResponseWriter, request *http.R
 		return Principal{}, false
 	}
 	return principal, true
+}
+
+func (server *Server) handleMCPProtectedResourceMetadata(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet && request.Method != http.MethodHead {
+		server.methodNotAllowed(response, request, http.MethodGet+", "+http.MethodHead)
+		return
+	}
+	resource, authorizationServer, ok := server.mcpOAuthMetadata()
+	if !ok {
+		server.handleNotFound(response, request)
+		return
+	}
+	response.Header().Set("Content-Type", "application/json")
+	response.WriteHeader(http.StatusOK)
+	if request.Method == http.MethodHead {
+		return
+	}
+	_ = json.NewEncoder(response).Encode(map[string]any{
+		"resource":              resource,
+		"authorization_servers": []string{authorizationServer},
+	})
+}
+
+func (server *Server) setMCPAuthenticationChallenge(response http.ResponseWriter, request *http.Request) {
+	if request.URL.Path != "/mcp" {
+		return
+	}
+	resource, _, ok := server.mcpOAuthMetadata()
+	if !ok {
+		return
+	}
+	metadataURL := strings.TrimSuffix(resource, "/mcp") + "/.well-known/oauth-protected-resource/mcp"
+	response.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+metadataURL+`"`)
+}
+
+func (server *Server) mcpOAuthMetadata() (string, string, bool) {
+	origin := strings.TrimSuffix(strings.TrimSpace(server.config.AllowedOrigin), "/")
+	authorizationServer := strings.TrimSpace(server.config.MCPAuthorizationServer)
+	if origin == "" || authorizationServer == "" {
+		return "", "", false
+	}
+	return origin + "/mcp", authorizationServer, true
 }
 
 func (server *Server) decodeJSON(response http.ResponseWriter, request *http.Request, target any) bool {
