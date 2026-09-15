@@ -120,13 +120,15 @@ Unauthenticated `GET /health/live` reports process liveness. `GET /health/ready`
 
 ## MCP client connection
 
-`metricspire serve` exposes a stateless Streamable HTTP endpoint at `/mcp`.
-External clients connect to that URL; they do not clone this repository or run
-a local MetricSpire binary. For Codex, configure the endpoint as follows:
+`metricspire serve` exposes stateless Streamable HTTP MCP at `/mcp` and the
+equivalent `/api/v1/mcp`. Databricks Apps clients use `/api/v1/mcp` so its API
+ingress does not redirect anonymous MCP requests to a browser login page.
+External clients do not clone this repository or run a local MetricSpire binary.
+For a bearer-token trial, configure Codex as follows:
 
 ```toml
 [mcp_servers.metricspire]
-url = "https://metrics.example.com/mcp"
+url = "https://metrics.example.com/api/v1/mcp"
 bearer_token_env_var = "METRICSPIRE_API_TOKEN"
 ```
 
@@ -137,13 +139,14 @@ permission, and scopes job reads and cancellation to that request's tenant and
 principal. Only `submit_query` may forward the current request's short-lived
 execution credential into its asynchronous job.
 
-The self-hosted service publishes OAuth protected-resource metadata at
-`/.well-known/oauth-protected-resource/mcp`; when a request reaches MetricSpire
-directly, an unauthenticated `/mcp` response also advertises that URL through
-`WWW-Authenticate`. A managed ingress may publish the metadata and issue the
-401 itself. Interactive OAuth still requires a client registration supported
-by the deployment identity provider; a short-lived bearer token remains the
-simplest staging trial path.
+The service publishes protected-resource metadata for both MCP paths; direct
+unauthenticated requests also advertise it through `WWW-Authenticate`. A
+managed ingress may issue the challenge itself. Token-free Codex OAuth requires
+the deployment identity provider to register a **public** client with Codex's
+reported loopback callback and refresh-token scope; Databricks does not offer
+dynamic client registration at its staging OIDC endpoint. Until that client ID
+is registered and a fresh-user login is tested, bearer-token trials are the
+verified path, not proof of automatic OAuth onboarding.
 
 交互使用时确认查询工具的执行请求。非交互 `codex exec` 无法弹出审批；仅对已明确授权的任务，可在本次进程配置 `mcp_servers.metricspire.tools.submit_query.approval_mode="approve"`。不要因此放开全局审批或沙盒。[Codex MCP 配置](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
 

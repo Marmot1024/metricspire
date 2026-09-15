@@ -24,7 +24,7 @@ The result is `dist/databricks-apps`. The source templates contain no workspace 
 
 `dist/` is intentionally ignored by Git. Do not use `databricks sync` for this generated package because ignore rules can leave an older remote binary while still reporting a completed sync. Upload it with `databricks workspace import-dir dist/databricks-apps <workspace-source> --overwrite`, verify both remote gzip sizes against the local files, and only then deploy the App from that workspace source.
 
-The deployed service exposes authenticated Streamable HTTP MCP at `<app-origin>/mcp`. Clients use only that URL and a short-lived bearer token; the local stdio bridge is development compatibility, not the hosted trial path. After deployment, run `TestMCPRemoteStagingAcceptance` with the opt-in staging variables documented in the project README to verify discovery, all seven tools, and the fixed five-row query without a local MetricSpire subprocess.
+The deployed service exposes authenticated Streamable HTTP MCP at `<app-origin>/api/v1/mcp`. The legacy `/mcp` route remains for direct/self-hosted compatibility; Databricks Apps ingress redirects its anonymous requests to browser login, which is unsuitable for Codex OAuth discovery. Clients need no local MetricSpire process. A short-lived bearer token is the verified staging path; token-free login additionally requires an account-admin-registered public Databricks OAuth client and fresh-session acceptance. After deployment, run `TestMCPRemoteStagingAcceptance` with the opt-in staging variables documented in the project README to verify discovery, all seven tools, and the fixed five-row query without a local MetricSpire subprocess.
 
 Before deployment, the staging App must be reviewed with exactly these resources:
 

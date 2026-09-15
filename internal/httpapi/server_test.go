@@ -152,27 +152,48 @@ func TestRemoteMCPPublishesOAuthProtectedResourceMetadataAndChallenge(t *testing
 		RequestID:              func() string { return "req_mcp_oauth" },
 	})
 
-	response := performMCPInitialize(handler, "")
-	assertProblem(t, response, http.StatusUnauthorized, "unauthenticated")
-	if got, want := response.Header.Get("WWW-Authenticate"), `Bearer resource_metadata="https://metrics.example.com/.well-known/oauth-protected-resource/mcp"`; got != want {
-		t.Fatalf("WWW-Authenticate = %q, want %q", got, want)
-	}
+	for _, endpoint := range []string{"/mcp", "/api/v1/mcp"} {
+		t.Run(endpoint, func(t *testing.T) {
+			response := performMCPInitializeAt(handler, "", endpoint)
+			assertProblem(t, response, http.StatusUnauthorized, "unauthenticated")
+			metadataPath := "/.well-known/oauth-protected-resource" + endpoint
+			if got, want := response.Header.Get("WWW-Authenticate"), `Bearer resource_metadata="https://metrics.example.com`+metadataPath+`"`; got != want {
+				t.Fatalf("WWW-Authenticate = %q, want %q", got, want)
+			}
 
-	request := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource/mcp", nil)
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("metadata status=%d; body=%s", recorder.Code, recorder.Body.String())
+			request := httptest.NewRequest(http.MethodGet, metadataPath, nil)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("metadata status=%d; body=%s", recorder.Code, recorder.Body.String())
+			}
+			var metadata struct {
+				Resource             string   `json:"resource"`
+				AuthorizationServers []string `json:"authorization_servers"`
+			}
+			if err := json.NewDecoder(recorder.Result().Body).Decode(&metadata); err != nil {
+				t.Fatal(err)
+			}
+			if metadata.Resource != "https://metrics.example.com"+endpoint || len(metadata.AuthorizationServers) != 1 || metadata.AuthorizationServers[0] != "https://identity.example.com/" {
+				t.Fatalf("protected resource metadata = %#v", metadata)
+			}
+		})
 	}
-	var metadata struct {
-		Resource             string   `json:"resource"`
-		AuthorizationServers []string `json:"authorization_servers"`
-	}
-	if err := json.NewDecoder(recorder.Result().Body).Decode(&metadata); err != nil {
+}
+
+func TestRemoteMCPAPIPathConnectsWithAuthenticatedUser(t *testing.T) {
+	handler, _, _ := newTestServer(t, httpapi.Config{})
+	session := connectRemoteMCPAt(t, handler, "query", "/api/v1/mcp")
+	listed, err := session.ListTools(t.Context(), nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if metadata.Resource != "https://metrics.example.com/mcp" || len(metadata.AuthorizationServers) != 1 || metadata.AuthorizationServers[0] != "https://identity.example.com/" {
-		t.Fatalf("protected resource metadata = %#v", metadata)
+	if len(listed.Tools) != 7 {
+		t.Fatalf("API-path MCP tools=%d, want 7", len(listed.Tools))
+	}
+	output := callRemoteMCP(t, session, "list_namespaces", map[string]any{}, false)
+	if !strings.Contains(output, `"namespaces"`) {
+		t.Fatalf("API-path MCP discovery response=%q", output)
 	}
 }
 
@@ -1024,7 +1045,11 @@ func performJSON(handler http.Handler, method, path, token string, body any) *ht
 }
 
 func performMCPInitialize(handler http.Handler, token string) *http.Response {
-	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`))
+	return performMCPInitializeAt(handler, token, "/mcp")
+}
+
+func performMCPInitializeAt(handler http.Handler, token, endpoint string) *http.Response {
+	request := httptest.NewRequest(http.MethodPost, endpoint, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
 	if token != "" {
@@ -1048,12 +1073,16 @@ func (transport bearerRoundTripper) RoundTrip(request *http.Request) (*http.Resp
 }
 
 func connectRemoteMCP(t *testing.T, handler http.Handler, token string) *mcp.ClientSession {
+	return connectRemoteMCPAt(t, handler, token, "/mcp")
+}
+
+func connectRemoteMCPAt(t *testing.T, handler http.Handler, token, endpoint string) *mcp.ClientSession {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	client := mcp.NewClient(&mcp.Implementation{Name: "remote-test", Version: "1"}, nil)
 	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{
-		Endpoint: server.URL + "/mcp", HTTPClient: &http.Client{Transport: bearerRoundTripper{token: token, base: http.DefaultTransport}},
+		Endpoint: server.URL + endpoint, HTTPClient: &http.Client{Transport: bearerRoundTripper{token: token, base: http.DefaultTransport}},
 		DisableStandaloneSSE: true, MaxRetries: -1,
 	}, nil)
 	if err != nil {
