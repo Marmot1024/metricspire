@@ -1,28 +1,26 @@
-<p align="center"><img src="docs/assets/metricspire-mark.svg" width="84" height="84" alt="MetricSpire のロゴ"></p>
+<p align="center"><img src="docs/assets/metricspire-mark.svg" width="62" height="62" alt="MetricSpire のロゴ"></p>
 
 <h1 align="center">MetricSpire</h1>
 
-<p align="center"><strong>指標を一度定義し、アプリと AI エージェントから同じ意味で問い合わせる。</strong></p>
+<p align="center"><strong>テーブルではなく、指標を問い合わせる。</strong></p>
+
+<p align="center">レビュー済みの定義 · 制限付きクエリ · UI・API・MCP に共通の契約</p>
 
 <p align="center"><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <strong>日本語</strong></p>
 
-<p align="center"><code>開発プレビュー</code> · <code>metricspire.io/v1alpha1</code> · Apache 2.0</p>
+<p align="center"><img src="docs/assets/semantic-workflow.svg" alt="公開 orders サンプルの概念図。売上指標を定義し、顧客の地域別に問い合わせ、認可と制限付き計画を経て実行します。"></p>
 
-MetricSpire はオープンソースのセマンティック指標サービスです。レビュー済みの指標定義を変更不能なリリースとして公開し、ユーザーの構造化クエリを有効なリリースに対して解決してから、分析エンジンのアダプターを通じて制限付きで実行します。HTTP API、製品 UI、リモート MCP ツールは同じガバナンスと実行処理を共有します。
+<p align="center"><sub>公開 <code>orders</code> モデルに基づく図解です。製品のスクリーンショットや実際のクエリ結果ではありません。</sub></p>
 
-> **本番利用を保証するリリースではありません。** コードと Databricks Apps の staging 経路は検証されていますが、予定している `v0.1.0` はまだ公開されていません。検証済み・未検証の範囲は[開発状況](docs/development-status.md)（英語）をご覧ください。
+<p align="center"><a href="docs/getting-started.md">サンプルを試す</a> · <a href="docs/mcp.md">AI クライアントを接続</a> · <a href="docs/architecture.md">構成を読む</a></p>
+
+MetricSpire はオープンソースのセマンティック指標サービスです。レビュー済みの指標を一度公開すれば、アプリや AI エージェントが指標コードとディメンションで同じガバナンス経路を利用できます。有効なリリースを解決し、方針と上限を適用したうえで、実データへのアクセス可否は分析エンジンに委ねます。
+
+> **開発プレビューであり、本番利用を保証しません。** Databricks Apps の staging 経路は検証されていますが、予定している `v0.1.0` は未公開です。[検証済みの範囲](docs/development-status.md)（英語）をご覧ください。
 
 ## なぜ MetricSpire が必要か
 
-アプリや AI アシスタントは物理テーブルを選んだり無制限の SQL を生成したりせず、**指標コードとディメンション**を指定するべきです。MetricSpire はビジネス定義、レビュー済みの物理バインディング、有効な版、アクセス方針、クエリ制限をサービス側で管理します。元データへのアクセス可否は引き続き分析エンジンが実ユーザーの権限に基づいて判断します。
-
-```text
-レビュー済みモデル ── 公開 ──> 変更不能な有効リリース
-                                  │
-ユーザー + 指標コード + 次元 ──> 認可 ──> 説明 / 計画
-                                           └──> 制限付き実行 ──> 型付き結果
-                    HTTP API · 製品 UI · リモート MCP
-```
+呼び出し側は物理テーブルや無制限の SQL ではなく、**指標コードとディメンション**を指定します。MetricSpire はビジネス定義、レビュー済みのバインディング、有効な版、製品側の権限とクエリ上限を管理します。元データのアクセス権限は分析エンジンが判断します。
 
 これは指標サービスであり、データウェアハウスや BI システム、エンジン固有の行・列レベルの権限管理を置き換えるものではありません。
 

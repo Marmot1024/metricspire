@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 430" role="img" aria-labelledby="title desc">
+  <title id="title">MetricSpire semantic workflow</title>
+  <desc id="desc">An illustration based on the public orders example: a reviewed revenue definition becomes a metric-first request, then an authorized bounded plan. This is not a product screenshot.</desc>
+  <rect width="1080" height="430" fill="#F3F0E8"/>
+  <rect x="1" y="1" width="1078" height="428" fill="none" stroke="#D1C9BA" stroke-width="2"/>
+  <path d="M40 70H1040M40 356H1040" stroke="#C9C2B5" stroke-width="2"/>
+  <path d="M368 92V333M713 92V333" stroke="#C9C2B5" stroke-width="2"/>
+  <rect x="40" y="36" width="12" height="12" fill="#D56345"/>
+  <text x="68" y="48" fill="#203746" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="15" font-weight="700" letter-spacing="2">METRICSPIRE  /  FIELD NOTES</text>
+  <text x="1040" y="48" fill="#536470" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="14" text-anchor="end" letter-spacing="1">THE ORDERS EXAMPLE</text>
+
+  <text x="40" y="112" fill="#C15135" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="15" font-weight="700" letter-spacing="1.5">01  DEFINE</text>
+  <text x="40" y="169" fill="#182E3B" font-family="Georgia, 'Times New Roman', serif" font-size="37" font-weight="700">Revenue,</text>
+  <text x="40" y="211" fill="#182E3B" font-family="Georgia, 'Times New Roman', serif" font-size="37" font-weight="700">once.</text>
+  <text x="40" y="264" fill="#314855" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18">gross_revenue</text>
+  <text x="40" y="296" fill="#667781" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="15">SUM(orders.gross_amount)</text>
+
+  <text x="395" y="112" fill="#C15135" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="15" font-weight="700" letter-spacing="1.5">02  ASK</text>
+  <text x="395" y="169" fill="#182E3B" font-family="Georgia, 'Times New Roman', serif" font-size="37" font-weight="700">Meaning,</text>
+  <text x="395" y="211" fill="#182E3B" font-family="Georgia, 'Times New Roman', serif" font-size="37" font-weight="700">not tables.</text>
+  <text x="395" y="264" fill="#314855" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18">metric: gross_revenue</text>
+  <text x="395" y="296" fill="#667781" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="15">by customer_region</text>
+
+  <text x="740" y="112" fill="#C15135" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="15" font-weight="700" letter-spacing="1.5">03  EXECUTE</text>
+  <text x="740" y="169" fill="#182E3B" font-family="Georgia, 'Times New Roman', serif" font-size="37" font-weight="700">Bounded</text>
+  <text x="740" y="211" fill="#182E3B" font-family="Georgia, 'Times New Roman', serif" font-size="37" font-weight="700">by design.</text>
+  <text x="740" y="264" fill="#314855" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18">authorize → plan → run</text>
+  <text x="740" y="296" fill="#667781" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="15">engine permissions still apply</text>
+
+  <circle cx="40" cy="356" r="5" fill="#D56345"/>
+  <circle cx="368" cy="356" r="5" fill="#D56345"/>
+  <circle cx="713" cy="356" r="5" fill="#D56345"/>
+  <circle cx="1040" cy="356" r="5" fill="#D56345"/>
+  <text x="40" y="393" fill="#52636D" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="14" letter-spacing=".7">REVIEWED MODEL</text>
+  <text x="542" y="393" fill="#52636D" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="14" text-anchor="middle" letter-spacing=".7">STRUCTURED QUERY</text>
+  <text x="1040" y="393" fill="#52636D" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="14" text-anchor="end" letter-spacing=".7">TYPED RESULT</text>
+</svg>

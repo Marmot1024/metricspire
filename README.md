@@ -1,28 +1,26 @@
-<p align="center"><img src="docs/assets/metricspire-mark.svg" width="84" height="84" alt="MetricSpire mark"></p>
+<p align="center"><img src="docs/assets/metricspire-mark.svg" width="62" height="62" alt="MetricSpire mark"></p>
 
 <h1 align="center">MetricSpire</h1>
 
-<p align="center"><strong>Define a metric once. Query it consistently from applications and AI agents.</strong></p>
+<p align="center"><strong>Ask for a metric, not a table.</strong></p>
+
+<p align="center">Reviewed definitions · bounded queries · one contract across UI, API, and MCP</p>
 
 <p align="center"><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a></p>
 
-<p align="center"><code>Development preview</code> · <code>metricspire.io/v1alpha1</code> · Apache 2.0</p>
+<p align="center"><img src="docs/assets/semantic-workflow.svg" alt="Illustrated path through the neutral orders example: define gross revenue, request it by customer region, then authorize and execute a bounded plan."></p>
 
-MetricSpire is an open-source semantic metrics service. It turns reviewed metric definitions into immutable releases, resolves a user's structured query against the active release, and executes a bounded plan through an analytical-engine adapter. The same governed workflow is available through an HTTP API, a product UI, and remote MCP tools.
+<p align="center"><sub>Illustration based on the public <code>orders</code> model; not a product screenshot or a claim of live query results.</sub></p>
 
-> **Development preview.** The code and Databricks Apps staging path have been exercised, but there is no production-ready or published `v0.1.0` release. See [what has actually been verified](docs/development-status.md).
+<p align="center"><a href="docs/getting-started.md">Explore the example</a> · <a href="docs/mcp.md">Connect an AI client</a> · <a href="docs/architecture.md">Read the architecture</a></p>
+
+MetricSpire is an open-source semantic metrics service. Publish a reviewed definition once; applications and AI agents can then request it by code and dimension through the same governed workflow. The service resolves the active release, applies policy and limits, and delegates physical data access to the analytical engine.
+
+> **Development preview.** The Databricks Apps staging path has been exercised, but there is no production-ready or published `v0.1.0` release. [See the verified boundary](docs/development-status.md).
 
 ## Why it exists
 
-Applications and AI assistants should ask for **metric codes and dimensions**, not choose tables or generate unrestricted SQL. MetricSpire keeps the business definition, approved physical binding, active version, access policy, and query limits on the service side. The analytical engine still decides whether the real user can read the underlying data.
-
-```text
-Reviewed model ── publish ──> immutable active release
-                                    │
-User + metric codes + dimensions ──> authorize ──> explain / plan
-                                                 └──> bounded engine query ──> typed result
-                    HTTP API  ·  product UI  ·  remote MCP
-```
+Clients ask for **metric codes and dimensions** rather than choosing physical tables or generating unrestricted SQL. MetricSpire owns the definition, approved binding, active version, product policy, and query budgets. The analytical engine still decides whether the real user can read the underlying data.
 
 This is a metric service, not a replacement for your data warehouse, BI system, or engine-native row and column security.
 

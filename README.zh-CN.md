@@ -1,28 +1,26 @@
-<p align="center"><img src="docs/assets/metricspire-mark.svg" width="84" height="84" alt="MetricSpire 标识"></p>
+<p align="center"><img src="docs/assets/metricspire-mark.svg" width="62" height="62" alt="MetricSpire 标识"></p>
 
 <h1 align="center">MetricSpire</h1>
 
-<p align="center"><strong>指标定义一次，让应用与 AI Agent 按同一口径查询。</strong></p>
+<p align="center"><strong>问指标，不问物理表。</strong></p>
+
+<p align="center">经过评审的定义 · 有边界的查询 · UI、API 与 MCP 共用一套契约</p>
 
 <p align="center"><a href="README.md">English</a> · <strong>简体中文</strong> · <a href="README.ja.md">日本語</a></p>
 
-<p align="center"><code>开发预览版</code> · <code>metricspire.io/v1alpha1</code> · Apache 2.0</p>
+<p align="center"><img src="docs/assets/semantic-workflow.svg" alt="以公开订单示例说明：定义收入指标，按客户地区发起结构化请求，经过授权与有边界的规划后执行。"></p>
 
-MetricSpire 是开源的语义指标服务。它把经过评审的指标定义发布为不可变版本，将用户的结构化查询解析到当前生效版本，再通过分析引擎适配器执行有边界的查询。HTTP API、产品界面和远程 MCP 工具共用同一套治理与执行链路。
+<p align="center"><sub>基于仓库公开的 <code>orders</code> 模型绘制；并非产品截图，也不代表实时查询结果。</sub></p>
 
-> **尚非生产就绪版本。** 代码及 Databricks Apps staging 路径经过验证，但计划中的 `v0.1.0` 尚未正式发布。已验证与未验证的范围见[开发状态](docs/development-status.md)（英文）。
+<p align="center"><a href="docs/getting-started.md">体验公开示例</a> · <a href="docs/mcp.md">连接 AI 客户端</a> · <a href="docs/architecture.md">了解架构</a></p>
+
+MetricSpire 是开源的语义指标服务。经评审的指标定义发布一次，应用与 AI Agent 就能按指标 code 和维度使用同一套治理链路。服务解析生效版本，执行策略与限额检查；真实数据的访问权仍由分析引擎裁定。
+
+> **开发预览版，尚非生产就绪。** Databricks Apps staging 路径经过验证，但计划中的 `v0.1.0` 尚未发布。[查看已验证范围](docs/development-status.md)（英文）。
 
 ## 为什么做 MetricSpire
 
-应用和 AI 助手应该提交**指标 code 与维度**，而不是自行选择物理表或生成不受约束的 SQL。MetricSpire 在服务端管理业务定义、经过审核的物理绑定、生效版本、访问策略与查询限额；底层分析引擎仍负责判断真实用户能否读取数据。
-
-```text
-审核后的模型 ── 发布 ──> 不可变的生效版本
-                              │
-用户 + 指标 code + 维度 ──> 鉴权 ──> 解释 / 规划
-                                       └──> 有边界的引擎查询 ──> 类型化结果
-                 HTTP API · 产品界面 · 远程 MCP
-```
+调用方提交**指标 code 与维度**，不自行选择物理表或生成不受约束的 SQL。MetricSpire 管理业务定义、经过审核的物理绑定、生效版本、产品权限与查询限额；底层分析引擎仍负责判断真实用户能否读取数据。
 
 它是指标服务，不代替数据仓库、BI 系统，也不会绕过引擎原生的行列权限。
 
