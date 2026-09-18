@@ -21,14 +21,4 @@ After explicit approval to create external state, sync only that generated direc
 
 A passing probe proves technical execution in that staging runtime. It does not by itself establish official Databricks support for Go or complete MetricSpire deployment acceptance.
 
-## Staging result (2026-09-03)
-
-A dedicated custom probe App was created only in an isolated staging workspace and received exactly the six generated files. No PostgreSQL, database, SQL warehouse, secret, production workspace, or business data was accessed. Databricks automatically created the App service principal and exposed its two baseline read-only IAM scopes; no additional user scopes or resources were configured. App names and environment identifiers belong in private deployment records, not this package.
-
-The deployment reached `RUNNING`. Logs reported an `amd64` process listening on platform port 8000, and authenticated `GET /health/live` returned:
-
-```json
-{"go_version":"go1.27.0","goarch":"amd64","protocol":"HTTP/1.1","status":"ok"}
-```
-
-The managed edge response used HTTP/2, while the Go process observed HTTP/1.1. A platform stop followed by start returned to the same 200 response, proving lifecycle recovery. Stop reached `STOPPED`, but the platform log stream closed before a shutdown log could be retained, even when the probe logged immediately after cancellation. This leaves managed signal delivery unverified rather than treating platform stop state as process-level proof. Retire one-off probe Apps after acceptance when they have no remaining consumers or attached resources; retain the reproducible package and private acceptance evidence.
+Keep dated runtime observations and deployment receipts in private acceptance records, not in this source guide. Re-run the probe on a new runtime before relying on it; the result of a prior staging deployment is not a production guarantee.

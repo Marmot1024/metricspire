@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="title desc">
+  <title id="title">MetricSpire</title>
+  <desc id="desc">Three rising metric lines inside a rounded square.</desc>
+  <rect width="120" height="120" rx="25" fill="#0D1728"/>
+  <path d="M22 92H98" stroke="#38516B" stroke-width="3" stroke-linecap="round"/>
+  <path d="M27 72 49 61 69 70 93 39" fill="none" stroke="#66E1CE" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M27 45 49 35 69 43 93 25" fill="none" stroke="#627DFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+  <circle cx="93" cy="39" r="7" fill="#C6FFF3"/>
+</svg>
