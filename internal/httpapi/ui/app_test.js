@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const {catalogStatusCounts, catalogStatusLabel, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricExpressionLabel, planSummaryRows, preferredTimeGranularity, resolvePresetRange, sharedTimeMetadata, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
+const {catalogStatusCounts, catalogStatusLabel, compactDimensions, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricExpressionLabel, metricFilterLabel, planSummaryRows, preferredTimeGranularity, resolvePresetRange, sharedTimeMetadata, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
 const {execFileSync} = require("node:child_process");
 
 test("copied request preserves apostrophes and shell characters as literal JSON", () => {
@@ -82,8 +82,10 @@ test("metric registry searches external codes and presents structured formulas",
     op: "count_distinct", field: "player.user_id", filters: [{field: "payment.amount", operator: "neq", values: ["0"]}],
   }};
   assert.equal(matchesCatalogSearch(metric, "1024"), true);
-  assert.equal(metricExpressionLabel(metric.expression), "COUNT_DISTINCT(player.user_id WHERE payment.amount NEQ 0)");
+  assert.equal(metricExpressionLabel(metric.expression), "COUNT(DISTINCT CASE WHEN payment.amount <> '0' THEN player.user_id ELSE NULL END)");
   assert.equal(metricExpressionLabel({op: "divide", args: [{op: "metric", metric: "revenue"}, {op: "metric", metric: "buyers"}]}), "(revenue ÷ buyers)");
+  assert.equal(metricFilterLabel({field: "order.status", operator: "in", values: ["paid", "refunded"]}), "order.status IN ('paid', 'refunded')");
+  assert.equal(compactDimensions(["date", "country", "platform"]), "date · country · +1");
 });
 
 test("common authorization and time-grouping failures explain the recovery action", () => {
@@ -151,8 +153,9 @@ test("explain and plan have a human-readable summary independent of raw JSON", (
 function editorContext() {
   const context = vm.createContext({structuredClone});
   vm.runInContext(fs.readFileSync(require.resolve("./app.js"), "utf8"), context);
-  const element = () => ({value: "", checked: false, dataset: {}, children: [], handlers: {},
+  const element = () => ({value: "", checked: false, disabled: false, dataset: {}, children: [], handlers: {},
     addEventListener(name, handler) { this.handlers[name] = handler; },
+    setAttribute(name, value) { this[name] = value; },
     append(...children) { this.children.push(...children); },
     replaceChildren(...children) { this.children = children; }});
   const elements = new Map();
@@ -204,12 +207,37 @@ test("new metric form submits an entity-qualified expression, not a physical dat
   assert.equal(context.document.getElementById("metric-field").value, "orders.amount");
 });
 
+test("metric editor preserves constrained CASE WHEN filters in the structured expression", () => {
+  const {context, run} = editorContext();
+  const values = {"metric-external-code": "1002", "metric-code": "paid_revenue", "metric-display-name": "付费收入",
+    "metric-description": "只汇总成功订单收入", "metric-owner": "data-team", "metric-entity": "orders",
+    "metric-operation": "sum", "metric-value-type": "decimal", "metric-field": "orders.amount",
+    "metric-filter-field": "orders.id", "metric-filter-operator": "neq", "metric-filter-values": "0"};
+  for (const [id, value] of Object.entries(values)) context.document.getElementById(id).value = value;
+  run("addMetricExpressionFilter()");
+  const metric = run("metricFromEditor()");
+  assert.deepEqual(JSON.parse(JSON.stringify(metric.expression)), {
+    op: "sum", field: "orders.amount", filters: [{field: "orders.id", operator: "neq", values: ["0"]}],
+  });
+  assert.equal(run("metricExpressionLabel(metricFromEditor().expression)"), "SUM(CASE WHEN orders.id <> '0' THEN orders.amount ELSE NULL END)");
+});
+
 test("editing an existing metric preserves its selected field and related dimensions", () => {
   const {context, run} = editorContext();
   run("renderEntityFields('orders', 'orders.amount'); renderMetricDimensions('orders', ['status', 'segment'])");
   assert.equal(context.document.getElementById("metric-field").value, "orders.amount");
   const inputs = context.document.getElementById("metric-dimension-options").children.map((label) => label.children[0]);
   assert.deepEqual(inputs.map((input) => [input.value, input.checked]), [["status", true], ["segment", true]]);
+});
+
+test("published derived metrics cannot be flattened through the aggregate copy form", () => {
+  const {context, run} = editorContext();
+  run(`state.review = {active_release: {id: 'rel_1'}, metric_changes: []};
+    renderMetricEditor({name: 'conversion_rate', display_name: '转化率', entity: 'orders', kind: 'ratio',
+      value_type: 'decimal', unit: '%', expression: {op: 'divide', args: [{op: 'metric', metric: 'buyers'}, {op: 'metric', metric: 'visitors'}]},
+      allowed_dimensions: ['status'], verification: {status: 'verified'}})`);
+  assert.equal(context.document.getElementById("duplicate-metric-button").hidden, true);
+  assert.match(context.document.getElementById("metric-formula-preview").textContent, /buyers.*visitors/);
 });
 
 test("saving a metric writes one draft revision without a separate browser-only apply step", async () => {

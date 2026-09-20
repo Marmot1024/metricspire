@@ -79,7 +79,12 @@
         </div>
 
         <div class="catalog-layout">
-          <div id="catalog-list" class="catalog-list" aria-live="polite"></div>
+          <div class="catalog-table-shell">
+            <div class="catalog-table-head" aria-hidden="true">
+              <span>指标</span><span>计算口径</span><span>可用维度</span><span>状态</span><span>负责人</span>
+            </div>
+            <div id="catalog-list" class="catalog-list" role="table" aria-label="指标目录" aria-live="polite"></div>
+          </div>
           <article id="metric-detail" class="detail-panel">
             <div id="metric-detail-empty" class="empty-state">选择一个指标查看完整定义和可用维度。</div>
             <div id="metric-detail-content" hidden>
@@ -92,6 +97,10 @@
                 <button id="detail-query-button" class="button primary" type="button">用于查询</button>
               </div>
               <p id="detail-description" class="lead"></p>
+              <section class="detail-section formula-detail">
+                <h3>计算口径</h3>
+                <code id="detail-formula">尚未登记可执行口径</code>
+              </section>
               <dl class="detail-grid">
                 <div><dt>负责人</dt><dd id="detail-owner"></dd></div>
                 <div><dt>返回类型</dt><dd id="detail-type"></dd></div>
@@ -182,6 +191,18 @@
                 <div class="form-grid two compact-grid">
                   <label>单位<input id="metric-unit" placeholder="人、次、USD、%"></label>
                   <label>默认时间维度<select id="metric-time-dimension"></select></label>
+                </div>
+                <div class="metric-filter-builder">
+                  <div class="subsection-heading">
+                    <div><strong>口径条件</strong><span>等价于聚合函数中的 CASE WHEN；条件之间使用 AND</span></div>
+                  </div>
+                  <div class="metric-filter-controls">
+                    <label>条件字段<select id="metric-filter-field"></select></label>
+                    <label>判断方式<select id="metric-filter-operator"><option value="eq">等于</option><option value="neq">不等于</option><option value="in">属于其中</option><option value="not_in">不属于其中</option><option value="is_null">为空</option><option value="is_not_null">不为空</option></select></label>
+                    <label class="grow">条件值<input id="metric-filter-values" placeholder="多个值用英文逗号分隔"></label>
+                    <button id="add-metric-filter-button" class="button secondary" type="button">添加条件</button>
+                  </div>
+                  <div id="metric-expression-filters" class="chips metric-expression-filters"></div>
                 </div>
                 <p id="execution-lock-note" class="muted"></p>
               </fieldset>
