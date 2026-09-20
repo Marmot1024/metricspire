@@ -18,7 +18,6 @@ const state = {
   releases: [],
   metricIndex: -1,
   creatingMetric: false,
-  dirty: false,
   editorDirty: false,
 };
 
@@ -203,7 +202,7 @@ function humanTag(tag) {
 
 function matchesCatalogSearch(metric, search) {
   if (!search) return true;
-  const text = [metric.name, metric.display_name, metric.description, metric.owner, ...(metric.tags || [])]
+  const text = [metric.external_code, metric.name, metric.display_name, metric.description, metric.owner, ...(metric.tags || [])]
     .filter(Boolean).join(" ").toLocaleLowerCase();
   return text.includes(search.toLocaleLowerCase());
 }
@@ -318,7 +317,6 @@ async function switchNamespace(namespace) {
   updateQueryBuilder();
   state.draft = null;
   state.review = null;
-  state.dirty = false;
   state.editorDirty = false;
   initializeGovernanceRoutes();
   await loadCatalog();
@@ -449,7 +447,7 @@ function renderMetricDetail(metric) {
   byID("detail-status").textContent = catalogStatusLabel(metric);
   byID("detail-status").className = `badge${draft || pending || metric.deprecated || businessUnverified ? " warning" : ""}`;
   byID("detail-name").textContent = metric.display_name || metric.name;
-  byID("detail-code").textContent = metric.name;
+  byID("detail-code").textContent = [metric.external_code ? `#${metric.external_code}` : "", metric.name].filter(Boolean).join(" · ");
   byID("detail-description").textContent = metric.description || "暂无业务定义。";
   byID("detail-owner").textContent = metric.owner || "未指定";
   byID("detail-type").textContent = humanType(metric.value_type, metric.unit);
@@ -1010,6 +1008,89 @@ function governanceMetrics() {
   return state.draft?.source?.spec?.metrics || [];
 }
 
+function metricExpressionLabel(expression = {}) {
+  const op = String(expression.op || "").toUpperCase();
+  if (expression.op === "metric") return expression.metric || "?";
+  if (expression.op === "literal") return expression.value || "0";
+  if (["add", "subtract", "multiply", "divide"].includes(expression.op)) {
+    const symbols = {add: "+", subtract: "−", multiply: "×", divide: "÷"};
+    return `(${(expression.args || []).map(metricExpressionLabel).join(` ${symbols[expression.op]} `)})`;
+  }
+  const field = expression.field || "*";
+  const filters = (expression.filters || []).map((filter) => {
+    const values = (filter.values || []).join(", ");
+    return `${filter.field} ${String(filter.operator || "").toUpperCase()} ${values}`.trim();
+  });
+  return `${op || "FORMULA"}(${field}${filters.length ? ` WHERE ${filters.join(" AND ")}` : ""})`;
+}
+
+function metricIsPublished(metric) {
+  if (!metric || !state.review?.active_release) return false;
+  const change = (state.review.metric_changes || []).find((candidate) => candidate.code === metric.name);
+  return !change || change.kind !== "added";
+}
+
+function metricRegistryStatus(metric) {
+  if (metric.deprecated) return "弃用";
+  const change = (state.review?.metric_changes || []).find((candidate) => candidate.code === metric.name);
+  if (!metricIsPublished(metric)) return "草稿";
+  if (change) return "待发布";
+  if (metric.verification?.status !== "verified") return "试用";
+  return "线上";
+}
+
+function metricExecutionLocked(metric) {
+  return Boolean(metric && (metric.kind !== "aggregate" || metricIsPublished(metric)));
+}
+
+function renderMetricInventory() {
+  const container = byID("metric-inventory");
+  const search = (byID("governance-metric-search")?.value || "").trim().toLowerCase();
+  container.replaceChildren();
+  const matches = governanceMetrics().map((metric, index) => ({metric, index})).filter(({metric}) =>
+    !search || [metric.external_code, metric.name, metric.display_name].some((value) => String(value || "").toLowerCase().includes(search)));
+  if (!matches.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = governanceMetrics().length ? "没有匹配的指标。" : "当前草稿还没有指标。";
+    container.append(empty);
+    return;
+  }
+  for (const {metric, index} of matches) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `metric-row${!state.creatingMetric && index === state.metricIndex ? " active" : ""}`;
+    const identity = document.createElement("span");
+    identity.className = "metric-row-main";
+    const number = document.createElement("span");
+    number.textContent = metric.external_code ? `#${metric.external_code}` : "未编号";
+    const title = document.createElement("strong");
+    title.textContent = metric.display_name || metric.name;
+    const name = document.createElement("code");
+    name.textContent = metric.name;
+    identity.append(number, title, name);
+    const formula = document.createElement("span");
+    formula.className = "metric-row-formula";
+    formula.textContent = metricExpressionLabel(metric.expression);
+    const status = document.createElement("span");
+    const registryStatus = metricRegistryStatus(metric);
+    status.className = `badge metric-row-status${registryStatus === "线上" ? "" : " warning"}`;
+    status.textContent = registryStatus;
+    row.append(identity, formula, status);
+    row.addEventListener("click", () => selectGovernanceMetric(index));
+    container.append(row);
+  }
+}
+
+function selectGovernanceMetric(index) {
+  if (state.editorDirty && !window.confirm("这条指标有尚未保存的修改。放弃修改并切换？")) return;
+  state.metricIndex = index;
+  state.creatingMetric = false;
+  byID("metric-select").value = String(index);
+  renderMetricEditor(governanceMetrics()[index]);
+  renderMetricInventory();
+}
+
 function datasetForEntity(entityName) {
   const entity = state.draft.source.spec.entities.find((candidate) => candidate.name === entityName);
   return entity ? state.draft.source.spec.datasets.find((dataset) => dataset.name === entity.dataset) : null;
@@ -1030,6 +1111,7 @@ function renderMetricSelect(preferredIndex = 0) {
     select.disabled = true;
     state.metricIndex = -1;
     clearMetricEditor();
+    renderMetricInventory();
     return;
   }
   select.disabled = false;
@@ -1037,6 +1119,7 @@ function renderMetricSelect(preferredIndex = 0) {
   select.value = String(state.metricIndex);
   state.creatingMetric = false;
   renderMetricEditor(governanceMetrics()[state.metricIndex]);
+  renderMetricInventory();
 }
 
 function fillSelect(select, values, selected, emptyLabel = "请选择") {
@@ -1076,20 +1159,29 @@ function renderMetricDimensions(entityName, selectedDimensions = [], timeDimensi
 }
 
 function clearMetricEditor() {
-  for (const id of ["metric-code", "metric-display-name", "metric-description", "metric-owner", "metric-unit", "metric-tags", "metric-examples", "metric-evidence"]) byID(id).value = "";
+  for (const id of ["metric-external-code", "metric-code", "metric-display-name", "metric-description", "metric-owner", "metric-unit", "metric-tags", "metric-examples", "metric-evidence"]) byID(id).value = "";
   byID("metric-verified").checked = false;
   byID("metric-deprecated").checked = false;
+  byID("metric-editor-title").textContent = "新增基础指标";
+  byID("metric-formula-preview").textContent = "—";
 }
 
 function renderMetricEditor(metric) {
   state.editorDirty = false;
   byID("editor-status").hidden = true;
   const aggregate = !metric || metric.kind === "aggregate";
+  const executionLocked = metricExecutionLocked(metric);
+  byID("metric-editor-kicker").textContent = state.creatingMetric ? "新建草稿" : metricIsPublished(metric) ? "已发布指标" : "未发布草稿";
+  byID("metric-editor-title").textContent = state.creatingMetric ? "新增基础指标" : (metric?.display_name || metric?.name || "选择一条指标");
+  byID("duplicate-metric-button").hidden = !metric || !metricIsPublished(metric);
   byID("editor-mode-note").textContent = state.creatingMetric
-    ? "新增基础指标：只接受结构化聚合口径，不接受 SQL 片段。保存草稿前不会影响线上版本。"
-    : aggregate
-      ? "此表单锁定已有指标的计算口径；可维护名称、说明、负责人、标签、验证证据与弃用状态。"
+    ? "这是一条新指标。保存后只进入草稿，发布前仍可修改口径。"
+    : executionLocked && aggregate
+      ? "这条指标已经发布。名称和说明可以继续维护；编号和计算口径已锁定。如需改口径，请复制为新指标。"
+      : aggregate
+        ? "这条指标还没有发布，编号和计算口径仍可修改。保存只更新草稿。"
       : `这是 ${metric.kind} 指标。当前界面只维护元数据；复合公式仍由版本化契约管理。`;
+  byID("metric-external-code").value = metric?.external_code || "";
   byID("metric-code").value = metric?.name || "";
   byID("metric-display-name").value = metric?.display_name || "";
   byID("metric-description").value = metric?.description || "";
@@ -1104,7 +1196,7 @@ function renderMetricEditor(metric) {
   const verificationNote = byID("business-verification-note");
   verificationNote.hidden = !isBusinessUnverified(metric);
   verificationNote.textContent = isBusinessUnverified(metric)
-    ? "当前勾选只表示 staging 技术试查证据已登记；业务口径仍待确认。测试发布不等于业务验证通过。"
+    ? "当前记录仅表示技术试查证据已登记；业务口径仍待确认。试用版本不等于业务验证通过。"
     : "";
   const entities = state.draft.source.spec.entities.map((entity) => entity.name);
   fillSelect(byID("metric-entity"), entities, metric?.entity || "", "没有可用实体");
@@ -1112,13 +1204,14 @@ function renderMetricEditor(metric) {
   renderEntityFields(byID("metric-entity").value, metric?.expression?.field || "");
   byID("metric-value-type").value = metric?.value_type || "decimal";
   renderMetricDimensions(byID("metric-entity").value, metric?.allowed_dimensions || [], metric?.time_dimension || "");
-  const executionLocked = !state.creatingMetric || !aggregate;
   for (const id of ["metric-code", "metric-entity", "metric-operation", "metric-field", "metric-value-type", "metric-unit"]) byID(id).disabled = executionLocked;
+  byID("metric-external-code").disabled = executionLocked && Boolean(metric?.external_code);
   for (const input of document.querySelectorAll("input[name='metric-dimension']")) input.disabled = executionLocked;
   byID("metric-time-dimension").disabled = executionLocked;
   byID("execution-lock-note").textContent = executionLocked
-    ? "为防止同一 code 静默改义，执行实体、公式、类型、单位和维度契约只能通过新增指标或显式弃用演进。"
-    : "系统将保存结构化表达式，并在发布前编译、检查绑定和影响范围。";
+    ? "发布后的英文名、公式、单位和维度契约不可原地改写；这样历史报表不会在同名指标下悄悄变义。"
+    : "口径以结构化表达式保存，不接受任意 SQL；发布前系统会检查字段、维度和数据绑定。";
+  byID("metric-formula-preview").textContent = metricExpressionLabel(metric?.expression || expressionFromEditor());
 }
 
 function newMetric() {
@@ -1128,11 +1221,38 @@ function newMetric() {
   state.metricIndex = -1;
   byID("metric-select").value = "";
   renderMetricEditor(null);
+  renderMetricInventory();
+}
+
+function duplicateMetric() {
+  const metric = governanceMetrics()[state.metricIndex];
+  if (!metric) return;
+  if (state.editorDirty && !window.confirm("当前修改尚未保存。放弃修改并复制线上口径？")) return;
+  state.creatingMetric = true;
+  state.metricIndex = -1;
+  const copy = structuredClone(metric);
+  copy.name = "";
+  copy.external_code = "";
+  copy.display_name = `${metric.display_name || metric.name}（新口径）`;
+  copy.deprecated = false;
+  copy.verification = {status: "unverified", evidence: []};
+  renderMetricEditor(copy);
+  renderMetricInventory();
+}
+
+function expressionFromEditor() {
+  return {op: byID("metric-operation").value, field: byID("metric-field").value};
+}
+
+function refreshFormulaPreview() {
+  if (!byID("metric-formula-preview")) return;
+  byID("metric-formula-preview").textContent = metricExpressionLabel(expressionFromEditor());
 }
 
 function metricFromEditor() {
   const editable = {
     name: byID("metric-code").value.trim(),
+    external_code: byID("metric-external-code").value.trim(),
     display_name: byID("metric-display-name").value.trim(),
     description: byID("metric-description").value.trim(),
     owner: byID("metric-owner").value.trim(),
@@ -1144,10 +1264,13 @@ function metricFromEditor() {
       evidence: byID("metric-evidence").value.split("；").map((value) => value.trim()).filter(Boolean),
     },
   };
-  if (!editable.name || !editable.display_name || !editable.description || !editable.owner) throw new Error("指标 code、展示名称、业务定义和负责人都是必填项。");
-  if (!/^[a-z][a-z0-9_]*$/.test(editable.name)) throw new Error("指标 code 只能使用小写字母、数字和下划线，并以字母开头。");
+  if (!editable.name || !editable.display_name || !editable.description || !editable.owner) throw new Error("英文名、中文名、指标定义和负责人都是必填项。");
+  if (!/^[a-z][a-z0-9_]*$/.test(editable.name)) throw new Error("英文名只能使用小写字母、数字和下划线，并以字母开头。");
+  if (editable.external_code && !/^[0-9]+$/.test(editable.external_code)) throw new Error("业务编号只能包含数字。");
+  if (editable.external_code && governanceMetrics().some((candidate, index) => candidate.external_code === editable.external_code && index !== state.metricIndex)) throw new Error(`业务编号 ${editable.external_code} 已被其他指标使用。`);
   if (editable.usage_examples.length > 5) throw new Error("每个指标最多维护 5 条常见使用示例。");
-  if (!state.creatingMetric) {
+  const current = governanceMetrics()[state.metricIndex];
+  if (!state.creatingMetric && metricExecutionLocked(current)) {
     return {...governanceMetrics()[state.metricIndex], ...editable};
   }
   const entity = byID("metric-entity").value;
@@ -1159,7 +1282,7 @@ function metricFromEditor() {
     kind: "aggregate",
     value_type: byID("metric-value-type").value,
     unit: byID("metric-unit").value.trim(),
-    expression: {op: byID("metric-operation").value, field},
+    expression: expressionFromEditor(),
     allowed_dimensions: [...document.querySelectorAll("input[name='metric-dimension']:checked")].map((input) => input.value),
     time_dimension: byID("metric-time-dimension").value,
   };
@@ -1170,22 +1293,28 @@ async function applyMetric(event) {
   try {
     const metric = metricFromEditor();
     let index = state.metricIndex;
+    const source = structuredClone(state.draft.source);
     if (state.creatingMetric) {
-      if (governanceMetrics().some((candidate) => candidate.name === metric.name)) throw new Error(`指标 code ${metric.name} 已存在。`);
-      state.draft.source.spec.metrics.push(metric);
-      index = governanceMetrics().length - 1;
+      if (governanceMetrics().some((candidate) => candidate.name === metric.name)) throw new Error(`英文名 ${metric.name} 已存在。`);
+      source.spec.metrics.push(metric);
+      index = source.spec.metrics.length - 1;
     } else {
-      state.draft.source.spec.metrics[index] = metric;
+      source.spec.metrics[index] = metric;
     }
+    setStatus("editor-status", "正在校验并保存草稿…");
+    const saved = await requestJSON(routePath(state.governanceRoute, "draft"), {
+      method: "PUT",
+      body: JSON.stringify({expected_revision: state.draft.revision, source}),
+    });
+    state.draft = saved;
     state.creatingMetric = false;
     state.editorDirty = false;
-    state.dirty = true;
-    renderMetricSelect(index);
+    byID("draft-revision-value").textContent = `revision ${saved.revision}`;
+    byID("draft-updated-meta").textContent = [saved.updated_by, saved.updated_at && new Date(saved.updated_at).toLocaleString("zh-CN")].filter(Boolean).join(" · ");
     await reviewGovernance();
-    setStatus("editor-status", state.review
-      ? "编辑已应用。请查看检查结果，修正问题后保存草稿。"
-      : "编辑已应用，但未取得检查结果。请重新检查后再保存。", state.review ? "success" : "warning");
-    setStatus("governance-status", "变更已应用到浏览器中的当前草稿；点击“保存草稿”后才会写入控制面。", "warning");
+    renderMetricSelect(index);
+    setStatus("editor-status", `已保存到草稿 revision ${saved.revision}，线上版本未改变。`, "success");
+    setStatus("governance-status", "草稿已保存。确认发布检查和说明后，才会创建新的线上版本。", "success");
   } catch (error) {
     setStatus("editor-status", errorMessage(error), "error");
     setStatus("governance-status", errorMessage(error), "error");
@@ -1193,12 +1322,12 @@ async function applyMetric(event) {
 }
 
 function confirmDiscardDraft() {
-  return (!state.dirty && !state.editorDirty) || window.confirm("存在尚未保存的修改。放弃本页修改并切换？已保存的草稿与线上版本不会改变。");
+  return !state.editorDirty || window.confirm("存在尚未保存的修改。放弃本页修改并切换？已保存的草稿与线上版本不会改变。");
 }
 
 function requireAppliedEditor() {
   if (!state.editorDirty) return true;
-  const message = "表单编辑尚未应用。请先点击“应用编辑并检查”，再保存草稿。";
+  const message = "表单还有尚未保存的修改。请先保存到草稿，再进行发布。";
   setStatus("editor-status", message, "warning");
   setStatus("governance-status", message, "warning");
   return false;
@@ -1268,7 +1397,7 @@ function renderReview() {
     list.append(empty);
   }
   renderBinding(review.binding);
-  byID("publish-button").disabled = state.dirty || issues.length > 0 || review.structure_changed || breaking.length > 0 ||
+  byID("publish-button").disabled = issues.length > 0 || review.structure_changed || breaking.length > 0 ||
     review.binding.status !== "ready" || (!changes.length && Boolean(review.active_release));
 }
 
@@ -1359,12 +1488,12 @@ async function loadGovernance() {
     ]);
     state.draft = draft;
     state.releases = releases;
-    state.dirty = false;
+    byID("governance-namespace-value").textContent = state.governanceRoute.namespace;
     byID("draft-revision-value").textContent = `revision ${draft.revision}`;
     byID("draft-updated-meta").textContent = [draft.updated_by, draft.updated_at && new Date(draft.updated_at).toLocaleString("zh-CN")].filter(Boolean).join(" · ");
-    renderMetricSelect();
     renderReleases();
     await reviewGovernance();
+    renderMetricSelect();
     setStatus("governance-status", "维护上下文已载入。线上查询继续只读取当前已发布版本。", "success");
   } catch (error) {
     state.draft = null;
@@ -1372,33 +1501,9 @@ async function loadGovernance() {
   }
 }
 
-async function saveDraft() {
-  if (!state.draft) return;
-  if (!requireAppliedEditor()) return;
-  try {
-    setStatus("governance-status", "正在校验并保存草稿…");
-    const saved = await requestJSON(routePath(state.governanceRoute, "draft"), {
-      method: "PUT",
-      body: JSON.stringify({expected_revision: state.draft.revision, source: state.draft.source}),
-    });
-    state.draft = saved;
-    state.dirty = false;
-    byID("draft-revision-value").textContent = `revision ${saved.revision}`;
-    byID("draft-updated-meta").textContent = [saved.updated_by, saved.updated_at && new Date(saved.updated_at).toLocaleString("zh-CN")].filter(Boolean).join(" · ");
-    await reviewGovernance();
-    setStatus("governance-status", `草稿 revision ${saved.revision} 已保存；当前线上版本未改变。`, "success");
-  } catch (error) {
-    setStatus("governance-status", errorMessage(error), "error");
-  }
-}
-
 async function publishDraft() {
   if (!state.draft) return;
   if (!requireAppliedEditor()) return;
-  if (state.dirty) {
-    setStatus("governance-status", "当前修改尚未保存。请先保存草稿，检查通过后再发布。", "warning");
-    return;
-  }
   const note = byID("release-note").value.trim();
   if (!note) {
     setStatus("governance-status", "发布说明必填：请说明本次为什么修改。", "error");
@@ -1490,24 +1595,34 @@ function bindEvents() {
     state.creatingMetric = false;
     renderMetricEditor(governanceMetrics()[state.metricIndex]);
   });
+  byID("governance-metric-search").addEventListener("input", renderMetricInventory);
   byID("new-metric-button").addEventListener("click", newMetric);
+  byID("duplicate-metric-button").addEventListener("click", duplicateMetric);
+  byID("discard-editor-button").addEventListener("click", () => {
+    if (!state.editorDirty || window.confirm("放弃这次尚未保存的修改？")) {
+      if (state.creatingMetric) renderMetricSelect();
+      else renderMetricEditor(governanceMetrics()[state.metricIndex]);
+      renderMetricInventory();
+    }
+  });
   byID("metric-entity").addEventListener("change", (event) => {
     renderEntityFields(event.target.value);
     renderMetricDimensions(event.target.value);
+    refreshFormulaPreview();
   });
   byID("metric-form").addEventListener("submit", applyMetric);
   byID("metric-form").addEventListener("input", () => {
     state.editorDirty = true;
-    setStatus("editor-status", "有尚未应用的编辑，请先“应用编辑并检查”。", "warning");
+    refreshFormulaPreview();
+    setStatus("editor-status", "有尚未保存的修改；保存后只进入草稿，不会影响线上版本。", "warning");
   });
   if (typeof window !== "undefined" && window.addEventListener) window.addEventListener("beforeunload", (event) => {
-    if (state.dirty || state.editorDirty) {
+    if (state.editorDirty) {
       event.preventDefault();
       event.returnValue = "";
     }
   });
   byID("review-draft-button").addEventListener("click", reviewGovernance);
-  byID("save-draft-button").addEventListener("click", saveDraft);
   byID("publish-button").addEventListener("click", publishDraft);
   byID("add-filter-button").addEventListener("click", () => {
     const dimension = byID("filter-dimension").value;
@@ -1573,6 +1688,6 @@ async function initialize() {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = {catalogStatusCounts, catalogStatusLabel, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricTimeDetail, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, sharedTimeMetadata, shiftDate, timezoneParts, verificationLabel, zonedMidnightISO, shellQuote};
+  module.exports = {catalogStatusCounts, catalogStatusLabel, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricExpressionLabel, metricTimeDetail, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, sharedTimeMetadata, shiftDate, timezoneParts, verificationLabel, zonedMidnightISO, shellQuote};
 }
 if (typeof document !== "undefined") initialize();

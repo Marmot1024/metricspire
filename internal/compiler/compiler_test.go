@@ -116,6 +116,23 @@ func TestCompileLimitsCuratedUsageExamples(t *testing.T) {
 	assertProblem(t, err, "invalid_metric")
 }
 
+func TestCompileRequiresUniqueNumericExternalMetricCodes(t *testing.T) {
+	t.Parallel()
+	t.Run("non numeric", func(t *testing.T) {
+		source := loadSource(t)
+		source.Spec.Metrics[0].ExternalCode = "DAU-01"
+		_, err := compiler.Compile(source)
+		assertProblem(t, err, "invalid_metric")
+	})
+	t.Run("duplicate", func(t *testing.T) {
+		source := loadSource(t)
+		source.Spec.Metrics[0].ExternalCode = "1001"
+		source.Spec.Metrics[1].ExternalCode = "1001"
+		_, err := compiler.Compile(source)
+		assertProblem(t, err, "duplicate_name")
+	})
+}
+
 func TestCompileRejectsDeclaredValueTypeThatDiffersFromExpression(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

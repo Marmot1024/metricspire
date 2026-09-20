@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const {catalogStatusCounts, catalogStatusLabel, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, planSummaryRows, preferredTimeGranularity, resolvePresetRange, sharedTimeMetadata, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
+const {catalogStatusCounts, catalogStatusLabel, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricExpressionLabel, planSummaryRows, preferredTimeGranularity, resolvePresetRange, sharedTimeMetadata, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
 const {execFileSync} = require("node:child_process");
 
 test("copied request preserves apostrophes and shell characters as literal JSON", () => {
@@ -77,6 +77,15 @@ test("query chooser shows selected metrics first and searches instead of listing
   assert.deepEqual(matchingQueryMetrics(metrics, "missing", new Set()).map((metric) => metric.name), []);
 });
 
+test("metric registry searches external codes and presents structured formulas", () => {
+  const metric = {external_code: "1024", name: "paid_users", display_name: "付费用户数", expression: {
+    op: "count_distinct", field: "player.user_id", filters: [{field: "payment.amount", operator: "neq", values: ["0"]}],
+  }};
+  assert.equal(matchesCatalogSearch(metric, "1024"), true);
+  assert.equal(metricExpressionLabel(metric.expression), "COUNT_DISTINCT(player.user_id WHERE payment.amount NEQ 0)");
+  assert.equal(metricExpressionLabel({op: "divide", args: [{op: "metric", metric: "revenue"}, {op: "metric", metric: "buyers"}]}), "(revenue ÷ buyers)");
+});
+
 test("common authorization and time-grouping failures explain the recovery action", () => {
   assert.match(errorMessage({status: 403, request_id: "req_1"}), /权限组.*req_1/);
   assert.match(errorMessage({detail: "grouped time dimensions require explicit grouping semantics", request_id: "req_2"}), /选择按日、按周或按月.*req_2/);
@@ -140,7 +149,7 @@ test("explain and plan have a human-readable summary independent of raw JSON", (
 
 // Exercise the actual form handlers without adding a production DOM dependency.
 function editorContext() {
-  const context = vm.createContext({});
+  const context = vm.createContext({structuredClone});
   vm.runInContext(fs.readFileSync(require.resolve("./app.js"), "utf8"), context);
   const element = () => ({value: "", checked: false, dataset: {}, children: [], handlers: {},
     addEventListener(name, handler) { this.handlers[name] = handler; },
@@ -183,7 +192,7 @@ test("query builder automatically completes grouped time semantics and keeps fil
 test("new metric form submits an entity-qualified expression, not a physical dataset", () => {
   const {context, run} = editorContext();
   run("renderEntityFields('orders', 'orders.amount')");
-  const values = {"metric-code": "revenue", "metric-display-name": "收入",
+  const values = {"metric-external-code": "1001", "metric-code": "revenue", "metric-display-name": "收入",
     "metric-description": "订单金额合计", "metric-owner": "data-team",
     "metric-entity": "orders", "metric-operation": "sum", "metric-value-type": "decimal"};
   for (const [id, value] of Object.entries(values)) context.document.getElementById(id).value = value;
@@ -191,6 +200,7 @@ test("new metric form submits an entity-qualified expression, not a physical dat
   assert.equal(metric.expression.field, "orders.amount");
   assert.equal(metric.entity, "orders");
   assert.equal(metric.expression.op, "sum");
+  assert.equal(metric.external_code, "1001");
   assert.equal(context.document.getElementById("metric-field").value, "orders.amount");
 });
 
@@ -200,6 +210,30 @@ test("editing an existing metric preserves its selected field and related dimens
   assert.equal(context.document.getElementById("metric-field").value, "orders.amount");
   const inputs = context.document.getElementById("metric-dimension-options").children.map((label) => label.children[0]);
   assert.deepEqual(inputs.map((input) => [input.value, input.checked]), [["status", true], ["segment", true]]);
+});
+
+test("saving a metric writes one draft revision without a separate browser-only apply step", async () => {
+  const {context, run} = editorContext();
+  run("state.draft.revision = 1; state.governanceRoute = {namespace: 'matchingstory', model_name: 'daily'}");
+  const values = {"metric-external-code": "1001", "metric-code": "daily_revenue", "metric-display-name": "日收入",
+    "metric-description": "按自然日汇总订单收入", "metric-owner": "data-team", "metric-entity": "orders",
+    "metric-operation": "sum", "metric-value-type": "decimal", "metric-field": "orders.amount"};
+  for (const [id, value] of Object.entries(values)) context.document.getElementById(id).value = value;
+  const calls = [];
+  context.requestJSON = async (path, options) => {
+    const body = JSON.parse(options.body);
+    calls.push([path, options.method, body]);
+    if (path.endsWith("/draft")) return {revision: 2, source: body.source, updated_by: "tester", updated_at: "2026-09-20T00:00:00Z"};
+    return {active_release: null, metric_changes: [{code: "daily_revenue", kind: "added"}], publication_issues: [],
+      structure_changed: false, binding: {status: "ready", message: "ready"}};
+  };
+  await run("applyMetric({preventDefault() {}})");
+  assert.equal(calls.filter(([path]) => path.endsWith("/draft")).length, 1);
+  assert.equal(calls[0][2].expected_revision, 1);
+  assert.equal(calls[0][2].source.spec.metrics[0].external_code, "1001");
+  assert.equal(run("state.draft.revision"), 2);
+  assert.equal(run("state.editorDirty"), false);
+  assert.match(context.document.getElementById("editor-status").textContent, /已保存到草稿/);
 });
 
 test("rollback uses the historical release and leaves an accurate success message after reload", async () => {
@@ -235,25 +269,21 @@ test("cancel button calls the existing job endpoint for the active job only", as
   assert.equal(calls.length, 1);
 });
 
-test("unapplied form edits cannot silently save or publish the old draft", async () => {
+test("unsaved form edits cannot silently publish the old draft", async () => {
   const {context, run} = editorContext();
   let requests = 0;
   context.requestJSON = async () => { requests++; };
   run("bindEvents()");
   context.document.getElementById("metric-form").handlers.input();
-  await run("saveDraft(); publishDraft()");
-  assert.equal(requests, 0);
-  assert.match(context.document.getElementById("editor-status").textContent, /尚未应用/);
-  run("state.editorDirty = false; state.dirty = true");
   await run("publishDraft()");
   assert.equal(requests, 0);
-  assert.match(context.document.getElementById("governance-status").textContent, /先保存草稿/);
+  assert.match(context.document.getElementById("editor-status").textContent, /尚未保存/);
 });
 
 test("cancelled navigation preserves unsaved draft and business domain", async () => {
   const {context, run} = editorContext();
   context.window = {confirm: () => false};
-  run("state.namespace = 'original'; state.dirty = true");
+  run("state.namespace = 'original'; state.editorDirty = true");
   const original = run("state.draft");
   await run("switchNamespace('other')");
   assert.equal(run("state.draft"), original);

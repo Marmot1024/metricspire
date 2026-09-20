@@ -92,6 +92,7 @@ type MetricCatalogEntry struct {
 	ReleaseChannel      catalog.ReleaseChannel   `json:"release_channel"`
 	ManifestFingerprint string                   `json:"manifest_fingerprint"`
 	Name                string                   `json:"name"`
+	ExternalCode        string                   `json:"external_code,omitempty"`
 	DisplayName         string                   `json:"display_name"`
 	Description         string                   `json:"description"`
 	Owner               string                   `json:"owner"`
@@ -222,7 +223,8 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 			results = append(results, MetricCatalogEntry{
 				Namespace: release.Namespace, ModelName: release.Name, ReleaseID: release.ID,
 				ReleaseChannel: release.Channel, ManifestFingerprint: release.ManifestFingerprint, Name: metric.Name,
-				DisplayName: metric.DisplayName, Description: metric.Description, Owner: metric.Owner,
+				ExternalCode: metric.ExternalCode,
+				DisplayName:  metric.DisplayName, Description: metric.Description, Owner: metric.Owner,
 				VerificationStatus: metric.Verification.Status,
 				Tags:               append([]string(nil), metric.Tags...), UsageExamples: append([]string(nil), metric.UsageExamples...), Deprecated: metric.Deprecated,
 				ValueType: metric.ValueType, Unit: metric.Unit,
@@ -301,7 +303,7 @@ func matchesMetricCatalogQuery(query string, metric model.Metric) bool {
 	if query == "" {
 		return true
 	}
-	values := []string{metric.Name, metric.DisplayName, metric.Description, metric.Owner, strings.Join(metric.Tags, " ")}
+	values := []string{metric.ExternalCode, metric.Name, metric.DisplayName, metric.Description, metric.Owner, strings.Join(metric.Tags, " ")}
 	for _, value := range values {
 		if strings.Contains(strings.ToLower(value), query) {
 			return true

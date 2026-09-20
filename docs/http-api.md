@@ -4,7 +4,7 @@ MetricSpire serves a strict, versioned HTTP API at `/api/v1`. The browser UI and
 
 ## Trust and identity
 
-Clients submit a namespace and a structured semantic query using metric codes. The server resolves the authorized active model, policy, source binding, and analytical engine. A query body cannot choose an identity, release, table, engine route, or raw SQL. Warehouse-native table, row, and column permissions remain authoritative.
+Clients submit a namespace and a structured semantic query using stable English metric names. Catalog responses may also expose an optional numeric `external_code` for business-system lookup; it is searchable but does not replace the query name. The server resolves the authorized active model, policy, source binding, and analytical engine. A query body cannot choose an identity, release, table, engine route, or raw SQL. Warehouse-native table, row, and column permissions remain authoritative.
 
 Portable self-hosting uses OIDC with browser PKCE sessions or a separately audience-bound API access token. Databricks Apps uses managed ingress and checks the forwarded identity against the platform current-user API; only query execution receives the user's short-lived token. `model:manage` and `query:execute` are distinct product permissions.
 

@@ -221,6 +221,32 @@ func TestPublishProtectsMetricCodesAndExecutionSemantics(t *testing.T) {
 			source.Spec.Metrics[0].Description = "reviewed business wording"
 		}, false)
 	})
+	t.Run("external code may be assigned once", func(t *testing.T) {
+		publishSecondRevision(t, func(source *model.SemanticSource) {
+			source.Spec.Metrics[0].ExternalCode = "1001"
+		}, false)
+	})
+	t.Run("assigned external code cannot change", func(t *testing.T) {
+		repository := catalog.NewMemoryRepository()
+		service, _ := catalog.NewService(repository)
+		source := loadSource(t)
+		source.Spec.Metrics[0].ExternalCode = "1001"
+		draft, err := service.SaveDraft(context.Background(), catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "alice"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.Publish(context.Background(), "demo", source.Metadata.Name, draft.Revision, "alice", "initial"); err != nil {
+			t.Fatal(err)
+		}
+		source.Spec.Metrics[0].ExternalCode = "1002"
+		draft, err = service.SaveDraft(context.Background(), catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "alice", ExpectedRevision: draft.Revision})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.Publish(context.Background(), "demo", source.Metadata.Name, draft.Revision, "alice", "renumber"); !errors.Is(err, catalog.ErrNotPublishable) {
+			t.Fatalf("Publish() error = %v, want ErrNotPublishable", err)
+		}
+	})
 	t.Run("metric removal", func(t *testing.T) {
 		publishSecondRevision(t, func(source *model.SemanticSource) {
 			source.Spec.Metrics = source.Spec.Metrics[:len(source.Spec.Metrics)-1]
