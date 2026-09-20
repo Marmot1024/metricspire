@@ -16,9 +16,10 @@ Portable self-hosting uses OIDC with browser PKCE sessions or a separately audie
 | `model:manage` | `GET, PUT /namespaces/{namespace}/models/{model}/draft` | Read or save a revisioned draft. |
 | `model:manage` | `POST /namespaces/{namespace}/models/{model}/validate` | Validate without saving. |
 | `model:manage` | `POST /namespaces/{namespace}/models/{model}/review` | Compare a candidate to the active release without writing. |
-| `model:manage` | `POST /namespaces/{namespace}/models/{model}/publish` | Publish the expected revision. |
+| `model:manage` | `POST /namespaces/{namespace}/models/{model}/publish` | Publish the expected revision as `certified`, or as `trial` only in an explicitly enabled namespace. |
 | `model:manage` | `GET /namespaces/{namespace}/models/{model}/releases` | List releases and active state. |
 | `model:manage` | `POST /namespaces/{namespace}/models/{model}/rollback` | Activate an existing immutable release. |
+| `model:manage` | `POST /namespaces/{namespace}/models/{model}/deactivate` | Remove the active pointer while retaining immutable history and an audit event. |
 | `query:execute` | `GET /catalog/search?namespace=...&q=...&limit=...` | Search authorized active metrics. |
 | `query:execute` | `POST /namespaces/{namespace}/explain` | Return an authorized logical plan; no engine call. |
 | `query:execute` | `POST /namespaces/{namespace}/plan` | Return logical and physical plans; no engine call. |

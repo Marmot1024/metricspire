@@ -26,7 +26,7 @@ This is a metric service, not a replacement for your data warehouse, BI system, 
 
 ## What is implemented
 
-- **Governed catalog:** optimistic drafts, validation, immutable releases, an active pointer, rollback, and release events in PostgreSQL.
+- **Governed catalog:** optimistic drafts, validation, immutable `trial` or `certified` releases, activation/deactivation, rollback, and release events in PostgreSQL.
 - **Portable semantics:** constrained expressions and logical plans, with environment-specific table and column mappings in reviewed `SourceBinding` files. No caller-provided SQL.
 - **Guarded execution:** policy checks, capability checks, deterministic plans, parameterized Databricks SQL, timeouts, cancellation, typed results, row/byte limits, and fail-closed audit.
 - **One service, three surfaces:** a maintainer/query UI, strict HTTP management and query APIs, and seven remote MCP query tools using the same application services.
@@ -80,6 +80,7 @@ Each request is authenticated. A Databricks Apps deployment needs a pre-register
 | [Architecture](docs/architecture.md) | Semantic, identity, control-plane, and engine adapter boundaries. |
 | [HTTP contract](docs/http-api.md) | Endpoints, permissions, errors, limits, and audit behavior. |
 | [Development status](docs/development-status.md) | Maintained preview boundary and known gaps. |
+| [Contributing](CONTRIBUTING.md) | Branch, pull-request, test, migration, and data-safety workflow. |
 
 The [documentation index](docs/README.md) separates product guides from maintainer-specific staging instructions. Historical phase acceptance notes are kept locally, not in the public documentation tree.
 

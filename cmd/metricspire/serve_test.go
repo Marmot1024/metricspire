@@ -193,6 +193,25 @@ func TestMCPAuthorizationServerFollowsAuthenticationProvider(t *testing.T) {
 	}
 }
 
+func TestTrialReleasesRequireConfiguredNamespacesAndDeploymentAcknowledgement(t *testing.T) {
+	config := runtimeconfig.Config{
+		ReleasePolicy: runtimeconfig.ReleasePolicyConfig{TrialNamespaces: []string{"matchingstory"}},
+	}
+	value := ""
+	getenv := func(string) string { return value }
+	if _, err := enabledTrialNamespaces(config, getenv); err == nil {
+		t.Fatal("configured trial namespaces were accepted without deployment acknowledgement")
+	}
+	value = "approved-trial"
+	if enabled, err := enabledTrialNamespaces(config, getenv); err != nil || len(enabled) != 1 || enabled[0] != "matchingstory" {
+		t.Fatalf("enabled trial namespaces=%v, %v", enabled, err)
+	}
+	config.ReleasePolicy.TrialNamespaces = nil
+	if _, err := enabledTrialNamespaces(config, getenv); err == nil {
+		t.Fatal("deployment acknowledgement without configured namespaces was accepted")
+	}
+}
+
 func TestServeStartsOIDCLoginAndStopsGracefullyWithPostgres(t *testing.T) {
 	databaseURL := os.Getenv("METRICSPIRE_TEST_DATABASE_URL")
 	if databaseURL == "" {

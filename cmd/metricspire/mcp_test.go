@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -195,8 +196,71 @@ func TestMCPRemoteStagingAcceptance(t *testing.T) {
 	if origin == "" || token == "" {
 		t.Fatal("staging origin and API token are required")
 	}
-	session := mcpHTTP(t, strings.TrimSuffix(origin, "/")+"/mcp", token)
+	session := mcpHTTP(t, strings.TrimSuffix(origin, "/")+"/api/v1/mcp", token)
 	verifyMCPStagingAcceptance(t, session, "remote HTTP")
+}
+
+// This opt-in probe checks the anonymous OAuth discovery contract at the App
+// ingress. It never submits a MetricSpire tool call or analytical query.
+func TestMCPRemoteStagingOAuthDiscovery(t *testing.T) {
+	if os.Getenv("METRICSPIRE_RUN_MCP_AUTH_ACCEPTANCE") != "staging-read-only" {
+		t.Skip("set METRICSPIRE_RUN_MCP_AUTH_ACCEPTANCE=staging-read-only with the staging origin")
+	}
+	origin := strings.TrimSuffix(os.Getenv("METRICSPIRE_MCP_TEST_URL"), "/")
+	if origin == "" {
+		t.Fatal("staging origin is required")
+	}
+	client := &http.Client{
+		Timeout:       15 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	metadataURL := origin + "/.well-known/oauth-protected-resource/api/v1/mcp"
+
+	t.Run("unauthenticated_initialize", func(t *testing.T) {
+		body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"auth-probe","version":"1"}}}`)
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, origin+"/api/v1/mcp", body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json, text/event-stream")
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusUnauthorized {
+			t.Errorf("anonymous MCP status=%d, want 401 without a login redirect", response.StatusCode)
+		}
+		if challenge := response.Header.Get("WWW-Authenticate"); !strings.HasPrefix(challenge, "Bearer ") || !strings.Contains(challenge, `resource_metadata="`+metadataURL+`"`) {
+			t.Errorf("anonymous MCP response has no matching Bearer resource_metadata challenge")
+		}
+	})
+
+	t.Run("protected_resource_metadata", func(t *testing.T) {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, metadataURL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("protected resource metadata status=%d, want 200", response.StatusCode)
+		}
+		var metadata struct {
+			Resource             string   `json:"resource"`
+			AuthorizationServers []string `json:"authorization_servers"`
+		}
+		if err := json.NewDecoder(io.LimitReader(response.Body, 1<<16)).Decode(&metadata); err != nil {
+			t.Fatal(err)
+		}
+		if metadata.Resource != origin+"/api/v1/mcp" || len(metadata.AuthorizationServers) != 1 || !strings.HasPrefix(metadata.AuthorizationServers[0], "https://") {
+			t.Errorf("protected resource metadata has an unexpected resource or authorization server")
+		}
+	})
 }
 
 // Explicit opt-in: this performs only discovery, explain, and plan calls. It
@@ -209,7 +273,7 @@ func TestMCPRemoteStagingTimeContractAcceptance(t *testing.T) {
 	if origin == "" || token == "" {
 		t.Fatal("staging origin and API token are required")
 	}
-	session := mcpHTTP(t, strings.TrimSuffix(origin, "/")+"/mcp", token)
+	session := mcpHTTP(t, strings.TrimSuffix(origin, "/")+"/api/v1/mcp", token)
 	var entries struct {
 		Metrics []application.MetricCatalogEntry `json:"metrics"`
 	}

@@ -177,7 +177,7 @@ function filterCatalogEntries(metrics, status = "queryable") {
 }
 
 function isBusinessUnverified(metric) {
-  return metric?.verification?.status === "unverified" || (metric?.tags || []).includes("governance_unverified");
+  return metric?.verification_status === "unverified" || metric?.verification?.status === "unverified" || (metric?.tags || []).includes("governance_unverified");
 }
 
 function catalogStatusLabel(metric) {
@@ -1318,14 +1318,19 @@ function renderReleases() {
     heading.append(title, fingerprint);
     const meta = document.createElement("span");
     const created = release.created_at ? new Date(release.created_at).toLocaleString("zh-CN") : "";
-    meta.textContent = [`revision ${release.source_revision}`, release.created_by, created, release.note].filter(Boolean).join(" · ");
-    const rollback = document.createElement("button");
-    rollback.type = "button";
-    rollback.className = "button danger";
-    rollback.textContent = "回滚到此版本";
-    rollback.disabled = Boolean(release.active);
-    rollback.addEventListener("click", () => rollbackRelease(release.id));
-    card.append(heading, meta, rollback);
+    const channel = release.channel === "trial" ? "试用版本" : "认证版本";
+    meta.textContent = [channel, `revision ${release.source_revision}`, release.created_by, created, release.note].filter(Boolean).join(" · ");
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "button danger";
+    if (release.active) {
+      action.textContent = "撤下当前版本";
+      action.addEventListener("click", deactivateRelease);
+    } else {
+      action.textContent = "回滚到此版本";
+      action.addEventListener("click", () => rollbackRelease(release.id));
+    }
+    card.append(heading, meta, action);
     container.append(card);
   }
 }
@@ -1428,6 +1433,26 @@ async function rollbackRelease(releaseID) {
     await loadGovernance();
     await loadCatalog();
     setStatus("governance-status", `已重新启用历史版本 ${release.id}，并记录回滚事件。`, "success");
+  } catch (error) {
+    setStatus("governance-status", errorMessage(error), "error");
+  }
+}
+
+async function deactivateRelease() {
+  const note = byID("release-note").value.trim();
+  if (!note) {
+    setStatus("governance-status", "撤下说明必填：请说明为什么停止对外提供当前版本。", "error");
+    return;
+  }
+  if (!window.confirm(`确认撤下 ${state.governanceRoute.model_name} 的当前版本？历史版本和审计记录会保留。`)) return;
+  try {
+    const release = await requestJSON(routePath(state.governanceRoute, "deactivate"), {
+      method: "POST", body: JSON.stringify({note}),
+    });
+    byID("release-note").value = "";
+    await loadGovernance();
+    await loadCatalog();
+    setStatus("governance-status", `版本 ${release.id} 已撤下；历史记录仍保留。`, "success");
   } catch (error) {
     setStatus("governance-status", errorMessage(error), "error");
   }

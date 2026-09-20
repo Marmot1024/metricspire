@@ -50,12 +50,23 @@ func (function BindingResolverFunc) ResolveBinding(ctx context.Context, scope Qu
 }
 
 type QueryService struct {
-	releases ReleaseReader
-	policies PolicyResolver
-	bindings BindingResolver
-	engine   QueryEngine
-	audit    audit.Recorder
-	now      func() time.Time
+	releases        ReleaseReader
+	policies        PolicyResolver
+	bindings        BindingResolver
+	engine          QueryEngine
+	audit           audit.Recorder
+	now             func() time.Time
+	trialNamespaces map[string]struct{}
+}
+
+type QueryServiceOption func(*QueryService)
+
+// WithTrialReleaseNamespaces is for explicitly configured trial namespaces.
+// It affects only immutable releases carrying the structured trial channel.
+func WithTrialReleaseNamespaces(namespaces ...string) QueryServiceOption {
+	return func(service *QueryService) {
+		service.trialNamespaces = namespaceSet(namespaces)
+	}
 }
 
 type QueryScope struct {
@@ -90,11 +101,17 @@ type QueryOutput struct {
 	Execution model.ExecutionSnapshot `json:"execution"`
 }
 
-func NewQueryService(releases ReleaseReader, policies PolicyResolver, bindings BindingResolver, engine QueryEngine, recorder audit.Recorder) (*QueryService, error) {
+func NewQueryService(releases ReleaseReader, policies PolicyResolver, bindings BindingResolver, engine QueryEngine, recorder audit.Recorder, options ...QueryServiceOption) (*QueryService, error) {
 	if releases == nil || policies == nil || bindings == nil || engine == nil || recorder == nil {
 		return nil, errors.New("release reader, policy resolver, binding resolver, query engine, and audit recorder are required")
 	}
-	return &QueryService{releases: releases, policies: policies, bindings: bindings, engine: engine, audit: recorder, now: time.Now}, nil
+	service := &QueryService{releases: releases, policies: policies, bindings: bindings, engine: engine, audit: recorder, now: time.Now}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
+	}
+	return service, nil
 }
 
 // ExplainActive resolves the active release and policy on the server, then
@@ -112,7 +129,9 @@ func (s *QueryService) ExplainActive(ctx context.Context, input QueryInput) (Exp
 	if err != nil {
 		return ExplainOutput{}, fmt.Errorf("resolve policy for active release: %w", err)
 	}
-	return explainRelease(input, release, policySource, false)
+	_, trialNamespaceEnabled := s.trialNamespaces[input.Namespace]
+	allowUnverified := trialNamespaceEnabled && catalog.IsTrialRelease(release)
+	return explainRelease(input, release, policySource, allowUnverified)
 }
 
 // ExplainDraft is a maintainer-only use case. The transport must require both

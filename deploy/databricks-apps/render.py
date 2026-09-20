@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 ENDPOINT = re.compile(r"^projects/[a-z0-9-]+/branches/[a-z0-9-]+/endpoints/[a-z0-9-]+$")
 APP_NAME = re.compile(r"^[a-z][a-z0-9-]{1,29}$")
+NAMESPACE = re.compile(r"^[a-z][a-z0-9_-]{0,127}$")
 
 
 def required(name: str) -> str:
@@ -33,6 +34,11 @@ def main() -> None:
     public_url = required("METRICSPIRE_APPS_PUBLIC_URL")
     publisher_group_id = required("METRICSPIRE_APPS_PUBLISHER_GROUP_ID")
     endpoint = required("METRICSPIRE_APPS_LAKEBASE_ENDPOINT")
+    trial_namespaces = [
+        value.strip()
+        for value in os.environ.get("METRICSPIRE_APPS_TRIAL_NAMESPACES", "").split(",")
+        if value.strip()
+    ]
 
     parsed_url = urlparse(public_url)
     if not APP_NAME.fullmatch(app_name):
@@ -45,6 +51,8 @@ def main() -> None:
         raise RuntimeError("METRICSPIRE_APPS_PUBLISHER_GROUP_ID is invalid")
     if not ENDPOINT.fullmatch(endpoint):
         raise RuntimeError("METRICSPIRE_APPS_LAKEBASE_ENDPOINT must be a Lakebase endpoint resource name")
+    if len(set(trial_namespaces)) != len(trial_namespaces) or any(not NAMESPACE.fullmatch(value) for value in trial_namespaces):
+        raise RuntimeError("METRICSPIRE_APPS_TRIAL_NAMESPACES must be a comma-separated list of unique namespaces")
 
     runtime = {
         "api_version": "metricspire.io/v1alpha1",
@@ -82,6 +90,8 @@ def main() -> None:
             }
         ],
     }
+    if trial_namespaces:
+        runtime["release_policy"] = {"trial_namespaces": trial_namespaces}
     (config_directory / "runtime.json").write_text(
         json.dumps(runtime, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
@@ -104,6 +114,11 @@ def main() -> None:
         app_yaml += (
             "  - name: METRICSPIRE_MIGRATE_ONCE\n"
             "    value: approved-staging\n"
+        )
+    if trial_namespaces:
+        app_yaml += (
+            "  - name: METRICSPIRE_TRIAL_RELEASES\n"
+            "    value: approved-trial\n"
         )
     (output / "app.yaml").write_text(app_yaml, encoding="utf-8")
 

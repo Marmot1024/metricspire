@@ -477,6 +477,94 @@ func TestHTTPQueryJobEnforcesTimeout(t *testing.T) {
 	}
 }
 
+func TestTrialPublicationExposesUnverifiedCatalogWithoutChangingCertifiedGate(t *testing.T) {
+	handler, engine, _ := newTestServer(t, httpapi.Config{
+		TrialReleaseNamespaces: []string{"matchingstory"},
+		UIModels:               []httpapi.UIModelRoute{{Namespace: "matchingstory", ModelName: "commerce"}},
+	})
+	path := httpapi.APIPrefix + "/namespaces/matchingstory/models/commerce/"
+	source := readSource(t)
+	for index := range source.Spec.Metrics {
+		source.Spec.Metrics[index].Verification.Status = model.VerificationUnverified
+	}
+	response := performJSON(handler, http.MethodPut, path+"draft", "manage", httpapi.SaveDraftRequest{Source: source})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("draft status=%d, body=%s", response.StatusCode, readBody(t, response))
+	}
+	response.Body.Close()
+
+	for _, test := range []struct {
+		token string
+		body  httpapi.PublishRequest
+		code  int
+	}{
+		{"query", httpapi.PublishRequest{ExpectedRevision: 1, ReleaseChannel: catalog.ReleaseChannelTrial, Note: "trial"}, http.StatusForbidden},
+		{"manage", httpapi.PublishRequest{ExpectedRevision: 1, ReleaseChannel: catalog.ReleaseChannelCertified}, http.StatusUnprocessableEntity},
+		{"manage", httpapi.PublishRequest{ExpectedRevision: 1, ReleaseChannel: catalog.ReleaseChannelTrial}, http.StatusForbidden},
+	} {
+		response = performJSON(handler, http.MethodPost, path+"publish", test.token, test.body)
+		if response.StatusCode != test.code {
+			t.Fatalf("publish %#v status=%d want=%d body=%s", test.body, response.StatusCode, test.code, readBody(t, response))
+		}
+		response.Body.Close()
+	}
+	response = performJSON(handler, http.MethodPost, path+"publish", "manage", httpapi.PublishRequest{
+		ExpectedRevision: 1, ReleaseChannel: catalog.ReleaseChannelTrial, Note: "staging-only trial",
+	})
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("trial publish status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	var release catalog.Release
+	decodeResponse(t, response, &release)
+	if release.Manifest.Definitions.Metrics[0].Verification.Status != model.VerificationUnverified || release.Channel != catalog.ReleaseChannelTrial {
+		t.Fatalf("release lost trial status: %#v", release)
+	}
+
+	response = performJSON(handler, http.MethodGet, httpapi.APIPrefix+"/catalog/search?namespace=matchingstory&q=gross", "query", nil)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("catalog status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	var found []application.MetricCatalogEntry
+	decodeResponse(t, response, &found)
+	if len(found) != 3 {
+		t.Fatalf("unverified test catalog=%#v", found)
+	}
+	for _, entry := range found {
+		if entry.VerificationStatus != model.VerificationUnverified {
+			t.Fatalf("trial release mislabeled as verified: %#v", entry)
+		}
+	}
+	query := readQuery(t)
+	response = performJSON(handler, http.MethodPost, httpapi.APIPrefix+"/namespaces/matchingstory/plan", "query", query)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("trial release plan status=%d body=%s", response.StatusCode, readBody(t, response))
+	}
+	response.Body.Close()
+	session := connectRemoteMCP(t, handler, "query")
+	listed, err := session.ListTools(t.Context(), nil)
+	if err != nil || len(listed.Tools) != 7 {
+		t.Fatalf("MCP tools=%#v error=%v", listed, err)
+	}
+	out := callRemoteMCP(t, session, "search_metrics", map[string]any{"namespace": "matchingstory", "search": "gross"}, false)
+	if !strings.Contains(out, `"verification_status":"unverified"`) {
+		t.Fatalf("MCP catalog hid trial verification status: %s", out)
+	}
+	callRemoteMCP(t, session, "plan_query", map[string]any{"namespace": "matchingstory", "query": query}, false)
+	if engine.executionCount() != 0 {
+		t.Fatal("catalog discovery unexpectedly executed SQL")
+	}
+
+	defaultHandler, _, _ := newTestServer(t, httpapi.Config{})
+	response = performJSON(defaultHandler, http.MethodPost, path+"publish", "manage", httpapi.PublishRequest{
+		ExpectedRevision: 1, ReleaseChannel: catalog.ReleaseChannelTrial, Note: "not enabled",
+	})
+	assertProblem(t, response, http.StatusForbidden, "trial_publish_disabled")
+	response = performJSON(handler, http.MethodPost, modelPath("publish"), "manage", httpapi.PublishRequest{
+		ExpectedRevision: 1, ReleaseChannel: catalog.ReleaseChannelTrial, Note: "wrong namespace",
+	})
+	assertProblem(t, response, http.StatusForbidden, "trial_publish_disabled")
+}
+
 func TestHTTPManagementUsesAuthenticatedActorAndReturnsReleaseSummaries(t *testing.T) {
 	handler, _, _ := newTestServer(t, httpapi.Config{RequestID: func() string { return "req_manage" }})
 	source := readSource(t)
@@ -534,6 +622,15 @@ func TestHTTPManagementUsesAuthenticatedActorAndReturnsReleaseSummaries(t *testi
 	decodeResponse(t, response, &rolledBack)
 	if rolledBack.ID != releases[0].ID {
 		t.Fatalf("rolled-back release = %#v", rolledBack)
+	}
+	response = performJSON(handler, http.MethodPost, modelPath("deactivate"), "manage", httpapi.DeactivateRequest{Note: "retire from discovery"})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("deactivate status = %d, body = %s", response.StatusCode, readBody(t, response))
+	}
+	var deactivated catalog.Release
+	decodeResponse(t, response, &deactivated)
+	if deactivated.ID != releases[0].ID {
+		t.Fatalf("deactivated release = %#v", deactivated)
 	}
 }
 
@@ -932,13 +1029,25 @@ func newTestServerWithDependencies(t *testing.T, config httpapi.Config, engine *
 	bindings := application.BindingResolverFunc(func(_ context.Context, scope application.QueryScope, _ catalog.Release) (model.SourceBinding, error) {
 		observed.lastScope = scope
 		observed.bindingCalls++
-		return binding, nil
+		resolved := binding
+		if scope.Namespace == "matchingstory" {
+			resolved.ManifestFingerprint = ""
+		}
+		return resolved, nil
 	})
-	queries, err := application.NewQueryService(repository, policies, bindings, engine, recorder)
+	queryOptions := make([]application.QueryServiceOption, 0, 1)
+	if len(config.TrialReleaseNamespaces) > 0 {
+		queryOptions = append(queryOptions, application.WithTrialReleaseNamespaces(config.TrialReleaseNamespaces...))
+	}
+	queries, err := application.NewQueryService(repository, policies, bindings, engine, recorder, queryOptions...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalogSearch, err := application.NewCatalogService(repository, policies, bindings)
+	catalogOptions := make([]application.CatalogServiceOption, 0, 1)
+	if len(config.TrialReleaseNamespaces) > 0 {
+		catalogOptions = append(catalogOptions, application.WithTrialCatalogReleaseNamespaces(config.TrialReleaseNamespaces...))
+	}
+	catalogSearch, err := application.NewCatalogService(repository, policies, bindings, catalogOptions...)
 	if err != nil {
 		t.Fatal(err)
 	}

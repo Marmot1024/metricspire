@@ -165,6 +165,60 @@ func TestPublishedReleaseToGovernedDatabricksResultAndRollback(t *testing.T) {
 	}
 }
 
+func TestActiveTrialReleaseRequiresExplicitQueryOption(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	root := filepath.Join("..", "..", "examples", "orders")
+	var source model.SemanticSource
+	var policySource model.PolicySource
+	var query model.SemanticQuery
+	var requestContext model.RequestContext
+	read(t, filepath.Join(root, "model.yaml"), &source)
+	read(t, filepath.Join(root, "policy.yaml"), &policySource)
+	read(t, filepath.Join(root, "query.json"), &query)
+	read(t, filepath.Join(root, "context.json"), &requestContext)
+	for index := range source.Spec.Metrics {
+		source.Spec.Metrics[index].Verification.Status = model.VerificationUnverified
+	}
+	repository := catalog.NewMemoryRepository()
+	management, _ := catalog.NewService(repository)
+	draft, err := management.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "matchingstory", Source: source, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := management.PublishTrial(ctx, "matchingstory", source.Metadata.Name, draft.Revision, "tester", "trial"); err != nil {
+		t.Fatal(err)
+	}
+	policies := application.PolicyResolverFunc(func(context.Context, application.QueryScope, catalog.Release) (model.PolicySource, error) {
+		return policySource, nil
+	})
+	bindings := application.BindingResolverFunc(func(context.Context, application.QueryScope, catalog.Release) (model.SourceBinding, error) {
+		return model.SourceBinding{}, nil
+	})
+	input := application.QueryInput{QueryScope: application.QueryScope{
+		Namespace: "matchingstory", ModelName: source.Metadata.Name, Context: requestContext,
+	}, Query: query}
+	ordinary, _ := application.NewQueryService(repository, policies, bindings, noOpEngine{}, audit.DiscardRecorder)
+	if _, err := ordinary.ExplainActive(ctx, input); err == nil || !strings.Contains(err.Error(), "metric_not_verified") {
+		t.Fatalf("ordinary service accepted trial release: %v", err)
+	}
+	staging, _ := application.NewQueryService(repository, policies, bindings, noOpEngine{}, audit.DiscardRecorder, application.WithTrialReleaseNamespaces("matchingstory"))
+	if _, err := staging.ExplainActive(ctx, input); err != nil {
+		t.Fatalf("explicit trial namespace rejected release: %v", err)
+	}
+	wrongNamespace, _ := application.NewQueryService(repository, policies, bindings, noOpEngine{}, audit.DiscardRecorder, application.WithTrialReleaseNamespaces("acceptance"))
+	if _, err := wrongNamespace.ExplainActive(ctx, input); err == nil || !strings.Contains(err.Error(), "metric_not_verified") {
+		t.Fatalf("different trial namespace accepted release: %v", err)
+	}
+}
+
+type noOpEngine struct{}
+
+func (noOpEngine) Capabilities() model.EngineCapabilities { return model.EngineCapabilities{} }
+func (noOpEngine) Execute(context.Context, model.PhysicalPlan) (model.ExecutionSnapshot, error) {
+	panic("unexpected execution")
+}
+
 type tokenCheckingRecorder struct {
 	t        *testing.T
 	recorder audit.Recorder

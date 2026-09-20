@@ -67,11 +67,14 @@ func (function ReadinessFunc) Ready(ctx context.Context) error { return function
 type ManagementService interface {
 	SaveDraft(context.Context, catalog.SaveDraftInput) (catalog.Draft, error)
 	Publish(context.Context, string, string, int64, string, string) (catalog.Release, error)
+	PublishTrial(context.Context, string, string, int64, string, string) (catalog.Release, error)
 	Rollback(context.Context, string, string, string, string, string) (catalog.Release, error)
+	Deactivate(context.Context, string, string, string, string) (catalog.Release, error)
 }
 
 type CatalogReader interface {
 	GetDraft(context.Context, string, string) (catalog.Draft, error)
+	GetRelease(context.Context, string, string, string) (catalog.Release, error)
 	GetActiveRelease(context.Context, string, string) (catalog.Release, error)
 	ListReleases(context.Context, string, string) ([]catalog.Release, error)
 }
@@ -138,6 +141,7 @@ type Config struct {
 	MCPAuthorizationServer string
 	AuthenticationProfile  string
 	MCPVersion             string
+	TrialReleaseNamespaces []string // explicit deployment opt-in; business verification stays unverified
 	UIModels               []UIModelRoute
 	RequestID              func() string
 }
@@ -181,13 +185,18 @@ type ReviewRequest struct {
 }
 
 type PublishRequest struct {
-	ExpectedRevision int64  `json:"expected_revision"`
-	Note             string `json:"note,omitempty"`
+	ExpectedRevision int64                  `json:"expected_revision"`
+	Note             string                 `json:"note,omitempty"`
+	ReleaseChannel   catalog.ReleaseChannel `json:"release_channel,omitempty"`
 }
 
 type RollbackRequest struct {
 	ReleaseID string `json:"release_id"`
 	Note      string `json:"note,omitempty"`
+}
+
+type DeactivateRequest struct {
+	Note string `json:"note"`
 }
 
 type GovernanceImportRequest struct {
@@ -197,11 +206,12 @@ type GovernanceImportRequest struct {
 }
 
 type ReleaseSummary struct {
-	ID                  string    `json:"id"`
-	SourceRevision      int64     `json:"source_revision"`
-	ManifestFingerprint string    `json:"manifest_fingerprint"`
-	Active              bool      `json:"active"`
-	CreatedBy           string    `json:"created_by"`
-	Note                string    `json:"note"`
-	CreatedAt           time.Time `json:"created_at"`
+	ID                  string                 `json:"id"`
+	SourceRevision      int64                  `json:"source_revision"`
+	ManifestFingerprint string                 `json:"manifest_fingerprint"`
+	Channel             catalog.ReleaseChannel `json:"channel"`
+	Active              bool                   `json:"active"`
+	CreatedBy           string                 `json:"created_by"`
+	Note                string                 `json:"note"`
+	CreatedAt           time.Time              `json:"created_at"`
 }

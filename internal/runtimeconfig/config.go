@@ -25,8 +25,13 @@ type Config struct {
 	Kind           string               `json:"kind" yaml:"kind"`
 	HTTP           HTTPConfig           `json:"http" yaml:"http"`
 	Authentication AuthenticationConfig `json:"authentication" yaml:"authentication"`
+	ReleasePolicy  ReleasePolicyConfig  `json:"release_policy,omitempty" yaml:"release_policy,omitempty"`
 	Policies       []PolicyRoute        `json:"policies" yaml:"policies"`
 	Bindings       []BindingRoute       `json:"bindings" yaml:"bindings"`
+}
+
+type ReleasePolicyConfig struct {
+	TrialNamespaces []string `json:"trial_namespaces,omitempty" yaml:"trial_namespaces,omitempty"`
 }
 
 type AuthenticationConfig struct {
@@ -130,6 +135,7 @@ func (config Config) Validate() error {
 		seenPolicies[key] = struct{}{}
 	}
 	seenBindings := make(map[string]struct{})
+	knownNamespaces := make(map[string]struct{})
 	for _, route := range config.Bindings {
 		if empty(route.Namespace, route.ModelName, route.Path) {
 			return errors.New("binding route namespace, model_name, and path are required")
@@ -139,6 +145,21 @@ func (config Config) Validate() error {
 			return fmt.Errorf("duplicate binding route for %s/%s", route.Namespace, route.ModelName)
 		}
 		seenBindings[key] = struct{}{}
+		knownNamespaces[route.Namespace] = struct{}{}
+	}
+	seenTrialNamespaces := make(map[string]struct{}, len(config.ReleasePolicy.TrialNamespaces))
+	for _, namespace := range config.ReleasePolicy.TrialNamespaces {
+		namespace = strings.TrimSpace(namespace)
+		if namespace == "" {
+			return errors.New("release_policy.trial_namespaces cannot contain an empty namespace")
+		}
+		if _, exists := seenTrialNamespaces[namespace]; exists {
+			return fmt.Errorf("duplicate trial release namespace %s", namespace)
+		}
+		if _, exists := knownNamespaces[namespace]; !exists {
+			return fmt.Errorf("trial release namespace %s has no binding route", namespace)
+		}
+		seenTrialNamespaces[namespace] = struct{}{}
 	}
 	return nil
 }

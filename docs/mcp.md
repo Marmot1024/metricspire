@@ -33,7 +33,7 @@ codex mcp add metricspire --url 'https://<your-app-origin>/api/v1/mcp' --oauth-c
 codex mcp login metricspire
 ```
 
-The observed Databricks staging scope is `sql`, but client scope and redirect settings depend on the actual deployment and installed client version. The redirect must match its host, port, and callback path exactly; changing the complete MCP URL may change the callback path. Do not put a `client_secret`, access token, or static Authorization header in a checked-in file. Start a new Codex session and call `metricspire.list_namespaces`; an OAuth success screen alone does not prove MCP tool calls work. See [Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+The observed Databricks staging scope is `sql`, but client scope and redirect settings depend on the actual deployment and installed client version. The redirect must match its host, port, and callback path exactly; changing the complete MCP URL may change the callback path. Do not put a `client_secret`, access token, or static Authorization header in a checked-in file. Keep the final server name stable because stored OAuth credentials are keyed to that connection; after a rename, log in again under the final name. Start a new Codex session and call `metricspire.list_namespaces`; an OAuth success screen alone does not prove MCP tool calls work. See [Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 For a deployment that intentionally uses bearer-token trials, `bearer_token_env_var` is supported, but it is a separate path from native OAuth. Do not combine a helper, static bearer header, and OAuth on one connection. Never paste a token into prompts, command arguments, checked-in files, or issue reports.
 

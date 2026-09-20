@@ -18,6 +18,8 @@
 *.sqlite3
 *.db
 .DS_Store
+__pycache__/
+*.py[cod]
 .idea/
 /.agents/
 /.codex/

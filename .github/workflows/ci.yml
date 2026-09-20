@@ -27,6 +27,8 @@ jobs:
           node-version: '22'
           package-manager-cache: false
       - run: node --test internal/httpapi/ui/app_test.js
+      - run: python3 -m unittest tools/test_databricks_mcp_headers.py
+      - run: go mod verify
       - run: go test -race ./...
       - run: go vet ./...
       - run: CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' ./cmd/metricspire
