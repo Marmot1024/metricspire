@@ -91,6 +91,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/publish", server.handlePublish)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/releases", server.handleReleases)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/rollback", server.handleRollback)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/deactivate", server.handleDeactivate)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/explain", server.handleExplain)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/plan", server.handlePlan)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/query", server.handleQuery)
@@ -378,7 +379,25 @@ func (server *Server) handlePublish(response http.ResponseWriter, request *http.
 		return
 	}
 	server.withTimeout(response, request, server.config.ControlTimeout, func(ctx context.Context) error {
-		release, err := server.deps.Management.Publish(ctx, request.PathValue("namespace"), request.PathValue("model"), body.ExpectedRevision, principal.Subject, body.Note)
+		var release catalog.Release
+		var err error
+		channel := body.ReleaseChannel
+		if channel == "" {
+			channel = catalog.ReleaseChannelCertified
+		}
+		switch channel {
+		case catalog.ReleaseChannelTrial:
+			if !server.trialReleaseEnabled(request.PathValue("namespace")) || strings.TrimSpace(body.Note) == "" {
+				server.writeProblem(response, request, http.StatusForbidden, "trial_publish_disabled", "Trial publication not allowed", "the trial channel requires an explicitly configured namespace and a nonempty note", "release_channel")
+				return nil
+			}
+			release, err = server.deps.Management.PublishTrial(ctx, request.PathValue("namespace"), request.PathValue("model"), body.ExpectedRevision, principal.Subject, body.Note)
+		case catalog.ReleaseChannelCertified:
+			release, err = server.deps.Management.Publish(ctx, request.PathValue("namespace"), request.PathValue("model"), body.ExpectedRevision, principal.Subject, body.Note)
+		default:
+			server.writeProblem(response, request, http.StatusUnprocessableEntity, "invalid_release_channel", "Invalid release channel", "release_channel must be trial or certified", "release_channel")
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -408,7 +427,8 @@ func (server *Server) handleReleases(response http.ResponseWriter, request *http
 		for _, release := range releases {
 			result = append(result, ReleaseSummary{
 				ID: release.ID, SourceRevision: release.SourceRevision, ManifestFingerprint: release.ManifestFingerprint,
-				Active: release.ID == active.ID, CreatedBy: release.CreatedBy, Note: release.Note, CreatedAt: release.CreatedAt,
+				Channel: release.Channel, Active: release.ID == active.ID,
+				CreatedBy: release.CreatedBy, Note: release.Note, CreatedAt: release.CreatedAt,
 			})
 		}
 		return writeJSON(response, http.StatusOK, result)
@@ -429,12 +449,51 @@ func (server *Server) handleRollback(response http.ResponseWriter, request *http
 		return
 	}
 	server.withTimeout(response, request, server.config.ControlTimeout, func(ctx context.Context) error {
+		target, err := server.deps.Catalog.GetRelease(ctx, request.PathValue("namespace"), request.PathValue("model"), body.ReleaseID)
+		if err != nil {
+			return err
+		}
+		if catalog.IsTrialRelease(target) && !server.trialReleaseEnabled(request.PathValue("namespace")) {
+			server.writeProblem(response, request, http.StatusForbidden, "trial_activation_disabled", "Trial activation not allowed", "this deployment does not allow trial releases for the requested namespace", "release_id")
+			return nil
+		}
 		release, err := server.deps.Management.Rollback(ctx, request.PathValue("namespace"), request.PathValue("model"), body.ReleaseID, principal.Subject, body.Note)
 		if err != nil {
 			return err
 		}
 		return writeJSON(response, http.StatusOK, release)
 	})
+}
+
+func (server *Server) handleDeactivate(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		server.methodNotAllowed(response, request, http.MethodPost)
+		return
+	}
+	principal, ok := server.authorize(response, request, PermissionManage)
+	if !ok {
+		return
+	}
+	var body DeactivateRequest
+	if !server.decodeJSON(response, request, &body) {
+		return
+	}
+	server.withTimeout(response, request, server.config.ControlTimeout, func(ctx context.Context) error {
+		release, err := server.deps.Management.Deactivate(ctx, request.PathValue("namespace"), request.PathValue("model"), principal.Subject, body.Note)
+		if err != nil {
+			return err
+		}
+		return writeJSON(response, http.StatusOK, release)
+	})
+}
+
+func (server *Server) trialReleaseEnabled(namespace string) bool {
+	for _, configured := range server.config.TrialReleaseNamespaces {
+		if configured == namespace {
+			return true
+		}
+	}
+	return false
 }
 
 func (server *Server) handleExplain(response http.ResponseWriter, request *http.Request) {

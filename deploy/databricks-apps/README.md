@@ -17,9 +17,11 @@ METRICSPIRE_APPS_LAKEBASE_ENDPOINT='projects/replace/branches/production/endpoin
 ./deploy/databricks-apps/build.sh
 ```
 
+For a dedicated trial environment only, add `METRICSPIRE_APPS_TRIAL_NAMESPACES='acceptance'`. The renderer writes both the structured namespace allowlist and the deployment acknowledgement. Omit it in production.
+
 Review generated `app.yaml` and configuration before upload. The App expects a SQL warehouse resource named `metricspire-warehouse` and a Lakebase Autoscaling resource supplying PostgreSQL connection variables. Use `databricks workspace import-dir` for the generated package, verify remote artifact sizes, and then deploy from that exact workspace source. `databricks sync` may skip ignored generated artifacts.
 
-Serving does not migrate PostgreSQL. Run the separate, explicitly approved one-shot migration only after reviewing the resource, identity, schema, and permission scope. Never carry a staging migration or test-publication switch into production. Test releases with unverified definitions are staging-only and are not business certification.
+Serving does not migrate PostgreSQL. Run the separate, explicitly approved one-shot migration only after reviewing the resource, identity, schema, and permission scope. Never carry a trial-release allowlist into production. Trial releases retain `unverified` business status and are not certification; they can be deactivated without deleting immutable history.
 
 ## Identity and MCP
 

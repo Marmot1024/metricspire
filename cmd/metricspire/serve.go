@@ -76,6 +76,10 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	if err != nil {
 		return fmt.Errorf("parse query timeout: %w", err)
 	}
+	trialNamespaces, err := enabledTrialNamespaces(config, os.Getenv)
+	if err != nil {
+		return err
+	}
 	policies, bindings, err := loadTrustedRoutes(filepath.Dir(*configPath), config)
 	if err != nil {
 		return err
@@ -107,7 +111,11 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	if err != nil {
 		return err
 	}
-	catalogSearch, err := application.NewCatalogService(store, policyResolver, bindingResolver)
+	catalogOptions := make([]application.CatalogServiceOption, 0, 1)
+	if len(trialNamespaces) > 0 {
+		catalogOptions = append(catalogOptions, application.WithTrialCatalogReleaseNamespaces(trialNamespaces...))
+	}
+	catalogSearch, err := application.NewCatalogService(store, policyResolver, bindingResolver, catalogOptions...)
 	if err != nil {
 		return err
 	}
@@ -128,7 +136,11 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	if err != nil {
 		return err
 	}
-	queries, err := application.NewQueryService(store, policyResolver, bindingResolver, engine, store)
+	queryOptions := make([]application.QueryServiceOption, 0, 1)
+	if len(trialNamespaces) > 0 {
+		queryOptions = append(queryOptions, application.WithTrialReleaseNamespaces(trialNamespaces...))
+	}
+	queries, err := application.NewQueryService(store, policyResolver, bindingResolver, engine, store, queryOptions...)
 	if err != nil {
 		return err
 	}
@@ -148,7 +160,8 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		QueryTimeout: queryTimeout, AllowedOrigin: config.HTTP.PublicURL,
 		MCPAuthorizationServer: mcpAuthorizationServer(config, environment),
 		AuthenticationProfile:  config.Authentication.Provider, MCPVersion: version,
-		UIModels: configuredUIModels(config.Bindings),
+		TrialReleaseNamespaces: trialNamespaces,
+		UIModels:               configuredUIModels(config.Bindings),
 	}, httpapi.Dependencies{
 		Authenticator: authenticator, AuthEndpoints: authEndpoints,
 		Readiness:  store,
@@ -192,6 +205,23 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		}
 		return writeServeStatus(stdout, "stopped", listener.Addr().String(), config.HTTP.PublicURL)
 	}
+}
+
+// Trial releases require both trusted runtime configuration and a deployment
+// acknowledgement. Production configs omit the namespace list entirely.
+func enabledTrialNamespaces(config runtimeconfig.Config, getenv func(string) string) ([]string, error) {
+	acknowledgement := strings.TrimSpace(getenv("METRICSPIRE_TRIAL_RELEASES"))
+	configured := config.ReleasePolicy.TrialNamespaces
+	if len(configured) == 0 {
+		if acknowledgement != "" {
+			return nil, errors.New("trial release acknowledgement was set without configured trial namespaces")
+		}
+		return nil, nil
+	}
+	if acknowledgement != "approved-trial" {
+		return nil, errors.New("configured trial namespaces require METRICSPIRE_TRIAL_RELEASES=approved-trial")
+	}
+	return append([]string(nil), configured...), nil
 }
 
 func mcpAuthorizationServer(config runtimeconfig.Config, environment serveEnvironment) string {

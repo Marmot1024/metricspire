@@ -97,3 +97,56 @@ func TestCatalogSearchReturnsOnlyAuthorizedMetricsFromActiveReleases(t *testing.
 		}
 	}
 }
+
+func TestCatalogHidesTrialReleaseUnlessDeploymentEnablesIt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repository := catalog.NewMemoryRepository()
+	management, _ := catalog.NewService(repository)
+	root := filepath.Join("..", "..", "examples", "orders")
+	var source model.SemanticSource
+	var policySource model.PolicySource
+	var binding model.SourceBinding
+	if err := contractio.ReadFile(filepath.Join(root, "model.yaml"), &source); err != nil {
+		t.Fatal(err)
+	}
+	if err := contractio.ReadFile(filepath.Join(root, "policy.yaml"), &policySource); err != nil {
+		t.Fatal(err)
+	}
+	if err := contractio.ReadFile(filepath.Join(root, "binding.json"), &binding); err != nil {
+		t.Fatal(err)
+	}
+	for index := range source.Spec.Metrics {
+		source.Spec.Metrics[index].Verification.Status = model.VerificationUnverified
+	}
+	binding.ManifestFingerprint = ""
+	draft, err := management.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "trial", Source: source, Actor: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := management.PublishTrial(ctx, "trial", source.Metadata.Name, draft.Revision, "owner", "technical preview"); err != nil {
+		t.Fatal(err)
+	}
+	policies := application.PolicyResolverFunc(func(context.Context, application.QueryScope, catalog.Release) (model.PolicySource, error) {
+		return policySource, nil
+	})
+	bindings := application.BindingResolverFunc(func(context.Context, application.QueryScope, catalog.Release) (model.SourceBinding, error) {
+		return binding, nil
+	})
+	scope := application.QueryScope{Namespace: "trial", Context: model.RequestContext{
+		Tenant: "demo", Principal: "analyst", Roles: []string{"analyst"}, RequestID: "trial-catalog",
+	}}
+	ordinary, _ := application.NewCatalogService(repository, policies, bindings)
+	if results, err := ordinary.SearchActive(ctx, scope, "", 100); err != nil || len(results) != 0 {
+		t.Fatalf("ordinary catalog exposed trial release: %#v, %v", results, err)
+	}
+	enabled, _ := application.NewCatalogService(repository, policies, bindings, application.WithTrialCatalogReleaseNamespaces("trial"))
+	results, err := enabled.SearchActive(ctx, scope, "", 100)
+	if err != nil || len(results) == 0 || results[0].ReleaseChannel != catalog.ReleaseChannelTrial {
+		t.Fatalf("enabled trial catalog = %#v, %v", results, err)
+	}
+	wrongNamespace, _ := application.NewCatalogService(repository, policies, bindings, application.WithTrialCatalogReleaseNamespaces("acceptance"))
+	if results, err := wrongNamespace.SearchActive(ctx, scope, "", 100); err != nil || len(results) != 0 {
+		t.Fatalf("different trial namespace exposed release: %#v, %v", results, err)
+	}
+}

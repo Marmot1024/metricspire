@@ -56,9 +56,10 @@ test("catalog defaults to queryable entries and keeps governance records explici
   assert.equal(filterCatalogEntries(metrics, "all").length, 3);
 });
 
-test("test-published metrics remain visibly business-unverified", () => {
+test("trial metrics remain visibly business-unverified", () => {
   const metric = {catalog_status: "published", tags: ["governance_unverified"]};
   assert.equal(catalogStatusLabel(metric), "已发布 · 业务待验证");
+  assert.equal(catalogStatusLabel({catalog_status: "published", verification_status: "unverified"}), "已发布 · 业务待验证");
   assert.equal(verificationLabel(metric), "技术试查证据已登记");
   assert.equal(verificationLabel({verification: {status: "verified"}}), "口径已经验证");
   assert.equal(humanTag("business_type_atomic"), "原子指标");

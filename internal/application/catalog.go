@@ -36,6 +36,9 @@ func (service *CatalogService) ResolveActiveModel(ctx context.Context, scope Que
 	}
 	candidates := make([]string, 0, 1)
 	for _, release := range releases {
+		if catalog.IsTrialRelease(release) && !service.trialNamespaceEnabled(scope.Namespace) {
+			continue
+		}
 		available := make(map[string]struct{}, len(release.Manifest.Definitions.Metrics))
 		for _, metric := range release.Manifest.Definitions.Metrics {
 			available[metric.Name] = struct{}{}
@@ -83,23 +86,25 @@ func (service *CatalogService) ResolveActiveModel(ctx context.Context, scope Que
 }
 
 type MetricCatalogEntry struct {
-	Namespace           string                  `json:"namespace"`
-	ModelName           string                  `json:"-"`
-	ReleaseID           string                  `json:"release_id"`
-	ManifestFingerprint string                  `json:"manifest_fingerprint"`
-	Name                string                  `json:"name"`
-	DisplayName         string                  `json:"display_name"`
-	Description         string                  `json:"description"`
-	Owner               string                  `json:"owner"`
-	Tags                []string                `json:"tags,omitempty"`
-	UsageExamples       []string                `json:"usage_examples,omitempty"`
-	Deprecated          bool                    `json:"deprecated"`
-	ValueType           model.DataType          `json:"value_type"`
-	Unit                string                  `json:"unit,omitempty"`
-	AllowedDimensions   []string                `json:"allowed_dimensions"`
-	DimensionDetails    []MetricDimensionEntry  `json:"dimension_details,omitempty"`
-	TimeDimension       string                  `json:"time_dimension,omitempty"`
-	TimeGranularities   []model.TimeGranularity `json:"time_granularities,omitempty"`
+	Namespace           string                   `json:"namespace"`
+	ModelName           string                   `json:"-"`
+	ReleaseID           string                   `json:"release_id"`
+	ReleaseChannel      catalog.ReleaseChannel   `json:"release_channel"`
+	ManifestFingerprint string                   `json:"manifest_fingerprint"`
+	Name                string                   `json:"name"`
+	DisplayName         string                   `json:"display_name"`
+	Description         string                   `json:"description"`
+	Owner               string                   `json:"owner"`
+	VerificationStatus  model.VerificationStatus `json:"verification_status"`
+	Tags                []string                 `json:"tags,omitempty"`
+	UsageExamples       []string                 `json:"usage_examples,omitempty"`
+	Deprecated          bool                     `json:"deprecated"`
+	ValueType           model.DataType           `json:"value_type"`
+	Unit                string                   `json:"unit,omitempty"`
+	AllowedDimensions   []string                 `json:"allowed_dimensions"`
+	DimensionDetails    []MetricDimensionEntry   `json:"dimension_details,omitempty"`
+	TimeDimension       string                   `json:"time_dimension,omitempty"`
+	TimeGranularities   []model.TimeGranularity  `json:"time_granularities,omitempty"`
 }
 
 type MetricDimensionEntry struct {
@@ -112,16 +117,46 @@ type MetricDimensionEntry struct {
 }
 
 type CatalogService struct {
-	releases ActiveReleaseLister
-	policies PolicyResolver
-	bindings BindingResolver
+	releases        ActiveReleaseLister
+	policies        PolicyResolver
+	bindings        BindingResolver
+	trialNamespaces map[string]struct{}
 }
 
-func NewCatalogService(releases ActiveReleaseLister, policies PolicyResolver, bindings BindingResolver) (*CatalogService, error) {
+type CatalogServiceOption func(*CatalogService)
+
+func WithTrialCatalogReleaseNamespaces(namespaces ...string) CatalogServiceOption {
+	return func(service *CatalogService) {
+		service.trialNamespaces = namespaceSet(namespaces)
+	}
+}
+
+func NewCatalogService(releases ActiveReleaseLister, policies PolicyResolver, bindings BindingResolver, options ...CatalogServiceOption) (*CatalogService, error) {
 	if releases == nil || policies == nil || bindings == nil {
 		return nil, errors.New("active release lister, policy resolver, and binding resolver are required")
 	}
-	return &CatalogService{releases: releases, policies: policies, bindings: bindings}, nil
+	service := &CatalogService{releases: releases, policies: policies, bindings: bindings}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
+	}
+	return service, nil
+}
+
+func namespaceSet(namespaces []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(namespaces))
+	for _, namespace := range namespaces {
+		if namespace = strings.TrimSpace(namespace); namespace != "" {
+			result[namespace] = struct{}{}
+		}
+	}
+	return result
+}
+
+func (service *CatalogService) trialNamespaceEnabled(namespace string) bool {
+	_, enabled := service.trialNamespaces[namespace]
+	return enabled
 }
 
 // SearchActive returns only metrics in active releases that the trusted
@@ -140,6 +175,9 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 	query := strings.ToLower(strings.TrimSpace(search))
 	results := make([]MetricCatalogEntry, 0)
 	for _, release := range releases {
+		if catalog.IsTrialRelease(release) && !service.trialNamespaceEnabled(scope.Namespace) {
+			continue
+		}
 		modelScope := scope
 		modelScope.ModelName = release.Name
 		policySource, err := service.policies.ResolvePolicy(ctx, modelScope, release)
@@ -183,9 +221,10 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 			}
 			results = append(results, MetricCatalogEntry{
 				Namespace: release.Namespace, ModelName: release.Name, ReleaseID: release.ID,
-				ManifestFingerprint: release.ManifestFingerprint, Name: metric.Name,
+				ReleaseChannel: release.Channel, ManifestFingerprint: release.ManifestFingerprint, Name: metric.Name,
 				DisplayName: metric.DisplayName, Description: metric.Description, Owner: metric.Owner,
-				Tags: append([]string(nil), metric.Tags...), UsageExamples: append([]string(nil), metric.UsageExamples...), Deprecated: metric.Deprecated,
+				VerificationStatus: metric.Verification.Status,
+				Tags:               append([]string(nil), metric.Tags...), UsageExamples: append([]string(nil), metric.UsageExamples...), Deprecated: metric.Deprecated,
 				ValueType: metric.ValueType, Unit: metric.Unit,
 				AllowedDimensions: authorizedDimensions, DimensionDetails: dimensionDetails, TimeDimension: metric.TimeDimension,
 				TimeGranularities: granularities,

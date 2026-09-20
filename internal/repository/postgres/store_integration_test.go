@@ -161,8 +161,21 @@ SELECT event_kind, row_count FROM metricspire_query_audit WHERE request_id = $1`
 	if err != nil || len(records) != 0 {
 		t.Fatalf("governance records after initial rollback = %#v, %v", records, err)
 	}
+	if _, err := service.Deactivate(ctx, namespace, source.Metadata.Name, "test", "retire from discovery"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetActiveRelease(ctx, namespace, source.Metadata.Name); !errors.Is(err, catalog.ErrNotFound) {
+		t.Fatalf("active release after deactivation = %v", err)
+	}
+	if _, err := service.Rollback(ctx, namespace, source.Metadata.Name, release2.ID, "test", "reactivate after deactivation"); err != nil {
+		t.Fatal(err)
+	}
+	active, err = store.GetActiveRelease(ctx, namespace, source.Metadata.Name)
+	if err != nil || active.ID != release2.ID {
+		t.Fatalf("active release after reactivation = %#v, %v", active, err)
+	}
 	events, err := store.ListEvents(ctx, namespace, source.Metadata.Name)
-	if err != nil || len(events) != 3 || events[1].ToReleaseID != release2.ID || events[2].Kind != catalog.EventRollback {
+	if err != nil || len(events) != 5 || events[1].ToReleaseID != release2.ID || events[2].Kind != catalog.EventRollback || events[3].Kind != catalog.EventDeactivated || events[3].ToReleaseID != "" || events[4].Kind != catalog.EventRollback || events[4].ToReleaseID != release2.ID {
 		t.Fatalf("events = %#v, %v", events, err)
 	}
 }

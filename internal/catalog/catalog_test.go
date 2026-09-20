@@ -79,6 +79,81 @@ func TestCatalogRejectsLostUpdateAndUnverifiedPublication(t *testing.T) {
 	}
 }
 
+func TestTrialReleasePreservesUnverifiedStatusAndOperationalMetadataGate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repository := catalog.NewMemoryRepository()
+	service, _ := catalog.NewService(repository)
+	source := loadSource(t)
+	for index := range source.Spec.Metrics {
+		source.Spec.Metrics[index].Verification.Status = model.VerificationUnverified
+	}
+	draft, err := service.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "matchingstory", Source: source, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Publish(ctx, "matchingstory", source.Metadata.Name, draft.Revision, "tester", "ordinary"); !errors.Is(err, catalog.ErrNotPublishable) {
+		t.Fatalf("ordinary publish error = %v", err)
+	}
+	release, err := service.PublishTrial(ctx, "matchingstory", source.Metadata.Name, draft.Revision, "tester", "trial only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if release.SourceRevision != draft.Revision || release.Manifest.Definitions.Metrics[0].Verification.Status != model.VerificationUnverified || release.Channel != catalog.ReleaseChannelTrial || release.Note != "trial only" {
+		t.Fatalf("trial release did not preserve the unverified draft: %#v", release)
+	}
+	if !catalog.IsTrialRelease(release) || catalog.IsTrialRelease(catalog.Release{Channel: catalog.ReleaseChannelCertified}) {
+		t.Fatal("trial release channel was not recognized exactly")
+	}
+	if _, err := service.PublishTrial(ctx, "matchingstory", source.Metadata.Name, draft.Revision, "tester", "duplicate"); !errors.Is(err, catalog.ErrConflict) {
+		t.Fatalf("duplicate release error = %v", err)
+	}
+
+	missingEvidence := loadSource(t)
+	missingEvidence.Spec.Metrics[0].Verification.Status = model.VerificationUnverified
+	missingEvidence.Spec.Metrics[0].Verification.Evidence = nil
+	if _, err := service.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "other", Source: missingEvidence, Actor: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.PublishTrial(ctx, "other", missingEvidence.Metadata.Name, 1, "tester", "trial"); !errors.Is(err, catalog.ErrNotPublishable) {
+		t.Fatalf("missing evidence error = %v", err)
+	}
+}
+
+func TestDeactivateClearsActivePointerAndPreservesReleaseHistory(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repository := catalog.NewMemoryRepository()
+	service, _ := catalog.NewService(repository)
+	source := loadSource(t)
+	if _, err := service.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	release, err := service.Publish(ctx, "demo", source.Metadata.Name, 1, "alice", "initial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deactivated, err := service.Deactivate(ctx, "demo", source.Metadata.Name, "alice", "retire from discovery")
+	if err != nil || deactivated.ID != release.ID {
+		t.Fatalf("Deactivate() = %#v, %v", deactivated, err)
+	}
+	if _, err := repository.GetActiveRelease(ctx, "demo", source.Metadata.Name); !errors.Is(err, catalog.ErrNotFound) {
+		t.Fatalf("active release after deactivation = %v", err)
+	}
+	stored, err := repository.GetRelease(ctx, "demo", source.Metadata.Name, release.ID)
+	if err != nil || stored.ID != release.ID {
+		t.Fatalf("immutable release was not preserved: %#v, %v", stored, err)
+	}
+	events, err := repository.ListEvents(ctx, "demo", source.Metadata.Name)
+	if err != nil || len(events) != 2 || events[1].Kind != catalog.EventDeactivated || events[1].ToReleaseID != "" {
+		t.Fatalf("deactivation events = %#v, %v", events, err)
+	}
+	restored, err := service.Rollback(ctx, "demo", source.Metadata.Name, release.ID, "alice", "restore retired metric")
+	if err != nil || restored.ID != release.ID {
+		t.Fatalf("Rollback(after deactivate) = %#v, %v", restored, err)
+	}
+}
+
 func TestRepositoryRejectsManifestFromAnotherDraftRevision(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

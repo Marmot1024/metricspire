@@ -20,6 +20,16 @@ func TestRuntimeConfigRequiresHTTPSAndUniqueTrustedRoutes(t *testing.T) {
 	if err := valid.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	trial := valid
+	trial.ReleasePolicy.TrialNamespaces = []string{"demo"}
+	if err := trial.Validate(); err != nil {
+		t.Fatalf("explicit trial namespace was rejected: %v", err)
+	}
+	unknownTrial := valid
+	unknownTrial.ReleasePolicy.TrialNamespaces = []string{"unknown"}
+	if err := unknownTrial.Validate(); err == nil {
+		t.Fatal("trial namespace without a binding route was accepted")
+	}
 	insecure := valid
 	insecure.HTTP.PublicURL = "http://metrics.example.com"
 	if err := insecure.Validate(); err == nil {

@@ -20,6 +20,13 @@ var (
 	ErrNotPublishable = errors.New("semantic model is not publishable")
 )
 
+type ReleaseChannel string
+
+const (
+	ReleaseChannelCertified ReleaseChannel = "certified"
+	ReleaseChannelTrial     ReleaseChannel = "trial"
+)
+
 type Draft struct {
 	Namespace string               `json:"namespace"`
 	Name      string               `json:"name"`
@@ -36,6 +43,7 @@ type Release struct {
 	SourceRevision      int64                  `json:"source_revision"`
 	ManifestFingerprint string                 `json:"manifest_fingerprint"`
 	Manifest            model.SemanticManifest `json:"manifest"`
+	Channel             ReleaseChannel         `json:"channel"`
 	CreatedBy           string                 `json:"created_by"`
 	Note                string                 `json:"note"`
 	CreatedAt           time.Time              `json:"created_at"`
@@ -44,8 +52,9 @@ type Release struct {
 type EventKind string
 
 const (
-	EventPublished EventKind = "published"
-	EventRollback  EventKind = "rollback"
+	EventPublished   EventKind = "published"
+	EventRollback    EventKind = "rollback"
+	EventDeactivated EventKind = "deactivated"
 )
 
 type ReleaseEvent struct {
@@ -54,7 +63,7 @@ type ReleaseEvent struct {
 	Name          string    `json:"name"`
 	Kind          EventKind `json:"kind"`
 	FromReleaseID string    `json:"from_release_id,omitempty"`
-	ToReleaseID   string    `json:"to_release_id"`
+	ToReleaseID   string    `json:"to_release_id,omitempty"`
 	Actor         string    `json:"actor"`
 	Note          string    `json:"note"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -74,6 +83,7 @@ type PublishInput struct {
 	ExpectedActiveReleaseID string
 	ReleaseID               string
 	Manifest                model.SemanticManifest
+	Channel                 ReleaseChannel
 	Actor                   string
 	Note                    string
 }
@@ -87,11 +97,19 @@ type ActivateInput struct {
 	Kind      EventKind
 }
 
+type DeactivateInput struct {
+	Namespace string
+	Name      string
+	Actor     string
+	Note      string
+}
+
 type Repository interface {
 	SaveDraft(context.Context, SaveDraftInput) (Draft, error)
 	GetDraft(context.Context, string, string) (Draft, error)
 	Publish(context.Context, PublishInput) (Release, error)
 	Activate(context.Context, ActivateInput) (Release, error)
+	Deactivate(context.Context, DeactivateInput) (Release, error)
 	GetRelease(context.Context, string, string, string) (Release, error)
 	GetActiveRelease(context.Context, string, string) (Release, error)
 	ListReleases(context.Context, string, string) ([]Release, error)
@@ -128,6 +146,17 @@ func (s *Service) SaveDraft(ctx context.Context, input SaveDraftInput) (Draft, e
 // Publish compiles the exact expected draft revision and atomically makes the
 // resulting immutable release active.
 func (s *Service) Publish(ctx context.Context, namespace, name string, expectedRevision int64, actor, note string) (Release, error) {
+	return s.publish(ctx, namespace, name, expectedRevision, actor, note, ReleaseChannelCertified)
+}
+
+// PublishTrial permits an explicitly configured trial deployment to expose
+// executable, unverified definitions without changing their verification status.
+// The transport boundary decides which namespaces may use this channel.
+func (s *Service) PublishTrial(ctx context.Context, namespace, name string, expectedRevision int64, actor, note string) (Release, error) {
+	return s.publish(ctx, namespace, name, expectedRevision, actor, note, ReleaseChannelTrial)
+}
+
+func (s *Service) publish(ctx context.Context, namespace, name string, expectedRevision int64, actor, note string, channel ReleaseChannel) (Release, error) {
 	if err := validateCommand(namespace, actor); err != nil {
 		return Release{}, err
 	}
@@ -145,8 +174,17 @@ func (s *Service) Publish(ctx context.Context, namespace, name string, expectedR
 	if err != nil {
 		return Release{}, fmt.Errorf("compile release: %w", err)
 	}
-	if err := validatePublishable(manifest); err != nil {
-		return Release{}, err
+	switch channel {
+	case ReleaseChannelTrial:
+		if issues := publicationIssues(manifest, false); len(issues) > 0 {
+			return Release{}, fmt.Errorf("%w: %s", ErrNotPublishable, issues[0])
+		}
+	case ReleaseChannelCertified:
+		if err := validatePublishable(manifest); err != nil {
+			return Release{}, err
+		}
+	default:
+		return Release{}, fmt.Errorf("%w: unsupported release channel %q", ErrNotPublishable, channel)
 	}
 	activeReleaseID := ""
 	active, err := s.repository.GetActiveRelease(ctx, namespace, name)
@@ -163,8 +201,13 @@ func (s *Service) Publish(ctx context.Context, namespace, name string, expectedR
 	return s.repository.Publish(ctx, PublishInput{
 		Namespace: namespace, Name: name, ExpectedRevision: expectedRevision,
 		ExpectedActiveReleaseID: activeReleaseID,
-		ReleaseID:               id, Manifest: manifest, Actor: actor, Note: strings.TrimSpace(note),
+		ReleaseID:               id, Manifest: manifest, Channel: channel,
+		Actor: actor, Note: strings.TrimSpace(note),
 	})
+}
+
+func IsTrialRelease(release Release) bool {
+	return release.Channel == ReleaseChannelTrial
 }
 
 func (s *Service) Rollback(ctx context.Context, namespace, name, releaseID, actor, note string) (Release, error) {
@@ -180,6 +223,20 @@ func (s *Service) Rollback(ctx context.Context, namespace, name, releaseID, acto
 	})
 }
 
+// Deactivate removes the active pointer without deleting immutable releases.
+// A later rollback may deliberately reactivate a historical release.
+func (s *Service) Deactivate(ctx context.Context, namespace, name, actor, note string) (Release, error) {
+	if err := validateCommand(namespace, actor); err != nil {
+		return Release{}, err
+	}
+	if strings.TrimSpace(name) == "" || strings.TrimSpace(note) == "" {
+		return Release{}, fmt.Errorf("%w: name and deactivation note are required", ErrConflict)
+	}
+	return s.repository.Deactivate(ctx, DeactivateInput{
+		Namespace: namespace, Name: name, Actor: actor, Note: strings.TrimSpace(note),
+	})
+}
+
 func validatePublishable(manifest model.SemanticManifest) error {
 	issues := PublicationIssues(manifest)
 	if len(issues) > 0 {
@@ -191,9 +248,13 @@ func validatePublishable(manifest model.SemanticManifest) error {
 // PublicationIssues returns every missing governance field so a review UI can
 // explain the full correction set before the authoritative publish attempt.
 func PublicationIssues(manifest model.SemanticManifest) []string {
+	return publicationIssues(manifest, true)
+}
+
+func publicationIssues(manifest model.SemanticManifest, requireVerified bool) []string {
 	issues := make([]string, 0)
 	for _, metric := range manifest.Definitions.Metrics {
-		if metric.Verification.Status != model.VerificationVerified {
+		if requireVerified && metric.Verification.Status != model.VerificationVerified {
 			issues = append(issues, fmt.Sprintf("metric %q is not verified", metric.Name))
 		}
 		if strings.TrimSpace(metric.DisplayName) == "" {

@@ -238,10 +238,10 @@ func (s *Store) Publish(ctx context.Context, input catalog.PublishInput) (catalo
 	var createdAt time.Time
 	if err := tx.QueryRow(ctx, `
 INSERT INTO metricspire_releases
-    (namespace, model_name, release_id, source_revision, manifest_fingerprint, manifest, created_by, note)
-VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+    (namespace, model_name, release_id, source_revision, manifest_fingerprint, manifest, channel, created_by, note)
+VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)
 RETURNING created_at`, input.Namespace, input.Name, input.ReleaseID, input.ExpectedRevision,
-		input.Manifest.Fingerprint, payload, input.Actor, input.Note,
+		input.Manifest.Fingerprint, payload, input.Channel, input.Actor, input.Note,
 	).Scan(&createdAt); err != nil {
 		return catalog.Release{}, classify("insert release", err)
 	}
@@ -270,7 +270,8 @@ SET release_id = EXCLUDED.release_id, activated_by = EXCLUDED.activated_by, acti
 	return catalog.Release{
 		ID: input.ReleaseID, Namespace: input.Namespace, Name: input.Name,
 		SourceRevision: input.ExpectedRevision, ManifestFingerprint: input.Manifest.Fingerprint,
-		Manifest: input.Manifest, CreatedBy: input.Actor, Note: input.Note, CreatedAt: createdAt.UTC(),
+		Manifest: input.Manifest, Channel: input.Channel,
+		CreatedBy: input.Actor, Note: input.Note, CreatedAt: createdAt.UTC(),
 	}, nil
 }
 
@@ -288,16 +289,15 @@ func (s *Store) Activate(ctx context.Context, input catalog.ActivateInput) (cata
 	if err != nil {
 		return catalog.Release{}, err
 	}
-	if previous == "" {
-		return catalog.Release{}, catalog.ErrNotFound
-	}
 	if previous == input.ReleaseID {
 		return catalog.Release{}, catalog.ErrConflict
 	}
 	command, err := tx.Exec(ctx, `
-UPDATE metricspire_active_releases
-SET release_id = $3, activated_by = $4, activated_at = clock_timestamp()
-WHERE namespace = $1 AND model_name = $2`, input.Namespace, input.Name, input.ReleaseID, input.Actor)
+INSERT INTO metricspire_active_releases (namespace, model_name, release_id, activated_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (namespace, model_name) DO UPDATE
+SET release_id = EXCLUDED.release_id, activated_by = EXCLUDED.activated_by, activated_at = clock_timestamp()`,
+		input.Namespace, input.Name, input.ReleaseID, input.Actor)
 	if err != nil {
 		return catalog.Release{}, classify("activate release", err)
 	}
@@ -313,6 +313,41 @@ WHERE namespace = $1 AND model_name = $2`, input.Namespace, input.Name, input.Re
 	return release, nil
 }
 
+func (s *Store) Deactivate(ctx context.Context, input catalog.DeactivateInput) (catalog.Release, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return catalog.Release{}, fmt.Errorf("begin deactivation transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	previous, err := lockActive(ctx, tx, input.Namespace, input.Name)
+	if err != nil {
+		return catalog.Release{}, err
+	}
+	if previous == "" {
+		return catalog.Release{}, catalog.ErrNotFound
+	}
+	release, err := getRelease(ctx, tx, input.Namespace, input.Name, previous)
+	if err != nil {
+		return catalog.Release{}, err
+	}
+	command, err := tx.Exec(ctx, `
+DELETE FROM metricspire_active_releases
+WHERE namespace = $1 AND model_name = $2 AND release_id = $3`, input.Namespace, input.Name, previous)
+	if err != nil {
+		return catalog.Release{}, classify("deactivate release", err)
+	}
+	if command.RowsAffected() != 1 {
+		return catalog.Release{}, catalog.ErrConflict
+	}
+	if err := insertEvent(ctx, tx, input.Namespace, input.Name, catalog.EventDeactivated, previous, "", input.Actor, input.Note); err != nil {
+		return catalog.Release{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return catalog.Release{}, classify("commit deactivation", err)
+	}
+	return release, nil
+}
+
 func (s *Store) GetRelease(ctx context.Context, namespace, name, id string) (catalog.Release, error) {
 	return getRelease(ctx, s.pool, namespace, name, id)
 }
@@ -320,7 +355,7 @@ func (s *Store) GetRelease(ctx context.Context, namespace, name, id string) (cat
 func (s *Store) GetActiveRelease(ctx context.Context, namespace, name string) (catalog.Release, error) {
 	return scanRelease(s.pool.QueryRow(ctx, `
 SELECT r.release_id, r.namespace, r.model_name, r.source_revision, r.manifest_fingerprint,
-       r.manifest, r.created_by, r.note, r.created_at
+       r.manifest, r.channel, r.created_by, r.note, r.created_at
 FROM metricspire_active_releases a
 JOIN metricspire_releases r
   ON r.namespace = a.namespace AND r.model_name = a.model_name AND r.release_id = a.release_id
@@ -330,7 +365,7 @@ WHERE a.namespace = $1 AND a.model_name = $2`, namespace, name))
 func (s *Store) ListReleases(ctx context.Context, namespace, name string) ([]catalog.Release, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT release_id, namespace, model_name, source_revision, manifest_fingerprint,
-       manifest, created_by, note, created_at
+       manifest, channel, created_by, note, created_at
 FROM metricspire_releases
 WHERE namespace = $1 AND model_name = $2
 ORDER BY created_at, release_id`, namespace, name)
@@ -355,7 +390,7 @@ ORDER BY created_at, release_id`, namespace, name)
 func (s *Store) ListActiveReleases(ctx context.Context, namespace string) ([]catalog.Release, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT r.release_id, r.namespace, r.model_name, r.source_revision, r.manifest_fingerprint,
-       r.manifest, r.created_by, r.note, r.created_at
+       r.manifest, r.channel, r.created_by, r.note, r.created_at
 FROM metricspire_active_releases a
 JOIN metricspire_releases r
   ON r.namespace = a.namespace AND r.model_name = a.model_name AND r.release_id = a.release_id
@@ -382,7 +417,7 @@ ORDER BY r.model_name`, namespace)
 func (s *Store) ListEvents(ctx context.Context, namespace, name string) ([]catalog.ReleaseEvent, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT event_id, namespace, model_name, event_kind, COALESCE(from_release_id, ''),
-       to_release_id, actor, note, created_at
+       COALESCE(to_release_id, ''), actor, note, created_at
 FROM metricspire_release_events
 WHERE namespace = $1 AND model_name = $2
 ORDER BY event_id`, namespace, name)
@@ -419,7 +454,7 @@ type scanner interface {
 func getRelease(ctx context.Context, database queryRower, namespace, name, id string) (catalog.Release, error) {
 	return scanRelease(database.QueryRow(ctx, `
 SELECT release_id, namespace, model_name, source_revision, manifest_fingerprint,
-       manifest, created_by, note, created_at
+       manifest, channel, created_by, note, created_at
 FROM metricspire_releases
 WHERE namespace = $1 AND model_name = $2 AND release_id = $3`, namespace, name, id))
 }
@@ -429,7 +464,7 @@ func scanRelease(row scanner) (catalog.Release, error) {
 	var payload []byte
 	if err := row.Scan(
 		&release.ID, &release.Namespace, &release.Name, &release.SourceRevision,
-		&release.ManifestFingerprint, &payload, &release.CreatedBy, &release.Note, &release.CreatedAt,
+		&release.ManifestFingerprint, &payload, &release.Channel, &release.CreatedBy, &release.Note, &release.CreatedAt,
 	); errors.Is(err, pgx.ErrNoRows) {
 		return catalog.Release{}, catalog.ErrNotFound
 	} else if err != nil {
@@ -462,10 +497,14 @@ func insertEvent(ctx context.Context, tx pgx.Tx, namespace, name string, kind ca
 	if from != "" {
 		fromValue = from
 	}
+	var toValue any
+	if to != "" {
+		toValue = to
+	}
 	if _, err := tx.Exec(ctx, `
 INSERT INTO metricspire_release_events
     (namespace, model_name, event_kind, from_release_id, to_release_id, actor, note)
-VALUES ($1, $2, $3, $4, $5, $6, $7)`, namespace, name, kind, fromValue, to, actor, note); err != nil {
+VALUES ($1, $2, $3, $4, $5, $6, $7)`, namespace, name, kind, fromValue, toValue, actor, note); err != nil {
 		return classify("record release event", err)
 	}
 	return nil

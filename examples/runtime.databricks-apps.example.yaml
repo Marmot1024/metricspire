@@ -16,6 +16,10 @@ authentication:
     query_role: analyst
     # Members of this stable SCIM group ID additionally get model:manage.
     publisher_group_id: replace-with-publisher-group-id
+# Omit this block in production. Enabling it also requires the deployment-only
+# METRICSPIRE_TRIAL_RELEASES=approved-trial acknowledgement.
+release_policy:
+  trial_namespaces: [acceptance]
 policies:
   - namespace: acceptance
     model_name: tpch_orders

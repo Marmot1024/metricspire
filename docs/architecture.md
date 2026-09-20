@@ -41,7 +41,7 @@ This is portability by explicit translation, not a claim that all engines are eq
 
 ## Catalog lifecycle
 
-Drafts use optimistic revisions. Publication recompiles the exact expected revision, enforces required ownership/business/verification metadata, compares it with the active release, and inserts a new immutable release. A published metric code cannot disappear or change execution semantics silently; deprecation is explicit and irreversible. Rollback only changes the active pointer to an existing immutable release and records an event.
+Drafts use optimistic revisions. Publication recompiles the exact expected revision, enforces required ownership/business/verification metadata, compares it with the active release, and inserts a new immutable release. Releases carry a structured `certified` or `trial` channel; trial publication requires an explicit deployment allowlist and never changes an unverified definition to verified. A published metric code cannot disappear or change execution semantics silently; deprecation is explicit and irreversible. Rollback changes the active pointer to an existing immutable release. Deactivation removes that pointer without deleting release history. Both actions record events.
 
 Query execution resolves the active release on the server. A caller cannot select an unpublished manifest or stale fingerprint.
 

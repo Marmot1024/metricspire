@@ -85,7 +85,8 @@ func (r *MemoryRepository) Publish(_ context.Context, input PublishInput) (Relea
 	release := Release{
 		ID: input.ReleaseID, Namespace: input.Namespace, Name: input.Name,
 		SourceRevision: input.ExpectedRevision, ManifestFingerprint: input.Manifest.Fingerprint,
-		Manifest: clone(input.Manifest), CreatedBy: input.Actor, Note: input.Note, CreatedAt: now,
+		Manifest: clone(input.Manifest), Channel: input.Channel,
+		CreatedBy: input.Actor, Note: input.Note, CreatedAt: now,
 	}
 	previous := r.active[key]
 	r.releases[releaseKey(key, release.ID)] = release
@@ -93,6 +94,23 @@ func (r *MemoryRepository) Publish(_ context.Context, input PublishInput) (Relea
 	r.appendEvent(key, ReleaseEvent{
 		Namespace: input.Namespace, Name: input.Name, Kind: EventPublished,
 		FromReleaseID: previous, ToReleaseID: release.ID, Actor: input.Actor, Note: input.Note, CreatedAt: now,
+	})
+	return clone(release), nil
+}
+
+func (r *MemoryRepository) Deactivate(_ context.Context, input DeactivateInput) (Release, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := catalogKey(input.Namespace, input.Name)
+	previous := r.active[key]
+	if previous == "" {
+		return Release{}, ErrNotFound
+	}
+	release := r.releases[releaseKey(key, previous)]
+	delete(r.active, key)
+	r.appendEvent(key, ReleaseEvent{
+		Namespace: input.Namespace, Name: input.Name, Kind: EventDeactivated,
+		FromReleaseID: previous, Actor: input.Actor, Note: input.Note, CreatedAt: r.now().UTC(),
 	})
 	return clone(release), nil
 }

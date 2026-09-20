@@ -26,7 +26,7 @@ MetricSpire 是开源的语义指标服务。经评审的指标定义发布一�
 
 ## 已实现的能力
 
-- **受治理的目录：** PostgreSQL 保存带乐观版本控制的草稿、校验结果、不可变发布、生效指针、回滚及版本事件。
+- **受治理的目录：** PostgreSQL 保存带乐观版本控制的草稿、校验结果、不可变的 `trial`/`certified` 发布、生效或撤下状态、回滚及版本事件。
 - **可移植的语义：** 使用受约束的表达式和逻辑计划；环境相关的表与字段映射由经过评审的 `SourceBinding` 管理，不接受调用方传入原始 SQL。
 - **受控执行：** 查询前检查策略与引擎能力；Databricks SQL 适配器使用参数化语句、超时、取消、类型化结果、行数与字节限制，以及失败即关闭的审计。
 - **三个入口、一套服务：** 维护与查询界面、严格的 HTTP 管理/查询 API，以及七个远程 MCP 查询工具共用应用服务。
@@ -80,6 +80,7 @@ list_namespaces → search_metrics → explain_query → plan_query
 | [架构](docs/architecture.md) | 语义、身份、控制面与引擎适配器边界。 |
 | [HTTP 契约](docs/http-api.md) | 端点、权限、错误、限额及审计行为。 |
 | [开发状态](docs/development-status.md) | 预览版验收边界、未完成项与发布门槛。 |
+| [贡献指南](CONTRIBUTING.md) | 分支、PR、测试、迁移与数据安全规范。 |
 
 [文档索引](docs/README.md)区分对外指南和维护者专用的 staging 部署说明；阶段验收记录仅在本地保留，不混入公开产品文档。
 
