@@ -391,6 +391,40 @@ test("a stale catalog response cannot overwrite a newer namespace", async () => 
   assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalog.map((entry) => entry.name)"))), ["new_metric"]);
 });
 
+test("maintainer catalog renders published metrics before governance finishes", async () => {
+  const {context, run} = editorContext();
+  let finishPublished;
+  let finishGovernance;
+  context.requestJSON = (path) => new Promise((resolve) => {
+    if (path.includes("/catalog/search")) finishPublished = resolve;
+    else finishGovernance = resolve;
+  });
+  context.renderCatalog = () => {};
+  context.updateQueryBuilder = () => {};
+  run("state.context = {permissions: ['query:execute', 'model:manage'], models: []}; state.namespace = 'matchingstory'");
+  const loading = run("loadCatalog()");
+  finishPublished([{name: "daily_active_users", release_id: "rel_1"}]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalogView.map((entry) => entry.name)"))), ["daily_active_users"]);
+  assert.match(context.document.getElementById("notice").textContent, /正在补充治理状态/);
+  finishGovernance([]);
+  await loading;
+});
+
+test("governance failure preserves already rendered published metrics", async () => {
+  const {context, run} = editorContext();
+  context.requestJSON = async (path) => {
+    if (path.includes("/catalog/search")) return [{name: "daily_active_users", release_id: "rel_1"}];
+    throw {detail: "governance unavailable"};
+  };
+  context.renderCatalog = () => {};
+  context.updateQueryBuilder = () => {};
+  run("state.context = {permissions: ['query:execute', 'model:manage'], models: []}; state.namespace = 'matchingstory'");
+  await run("loadCatalog()");
+  assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalogView.map((entry) => entry.name)"))), ["daily_active_users"]);
+  assert.match(context.document.getElementById("notice").textContent, /治理状态暂时加载失败/);
+});
+
 test("new query failure clears old results and unlocks controls without retry", async () => {
   const {context, run} = editorContext();
   const table = context.document.getElementById("result-table");

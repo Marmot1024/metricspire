@@ -389,14 +389,43 @@ async function loadCatalog() {
   }
   const search = byID("catalog-search").value.trim();
   setNotice(hasPermission("model:manage") ? "正在读取已发布指标和治理目录…" : "正在读取当前业务域的已发布指标…");
+  const canQuery = hasPermission("query:execute");
+  const canManage = hasPermission("model:manage");
+  const publishedRequest = canQuery
+    ? requestJSON(`/api/v1/catalog/search?namespace=${escapePath(namespace)}&q=${encodeURIComponent(search)}&limit=100`)
+    : Promise.resolve([]);
+  const governanceRequest = canManage
+    ? requestJSON(`/api/v1/namespaces/${escapePath(namespace)}/governance/metrics?q=${encodeURIComponent(search)}&limit=1000`)
+    : Promise.resolve([]);
+  let published = [];
   try {
-    const publishedRequest = hasPermission("query:execute")
-      ? requestJSON(`/api/v1/catalog/search?namespace=${escapePath(namespace)}&q=${encodeURIComponent(search)}&limit=100`)
-      : Promise.resolve([]);
-    const governanceRequest = hasPermission("model:manage")
-      ? requestJSON(`/api/v1/namespaces/${escapePath(namespace)}/governance/metrics?q=${encodeURIComponent(search)}&limit=1000`)
-      : Promise.resolve([]);
-    const [published, governanceRecords] = await Promise.all([publishedRequest, governanceRequest]);
+    published = await publishedRequest;
+    if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
+    state.catalogView = mergeCatalogEntries(published, []);
+    state.catalog = state.catalogView.filter((metric) => metric.catalog_status !== "governance");
+    state.queryMetricKeys = new Set([...state.queryMetricKeys].filter((key) => state.catalog.some((metric) => metricKey(metric) === key)));
+    if (state.selectedCatalogIndex >= state.catalogView.length) state.selectedCatalogIndex = -1;
+    renderCatalog();
+    updateQueryBuilder();
+    if (!canManage) {
+      const elapsed = startedAt ? ` · ${Math.round(performance.now() - startedAt)}ms` : "";
+      setNotice(`已载入 ${published.length} 个已发布指标${elapsed}。选择指标查看口径与可用维度。`, "success");
+      return;
+    }
+    setNotice(`已显示 ${published.length} 个已发布指标，正在补充治理状态…`);
+  } catch (error) {
+    if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
+    if (!canManage) {
+      state.catalog = [];
+      state.catalogView = [];
+      renderCatalog();
+      updateQueryBuilder();
+      setNotice(errorMessage(error), "error");
+      return;
+    }
+  }
+  try {
+    const governanceRecords = await governanceRequest;
     if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
     const governed = governanceCatalogEntries(governanceRecords).filter((metric) => matchesCatalogSearch(metric, search));
     state.catalogView = mergeCatalogEntries(published, governed);
@@ -407,11 +436,13 @@ async function loadCatalog() {
     updateQueryBuilder();
     const counts = catalogStatusCounts(state.catalogView);
     const elapsed = startedAt ? ` · ${Math.round(performance.now() - startedAt)}ms` : "";
-    setNotice(hasPermission("model:manage")
-      ? `已载入 ${counts.published} 个已发布指标、${counts.draft} 个可试查定义和 ${counts.governance} 个待治理指标${elapsed}。`
-      : `已载入 ${published.length} 个已发布指标${elapsed}。选择指标查看口径与可用维度。`, "success");
+    setNotice(`已载入 ${counts.published} 个已发布指标、${counts.draft} 个可试查定义和 ${counts.governance} 个待治理指标${elapsed}。`, "success");
   } catch (error) {
     if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
+    if (published.length) {
+      setNotice(`已显示 ${published.length} 个已发布指标；治理状态暂时加载失败。${errorMessage(error)}`, "warning");
+      return;
+    }
     state.catalog = [];
     state.catalogView = [];
     renderCatalog();

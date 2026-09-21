@@ -17,13 +17,13 @@
 
       <nav id="workspace-tabs" class="side-nav" aria-label="主要功能" hidden>
         <button class="nav-item active" type="button" data-tab="catalog" aria-selected="true">
-          <span>01</span><strong>指标库</strong><small>发现可信指标</small>
+          <strong>指标目录</strong><small>搜索、理解与使用指标</small>
         </button>
         <button id="governance-tab" class="nav-item" type="button" data-tab="governance" aria-selected="false" hidden>
-          <span>02</span><strong>指标管理</strong><small>草稿、审查与发布</small>
+          <strong>指标治理</strong><small>草稿、审查与发布</small>
         </button>
-        <button id="query-tab" class="nav-item" type="button" data-tab="query" aria-selected="false" hidden>
-          <span>03</span><strong>查询验证</strong><small>生成规范请求</small>
+        <button id="query-tab" class="nav-item developer-nav" type="button" data-tab="query" aria-selected="false" hidden>
+          <strong>开发者工具</strong><small>验证查询与 API 请求</small>
         </button>
       </nav>
 
@@ -52,7 +52,7 @@
         <header class="page-heading">
           <div>
             <p class="eyebrow">可信指标目录</p>
-            <h1>指标库</h1>
+            <h1>指标目录</h1>
             <p>维护者可同时验收未发布草稿；只有已发布指标才能用于应用或 AI 查询。</p>
           </div>
           <span id="catalog-count" class="count-badge">0 个指标</span>
@@ -150,7 +150,7 @@
         <header class="page-heading with-control">
           <div>
             <p class="eyebrow">Metric registry</p>
-            <h1>指标管理</h1>
+            <h1>指标治理</h1>
             <p>先维护单条指标，再统一审查并发布。保存草稿不会影响正在使用的版本。</p>
           </div>
           <label for="governance-route">语义模型
