@@ -1,6 +1,6 @@
 # Development status and verification boundary
 
-As of **2026-09-20**, MetricSpire is a development preview, not a production-ready release. This page separates implemented behavior, real staging evidence, and work still needing acceptance. Environment-specific URLs, user identities, credentials, and private business schemas are intentionally omitted.
+As of **2026-09-21**, MetricSpire is a development preview, not a production-ready release. This page separates implemented behavior, real staging evidence, and work still needing acceptance. Environment-specific URLs, user identities, credentials, and private business schemas are intentionally omitted.
 
 | Area | Current evidence | Not yet established |
 | --- | --- | --- |
@@ -12,7 +12,7 @@ As of **2026-09-20**, MetricSpire is a development preview, not a production-rea
 
 The neutral fixture in [`testdata/acceptance/databricks-tpch`](../testdata/acceptance/databricks-tpch) is test data, not business-data certification. Trial publication of unverified definitions remains explicitly labeled, deployment-allowlisted, and separate from business verification.
 
-The pre-registered public OAuth client and exact redirect URI allowed a real Codex namespace tool call and query from a fresh process. This proves one user/client path, not universal onboarding, another user's permission isolation, automatic browser launch, current-thread hot reload, or automatic post-expiry refresh. A 2026-09-21 anonymous staging probe returned `401` at Databricks Apps ingress with no application-generated challenge header while the platform resource-metadata endpoint correctly advertised the API resource, workspace OIDC issuer, and the app's two identity scopes plus `sql`. This is consistent with the platform authenticating `/api/*` before MetricSpire receives the request; it does not justify a static-token fallback or broader OAuth scope. [MCP integration](mcp.md) explains the public connection boundary; the source-adjacent [Databricks Apps guide](../deploy/databricks-apps/README.md) is for staging maintainers.
+One user completed Codex OAuth and a real staging query. A separate anonymous probe confirmed that Databricks Apps rejects `/api/*` before MetricSpire receives the request while publishing valid OAuth resource metadata. This does not prove universal onboarding, hot reload, post-expiry refresh, or second-user isolation, and it does not justify a static-token fallback or broader scope. See [MCP integration](mcp.md).
 
 ## Release boundary
 
