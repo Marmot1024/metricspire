@@ -81,7 +81,7 @@
         <div class="catalog-layout">
           <div class="catalog-table-shell">
             <div class="catalog-table-head" aria-hidden="true">
-              <span>指标</span><span>计算口径</span><span>可用维度</span><span>状态</span><span>负责人</span>
+              <span>指标</span><span>计算逻辑</span><span>数据来源</span><span>状态</span>
             </div>
             <div id="catalog-list" class="catalog-list" role="table" aria-label="指标目录" aria-live="polite"></div>
           </div>
@@ -94,18 +94,40 @@
                   <h2 id="detail-name"></h2>
                   <code id="detail-code"></code>
                 </div>
-                <button id="detail-query-button" class="button primary" type="button">用于查询</button>
+                <button id="detail-query-button" class="button secondary compact" type="button">带入查询验证</button>
               </div>
-              <p id="detail-description" class="lead"></p>
+              <section class="detail-section definition-detail">
+                <h3>业务定义</h3>
+                <p id="detail-description" class="lead"></p>
+              </section>
               <section class="detail-section formula-detail">
-                <h3>计算口径</h3>
+                <div class="detail-section-heading"><h3>计算逻辑</h3><span id="detail-calculation-kind" class="detail-meta"></span></div>
                 <code id="detail-formula">尚未登记可执行口径</code>
+                <p id="detail-calculation-note" class="detail-note"></p>
+                <details id="detail-registered-formula-wrap" class="registered-formula" hidden>
+                  <summary>查看登记口径</summary>
+                  <code id="detail-registered-formula"></code>
+                </details>
+              </section>
+              <section class="detail-section source-detail">
+                <div class="detail-section-heading"><h3>数据来源</h3><span id="detail-source-state" class="detail-meta">正在解析</span></div>
+                <dl class="source-grid">
+                  <div><dt>语义模型</dt><dd id="detail-semantic-model"></dd></div>
+                  <div><dt>统计实体</dt><dd id="detail-entity"></dd></div>
+                  <div><dt>权威来源</dt><dd id="detail-authoritative-source"></dd></div>
+                  <div><dt>物理数据集</dt><dd id="detail-physical-source"></dd></div>
+                </dl>
+                <div id="detail-field-lineage" class="field-lineage"></div>
+                <p id="detail-fact-grain" class="detail-note"></p>
+                <div id="detail-source-evidence" class="source-evidence"></div>
               </section>
               <dl class="detail-grid">
                 <div><dt>负责人</dt><dd id="detail-owner"></dd></div>
                 <div><dt>返回类型</dt><dd id="detail-type"></dd></div>
                 <div><dt>当前版本</dt><dd id="detail-release"></dd></div>
                 <div><dt>时间口径</dt><dd id="detail-time"></dd></div>
+                <div><dt>验证状态</dt><dd id="detail-verification"></dd></div>
+                <div><dt>可用维度</dt><dd id="detail-dimension-count"></dd></div>
               </dl>
               <section class="detail-section">
                 <h3>可用维度</h3>

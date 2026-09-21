@@ -87,7 +87,7 @@ func (service *CatalogService) ResolveActiveModel(ctx context.Context, scope Que
 
 type MetricCatalogEntry struct {
 	Namespace           string                   `json:"namespace"`
-	ModelName           string                   `json:"-"`
+	ModelName           string                   `json:"semantic_model_name"`
 	ReleaseID           string                   `json:"release_id"`
 	ReleaseChannel      catalog.ReleaseChannel   `json:"release_channel"`
 	ManifestFingerprint string                   `json:"manifest_fingerprint"`
@@ -100,8 +100,11 @@ type MetricCatalogEntry struct {
 	Tags                []string                 `json:"tags,omitempty"`
 	UsageExamples       []string                 `json:"usage_examples,omitempty"`
 	Deprecated          bool                     `json:"deprecated"`
+	Entity              string                   `json:"entity"`
+	Kind                model.MetricKind         `json:"metric_kind"`
 	ValueType           model.DataType           `json:"value_type"`
 	Unit                string                   `json:"unit,omitempty"`
+	Expression          model.Expression         `json:"expression"`
 	AllowedDimensions   []string                 `json:"allowed_dimensions"`
 	DimensionDetails    []MetricDimensionEntry   `json:"dimension_details,omitempty"`
 	TimeDimension       string                   `json:"time_dimension,omitempty"`
@@ -227,7 +230,8 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 				DisplayName:  metric.DisplayName, Description: metric.Description, Owner: metric.Owner,
 				VerificationStatus: metric.Verification.Status,
 				Tags:               append([]string(nil), metric.Tags...), UsageExamples: append([]string(nil), metric.UsageExamples...), Deprecated: metric.Deprecated,
-				ValueType: metric.ValueType, Unit: metric.Unit,
+				Entity: metric.Entity, Kind: metric.Kind, ValueType: metric.ValueType, Unit: metric.Unit,
+				Expression:        metric.Expression,
 				AllowedDimensions: authorizedDimensions, DimensionDetails: dimensionDetails, TimeDimension: metric.TimeDimension,
 				TimeGranularities: granularities,
 			})

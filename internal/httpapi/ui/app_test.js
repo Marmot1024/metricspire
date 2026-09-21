@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const {catalogStatusCounts, catalogStatusLabel, compactDimensions, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricExpressionLabel, metricFilterLabel, planSummaryRows, preferredTimeGranularity, resolvePresetRange, sharedTimeMetadata, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
+const {catalogStatusCounts, catalogStatusLabel, catalogStatusShortLabel, compactDimensions, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, groupPublicationIssues, humanOwner, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricCalculationNote, metricDetailQuery, metricExpressionLabel, metricFilterLabel, planSummaryRows, preferredTimeGranularity, resolvePresetRange, sharedTimeMetadata, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
 const {execFileSync} = require("node:child_process");
 
 test("copied request preserves apostrophes and shell characters as literal JSON", () => {
@@ -30,11 +30,17 @@ test("maintainer catalog exposes unverified drafts without making them published
 
 test("published metric wins over a same-code draft in the catalog view", () => {
   const published = [{name: "iap_amount", release_id: "rel_1"}];
-  const drafts = [{name: "iap_amount", catalog_status: "draft"}, {name: "level_count", catalog_status: "draft"}];
-  assert.deepEqual(mergeCatalogEntries(published, drafts), [
-    {name: "iap_amount", release_id: "rel_1", catalog_status: "published"},
-    {name: "level_count", catalog_status: "draft"},
-  ]);
+  const drafts = [{name: "iap_amount", catalog_status: "draft", formula_summary: "SUM(amount)",
+    authoritative_source: {resource: "payments", field: "amount"}, fact_grain: "player + date"},
+  {name: "level_count", catalog_status: "draft"}];
+  const view = mergeCatalogEntries(published, drafts);
+  assert.equal(view.length, 2);
+  assert.equal(view[0].catalog_status, "published");
+  assert.equal(view[0].release_id, "rel_1");
+  assert.equal(view[0].formula_summary, "SUM(amount)");
+  assert.equal(view[0].authoritative_source.resource, "payments");
+  assert.equal(view[0].fact_grain, "player + date");
+  assert.equal(view[1].name, "level_count");
 });
 
 test("catalog status counts do not double count drafts shadowed by a published metric", () => {
@@ -64,6 +70,8 @@ test("trial metrics remain visibly business-unverified", () => {
   assert.equal(verificationLabel({verification: {status: "verified"}}), "口径已经验证");
   assert.equal(humanTag("business_type_atomic"), "原子指标");
   assert.equal(humanTag("governance_unverified"), "业务待验证");
+  assert.equal(catalogStatusShortLabel(metric), "试用");
+  assert.equal(humanOwner("pending_assignment"), "待分配");
 });
 
 test("query chooser shows selected metrics first and searches instead of listing the whole catalog", () => {
@@ -86,11 +94,35 @@ test("metric registry searches external codes and presents structured formulas",
   assert.equal(metricExpressionLabel({op: "divide", args: [{op: "metric", metric: "revenue"}, {op: "metric", metric: "buyers"}]}), "(revenue ÷ buyers)");
   assert.equal(metricFilterLabel({field: "order.status", operator: "in", values: ["paid", "refunded"]}), "order.status IN ('paid', 'refunded')");
   assert.equal(compactDimensions(["date", "country", "platform"]), "date · country · +1");
+  assert.equal(metricCalculationNote(metric), "去重计数字段 player.user_id；仅统计满足 payment.amount <> '0' 的记录。");
+});
+
+test("metric detail plan query uses a bounded calendar range without executing SQL", () => {
+  const query = metricDetailQuery({name: "daily_active_users", time_dimension: "date",
+    dimension_details: [{name: "date", calendar_timezone: "UTC"}]}, new Date("2026-09-21T08:00:00Z"));
+  assert.equal(query.api_version, "metricspire.io/v1alpha1");
+  assert.equal(query.kind, "SemanticQuery");
+  assert.deepEqual(query.metrics, ["daily_active_users"]);
+  assert.deepEqual(query.time_range, {
+    dimension: "date", start: "2026-09-20T00:00:00.000Z", end: "2026-09-21T00:00:00.000Z", timezone: "UTC",
+  });
+  assert.equal(query.limit, 1);
 });
 
 test("common authorization and time-grouping failures explain the recovery action", () => {
   assert.match(errorMessage({status: 403, request_id: "req_1"}), /权限组.*req_1/);
   assert.match(errorMessage({detail: "grouped time dimensions require explicit grouping semantics", request_id: "req_2"}), /选择按日、按周或按月.*req_2/);
+});
+
+test("publication issues are grouped by actionable cause instead of rendering an error wall", () => {
+  const groups = groupPublicationIssues([
+    'metric "revenue" is not verified', 'metric "orders" is not verified',
+    'metric "revenue" has no owner', 'metric "orders" has no verification evidence',
+  ]);
+  assert.deepEqual(groups.map((group) => [group.key, group.issues.length]), [
+    ["not_verified", 2], ["owner", 1], ["evidence", 1],
+  ]);
+  assert.deepEqual(groups[0].metrics, ["revenue", "orders"]);
 });
 
 test("governance catalog keeps all records but only marks executable definitions as draft previews", () => {
@@ -104,6 +136,7 @@ test("governance catalog keeps all records but only marks executable definitions
   assert.deepEqual(entries.map((entry) => entry.catalog_status), ["draft", "governance"]);
   assert.equal(entries[0].semantic_model_name, "daily");
   assert.equal(entries[1].semantic_model_name, "");
+  assert.equal(entries[0].authoritative_source, null);
 });
 
 test("time dimension has a deterministic safe grouping default", () => {

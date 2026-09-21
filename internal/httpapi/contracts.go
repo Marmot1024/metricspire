@@ -147,7 +147,7 @@ type Config struct {
 }
 
 // UIModelRoute is the small, non-secret route list required by the embedded
-// product UI. Physical bindings and policy contents are never exposed.
+// product UI. Physical bindings and policy contents are never exposed here.
 type UIModelRoute struct {
 	Namespace string `json:"namespace"`
 	ModelName string `json:"model_name"`

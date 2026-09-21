@@ -20,7 +20,7 @@ Portable self-hosting uses OIDC with browser PKCE sessions or a separately audie
 | `model:manage` | `GET /namespaces/{namespace}/models/{model}/releases` | List releases and active state. |
 | `model:manage` | `POST /namespaces/{namespace}/models/{model}/rollback` | Activate an existing immutable release. |
 | `model:manage` | `POST /namespaces/{namespace}/models/{model}/deactivate` | Remove the active pointer while retaining immutable history and an audit event. |
-| `query:execute` | `GET /catalog/search?namespace=...&q=...&limit=...` | Search authorized active metrics. |
+| `query:execute` | `GET /catalog/search?namespace=...&q=...&limit=...` | Search authorized active metrics and their governed semantic definitions. |
 | `query:execute` | `POST /namespaces/{namespace}/explain` | Return an authorized logical plan; no engine call. |
 | `query:execute` | `POST /namespaces/{namespace}/plan` | Return logical and physical plans; no engine call. |
 | `query:execute` | `POST /namespaces/{namespace}/query` | Submit an asynchronous bounded query; returns `202`. |
@@ -28,6 +28,8 @@ Portable self-hosting uses OIDC with browser PKCE sessions or a separately audie
 | `query:execute` | `POST /jobs/{job}/cancel` | Cancel an owned job. |
 
 Model-scoped explain, plan, and query routes exist for existing clients; new clients should use the metric-first namespace routes. `GET /health/live` and `GET /health/ready` are unauthenticated probes outside `/api/v1`; readiness checks PostgreSQL, not warehouse access.
+
+Catalog search returns the semantic model name, entity, typed metric expression, dimensions, time contract, ownership, and verification metadata that an authorized user needs to understand a metric. It deliberately omits the trusted source binding and physical resource. A client that needs table and column lineage should send a bounded semantic query to `POST /namespaces/{namespace}/plan`; planning resolves the authorized binding and returns the physical plan without executing SQL or contacting the analytical engine.
 
 ## Request, result, and audit limits
 

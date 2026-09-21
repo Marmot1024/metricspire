@@ -73,7 +73,8 @@ func TestCatalogSearchReturnsOnlyAuthorizedMetricsFromActiveReleases(t *testing.
 	if len(results) != 1 || results[0].Name != "refund_rate" || results[0].ExternalCode != "1007" || len(results[0].AllowedDimensions) != 1 || results[0].AllowedDimensions[0] != "order_date" ||
 		results[0].TimeDimension != "order_date" || len(results[0].TimeGranularities) != 3 || len(results[0].UsageExamples) != 1 ||
 		len(results[0].DimensionDetails) != 1 || results[0].DimensionDetails[0].Name != "order_date" ||
-		results[0].DimensionDetails[0].Description == "" || results[0].DimensionDetails[0].DataType != model.DataTypeTimestamp {
+		results[0].DimensionDetails[0].Description == "" || results[0].DimensionDetails[0].DataType != model.DataTypeTimestamp ||
+		results[0].ModelName != source.Metadata.Name || results[0].Entity == "" || results[0].Expression.Op == "" {
 		t.Fatalf("authorized catalog = %#v", results)
 	}
 	results, err = service.SearchActive(context.Background(), application.QueryScope{

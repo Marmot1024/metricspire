@@ -7,6 +7,8 @@ const state = {
   catalog: [],
   catalogView: [],
   catalogLoadSequence: 0,
+  metricDetailSequence: 0,
+  metricPlanCache: new Map(),
   selectedCatalogIndex: -1,
   queryMetricKeys: new Set(),
   filters: [],
@@ -112,6 +114,7 @@ function draftCatalogEntries(route, draft) {
     return {
       ...metric,
       namespace: route.namespace,
+      semantic_model_name: route.model_name,
       catalog_status: "draft",
       release_id: "",
       time_granularities: time?.time_granularities || [],
@@ -145,7 +148,16 @@ function governanceCatalogEntries(records, drafts = []) {
       semantic_readiness: definition.semantic_readiness,
       semantic_model_name: definition.semantic_model_name || "",
       business_type: definition.business_type,
+      origin: definition.origin || "",
+      calculation_kind: definition.calculation_kind || "",
       formula_summary: definition.serving_formula || definition.documented_formula || "",
+      documented_formula: definition.documented_formula || "",
+      serving_formula: definition.serving_formula || "",
+      authoritative_source: definition.authoritative_source || null,
+      source_references: definition.source_references || [],
+      fact_grain: definition.fact_grain || "",
+      readiness_reason: definition.readiness_reason || "",
+      owner_status: definition.owner_status || "",
       issues: definition.issues || [],
       governance_revision: record.revision,
       source_import_id: record.source_import_id,
@@ -155,9 +167,25 @@ function governanceCatalogEntries(records, drafts = []) {
 }
 
 function mergeCatalogEntries(published, drafts) {
+  const draftsByCode = new Map(drafts.map((metric) => [metricKey(metric), metric]));
   const publishedCodes = new Set(published.map(metricKey));
   return [
-    ...published.map((metric) => ({...metric, catalog_status: "published"})),
+    ...published.map((metric) => {
+      const governed = draftsByCode.get(metricKey(metric)) || {};
+      return {
+        ...governed,
+        ...metric,
+        formula_summary: metric.formula_summary || governed.formula_summary || "",
+        authoritative_source: metric.authoritative_source || governed.authoritative_source || null,
+        source_references: metric.source_references || governed.source_references || [],
+        fact_grain: metric.fact_grain || governed.fact_grain || "",
+        calculation_kind: metric.calculation_kind || governed.calculation_kind || "",
+        origin: metric.origin || governed.origin || "",
+        readiness_reason: metric.readiness_reason || governed.readiness_reason || "",
+        owner_status: metric.owner_status || governed.owner_status || "",
+        catalog_status: "published",
+      };
+    }),
     ...drafts.filter((metric) => !publishedCodes.has(metricKey(metric))),
   ];
 }
@@ -188,6 +216,17 @@ function catalogStatusLabel(metric) {
   return isBusinessUnverified(metric) ? "已发布 · 业务待验证" : "已发布";
 }
 
+function catalogStatusShortLabel(metric) {
+  if (metric.catalog_status === "draft") return "草稿";
+  if (metric.catalog_status === "governance") return "待治理";
+  if (metric.deprecated) return "已弃用";
+  return isBusinessUnverified(metric) ? "试用" : "线上";
+}
+
+function humanOwner(owner) {
+  return !owner || owner === "pending_assignment" ? "待分配" : owner;
+}
+
 function verificationLabel(metric) {
   return isBusinessUnverified(metric) ? "技术试查证据已登记" : "口径已经验证";
 }
@@ -202,9 +241,16 @@ function humanTag(tag) {
   })[tag] || tag;
 }
 
+function humanCalculationKind(metric) {
+  const kind = metric.calculation_kind || metric.metric_kind || metric.kind || "";
+  return ({aggregate: "聚合指标", ratio: "比率指标", derived: "派生指标"})[kind] || "结构化指标";
+}
+
 function matchesCatalogSearch(metric, search) {
   if (!search) return true;
-  const text = [metric.external_code, metric.name, metric.display_name, metric.description, metric.owner, ...(metric.tags || [])]
+  const text = [metric.external_code, metric.name, metric.display_name, metric.description, metric.owner,
+    metric.semantic_model_name, metric.authoritative_source?.resource, metric.authoritative_source?.field,
+    metric.formula_summary, ...(metric.tags || [])]
     .filter(Boolean).join(" ").toLocaleLowerCase();
   return text.includes(search.toLocaleLowerCase());
 }
@@ -316,6 +362,7 @@ async function switchNamespace(namespace) {
   state.catalog = [];
   state.catalogView = [];
   state.selectedCatalogIndex = -1;
+  state.metricPlanCache.clear();
   state.queryMetricKeys.clear();
   byID("query-metric-search").value = "";
   state.filters = [];
@@ -363,7 +410,6 @@ async function loadCatalog() {
     setNotice(hasPermission("model:manage")
       ? `已载入 ${counts.published} 个已发布指标、${counts.draft} 个可试查定义和 ${counts.governance} 个待治理指标${elapsed}。`
       : `已载入 ${published.length} 个已发布指标${elapsed}。选择指标查看口径与可用维度。`, "success");
-    if (hasPermission("model:manage")) hydrateDraftCatalog(loadSequence, namespace, search, published, governanceRecords, startedAt);
   } catch (error) {
     if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
     state.catalog = [];
@@ -372,40 +418,6 @@ async function loadCatalog() {
     updateQueryBuilder();
     setNotice(errorMessage(error), "error");
   }
-}
-
-async function hydrateDraftCatalog(loadSequence, namespace, search, published, governanceRecords, startedAt) {
-  try {
-    const drafts = await loadDraftCatalog("", namespace);
-    if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
-    const governed = governanceCatalogEntries(governanceRecords, drafts).filter((metric) => matchesCatalogSearch(metric, search));
-    const selectedCode = state.catalogView[state.selectedCatalogIndex]?.name || "";
-    state.catalogView = mergeCatalogEntries(published, governed);
-    state.catalog = state.catalogView.filter((metric) => metric.catalog_status !== "governance");
-    state.selectedCatalogIndex = Math.max(0, state.catalogView.findIndex((metric) => metric.name === selectedCode));
-    renderCatalog();
-    updateQueryBuilder();
-    const counts = catalogStatusCounts(state.catalogView);
-    const elapsed = startedAt ? ` · ${Math.round(performance.now() - startedAt)}ms` : "";
-    setNotice(`已载入 ${counts.published} 个已发布指标、${counts.draft} 个可试查定义和 ${counts.governance} 个待治理指标；草稿口径已补全${elapsed}。`, "success");
-  } catch (error) {
-    if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
-    setNotice(`指标目录已可用，但草稿口径补全失败：${errorMessage(error)}`, "warning");
-  }
-}
-
-async function loadDraftCatalog(search, namespace = state.namespace) {
-  const routes = (state.context.models || []).filter((route) => route.namespace === namespace);
-  const drafts = await Promise.all(routes.map(async (route) => {
-    try {
-      const draft = await requestJSON(routePath(route, "draft"));
-      return draftCatalogEntries(route, draft);
-    } catch (error) {
-      if (error?.status === 404) return [];
-      throw error;
-    }
-  }));
-  return drafts.flat().filter((metric) => matchesCatalogSearch(metric, search));
 }
 
 function renderCatalog() {
@@ -448,22 +460,20 @@ function renderCatalog() {
     const formula = document.createElement("code");
     formula.className = "catalog-formula";
     formula.textContent = metricFormulaLabel(metric);
-    const dimensions = document.createElement("span");
-    dimensions.className = "catalog-dimensions";
-    dimensions.textContent = compactDimensions(metric.allowed_dimensions);
-    dimensions.title = (metric.allowed_dimensions || []).join(" · ");
+    formula.title = metricFormulaLabel(metric);
+    const source = document.createElement("span");
+    source.className = "catalog-source";
+    source.textContent = metric.authoritative_source?.resource || metric.semantic_model_name || metric.entity || "来源待补充";
+    source.title = [metric.semantic_model_name, metric.authoritative_source?.resource, metric.authoritative_source?.field].filter(Boolean).join(" · ");
     const status = document.createElement("span");
-    const statusLabel = catalogStatusLabel(metric);
+    const statusLabel = catalogStatusShortLabel(metric);
     status.className = `badge catalog-row-status${metric.catalog_status !== "published" || metric.deprecated || isBusinessUnverified(metric) ? " warning" : ""}`;
     status.textContent = statusLabel;
-    const owner = document.createElement("span");
-    owner.className = "catalog-owner";
-    owner.textContent = metric.owner || "未指定";
-    button.append(heading, formula, dimensions, status, owner);
+    status.title = catalogStatusLabel(metric);
+    button.append(heading, formula, source, status);
     button.addEventListener("click", () => {
       state.selectedCatalogIndex = index;
       renderCatalog();
-      renderMetricDetail(metric);
     });
     list.append(button);
   });
@@ -479,6 +489,7 @@ function renderCatalog() {
 function renderMetricDetail(metric) {
   byID("metric-detail-empty").hidden = Boolean(metric);
   byID("metric-detail-content").hidden = !metric;
+  const sequence = ++state.metricDetailSequence;
   if (!metric) return;
   const draft = metric.catalog_status === "draft";
   const pending = metric.catalog_status === "governance";
@@ -487,14 +498,32 @@ function renderMetricDetail(metric) {
   byID("detail-status").className = `badge${draft || pending || metric.deprecated || businessUnverified ? " warning" : ""}`;
   byID("detail-name").textContent = metric.display_name || metric.name;
   byID("detail-code").textContent = [metric.external_code ? `#${metric.external_code}` : "", metric.name].filter(Boolean).join(" · ");
-  byID("detail-description").textContent = metric.description || "暂无业务定义。";
-  byID("detail-formula").textContent = metricFormulaLabel(metric);
-  byID("detail-owner").textContent = metric.owner || "未指定";
+  byID("detail-description").textContent = metric.description || "业务定义待补充：尚未说明统计对象、时间边界和排除条件。";
+  const normalizedFormula = metricFormulaLabel(metric);
+  byID("detail-formula").textContent = normalizedFormula;
+  byID("detail-calculation-kind").textContent = humanCalculationKind(metric);
+  byID("detail-calculation-note").textContent = metricCalculationNote(metric);
+  const registeredFormula = metric.serving_formula || metric.documented_formula || metric.formula_summary || "";
+  const showRegisteredFormula = Boolean(registeredFormula && registeredFormula !== normalizedFormula);
+  byID("detail-registered-formula-wrap").hidden = !showRegisteredFormula;
+  byID("detail-registered-formula").textContent = showRegisteredFormula ? registeredFormula : "";
+  byID("detail-owner").textContent = humanOwner(metric.owner);
   byID("detail-type").textContent = humanType(metric.value_type, metric.unit);
   byID("detail-release").textContent = draft ? "尚未发布 · 可试查" : pending ? "尚无安全查询定义" : metric.release_id;
   byID("detail-time").textContent = metric.time_dimension
     ? `${metric.time_dimension} · ${(metric.time_granularities || []).map(humanGrain).join("/") || "未配置粒度"}${metricTimeDetail(metric)?.calendar_timezone ? ` · ${metricTimeDetail(metric).calendar_timezone} 日历` : ""}`
     : "非时间限定指标";
+  byID("detail-verification").textContent = pending ? "尚未形成可执行定义" : verificationLabel(metric);
+  byID("detail-dimension-count").textContent = `${(metric.allowed_dimensions || []).length} 个`;
+  byID("detail-semantic-model").textContent = metric.semantic_model_name || "待补充";
+  byID("detail-entity").textContent = metric.entity || "待补充";
+  const authoritative = metric.authoritative_source || {};
+  byID("detail-authoritative-source").textContent = [authoritative.resource, authoritative.field].filter(Boolean).join(" · ") || "待补充";
+  byID("detail-physical-source").textContent = pending ? "尚未绑定" : "正在解析…";
+  byID("detail-source-state").textContent = pending ? "待治理" : "正在解析";
+  byID("detail-field-lineage").replaceChildren();
+  byID("detail-fact-grain").textContent = metric.fact_grain ? `事实粒度：${metric.fact_grain}` : "事实粒度待补充。";
+  renderSourceEvidence(metric.source_references || [], authoritative);
   const dimensions = byID("detail-dimensions");
   dimensions.replaceChildren();
   for (const dimension of metric.allowed_dimensions) appendChip(dimensions, dimension);
@@ -511,9 +540,100 @@ function renderMetricDetail(metric) {
     examples.append(item);
   }
   if (!(metric.usage_examples || []).length) examples.textContent = "维护者尚未提供常见使用示例。";
-  byID("detail-query-button").textContent = draft ? "草稿试查" : pending ? "暂不可查询" : "用于查询";
+  byID("detail-query-button").textContent = draft ? "带入草稿试查" : pending ? "暂不可查询" : "带入查询验证";
   byID("detail-query-button").disabled = pending || metric.deprecated || !hasPermission("query:execute") || (draft && !hasPermission("model:manage"));
   byID("detail-query-button").onclick = () => addMetricToQuery(metric);
+  if (!pending && (hasPermission("query:execute") || (draft && hasPermission("model:manage")))) loadMetricLineage(metric, sequence);
+}
+
+function metricCalculationNote(metric) {
+  const expression = metric.expression || {};
+  if (!expression.op) return metric.formula_summary ? "这是治理登记口径；形成可执行定义后会补充字段级解释。" : "计算逻辑待补充。";
+  const aggregateLabels = {sum: "求和", count: "计数", count_distinct: "去重计数", avg: "求平均", min: "取最小值", max: "取最大值"};
+  if (aggregateLabels[expression.op]) {
+    const filters = (expression.filters || []).map(metricFilterLabel);
+    return `${aggregateLabels[expression.op]}字段 ${expression.field || "*"}${filters.length ? `；仅统计满足 ${filters.join(" 且 ")} 的记录` : "；不附加指标级条件"}。`;
+  }
+  return `由结构化表达式 ${metricExpressionLabel(expression)} 计算；指标引用会在计划阶段解析为固定发布版本。`;
+}
+
+function renderSourceEvidence(references, authoritative = {}) {
+  const container = byID("detail-source-evidence");
+  container.replaceChildren();
+  const evidence = [...references];
+  if (authoritative.reference && !evidence.some((item) => item.reference === authoritative.reference)) evidence.unshift(authoritative);
+  if (!evidence.length) {
+    container.textContent = "尚未登记来源证据。";
+    return;
+  }
+  const title = document.createElement("strong");
+  title.textContent = "来源证据";
+  container.append(title);
+  for (const reference of evidence.slice(0, 4)) {
+    const item = document.createElement("p");
+    item.textContent = [reference.reference, reference.resource, reference.field].filter(Boolean).join(" · ");
+    container.append(item);
+  }
+}
+
+function metricDetailQuery(metric, now = new Date()) {
+  const query = {api_version: "metricspire.io/v1alpha1", kind: "SemanticQuery", metrics: [metric.name], limit: 1};
+  if (metric.time_dimension) {
+    const timezone = metricTimeDetail(metric)?.calendar_timezone || "UTC";
+    const range = resolvePresetRange("yesterday", timezone, now);
+    query.time_range = {dimension: metric.time_dimension, start: range.start, end: range.end, timezone};
+  }
+  return query;
+}
+
+function metricDetailPlanPath(metric) {
+  if (metric.catalog_status !== "draft") return publicQueryPath("plan");
+  const route = (state.context.models || []).find((candidate) => candidate.namespace === metric.namespace && candidate.model_name === metric.semantic_model_name);
+  if (!route) throw new Error("当前草稿没有可用的语义模型路由。");
+  return routePath(route, "draft-plan");
+}
+
+function renderMetricLineage(result) {
+  const physical = result.physical_plan || {};
+  const root = physical.root || {};
+  byID("detail-source-state").textContent = "执行计划已解析";
+  byID("detail-physical-source").textContent = resourceLabel(root.resource || {}) || root.name || "未解析到物理数据集";
+  const lineage = byID("detail-field-lineage");
+  lineage.replaceChildren();
+  const seen = new Set();
+  for (const field of physical.metric_fields || []) {
+    const logical = [field.entity, field.field].filter(Boolean).join(".");
+    const physicalField = [resourceLabel(field.resource || {}), field.column].filter(Boolean).join(".");
+    const key = `${logical}\u0000${physicalField}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const row = document.createElement("div");
+    const from = document.createElement("code");
+    from.textContent = logical || "逻辑字段";
+    const arrow = document.createElement("span");
+    arrow.textContent = "→";
+    const to = document.createElement("code");
+    to.textContent = physicalField || "物理字段待解析";
+    row.append(from, arrow, to);
+    lineage.append(row);
+  }
+}
+
+async function loadMetricLineage(metric, sequence) {
+  const key = [metric.catalog_status, metric.release_id, metric.semantic_model_name, metric.name].join(":");
+  try {
+    let result = state.metricPlanCache.get(key);
+    if (!result) {
+      result = await requestJSON(metricDetailPlanPath(metric), {method: "POST", body: JSON.stringify(metricDetailQuery(metric))});
+      state.metricPlanCache.set(key, result);
+    }
+    if (sequence !== state.metricDetailSequence) return;
+    renderMetricLineage(result);
+  } catch (error) {
+    if (sequence !== state.metricDetailSequence) return;
+    byID("detail-source-state").textContent = "物理来源暂不可用";
+    byID("detail-physical-source").textContent = errorMessage(error);
+  }
 }
 
 function addMetricToQuery(metric) {
@@ -1463,12 +1583,35 @@ function requireAppliedEditor() {
   return false;
 }
 
+function groupPublicationIssues(issues = []) {
+  const rules = [
+    {pattern: /^metric "([^"]+)" is not verified$/, key: "not_verified", label: "业务验证待完成"},
+    {pattern: /^metric "([^"]+)" has no display name$/, key: "display_name", label: "缺少中文名称"},
+    {pattern: /^metric "([^"]+)" has no business definition$/, key: "description", label: "缺少业务定义"},
+    {pattern: /^metric "([^"]+)" has no owner$/, key: "owner", label: "缺少负责人"},
+    {pattern: /^metric "([^"]+)" has no verification evidence$/, key: "evidence", label: "缺少验证证据"},
+    {pattern: /^metric "([^"]+)" has empty verification evidence$/, key: "empty_evidence", label: "存在空验证证据"},
+  ];
+  const groups = new Map();
+  for (const issue of issues) {
+    const rule = rules.find((candidate) => candidate.pattern.test(issue));
+    const match = rule?.pattern.exec(issue);
+    const key = rule?.key || issue;
+    if (!groups.has(key)) groups.set(key, {key, label: rule?.label || "其他发布问题", metrics: [], issues: []});
+    const group = groups.get(key);
+    if (match?.[1]) group.metrics.push(match[1]);
+    group.issues.push(issue);
+  }
+  return [...groups.values()];
+}
+
 function renderReview() {
   const review = state.review;
   if (!review) return;
   const changes = review.metric_changes || [];
   const breaking = changes.filter((change) => change.breaking);
   const issues = review.publication_issues || [];
+  const issueGroups = groupPublicationIssues(issues);
   byID("active-release-value").textContent = review.active_release?.id || "尚未发布";
   byID("active-release-meta").textContent = review.active_release
     ? `revision ${review.active_release.source_revision} · ${review.active_release.manifest_fingerprint.slice(0, 18)}…`
@@ -1476,7 +1619,7 @@ function renderReview() {
   byID("binding-status-value").textContent = review.binding.status === "ready" ? "完整" : review.binding.status === "missing" ? "未配置" : "需处理";
   byID("binding-status-meta").textContent = review.binding.message;
   setStatus("review-status", issues.length
-    ? `发布前还需修正 ${issues.length} 项指标信息。`
+    ? `发布前还需处理 ${issues.length} 项问题，已归并为 ${issueGroups.length} 类。`
     : review.structure_changed
       ? "候选内容修改了内部模型结构，不能从简化页面直接发布。"
       : !changes.length
@@ -1500,13 +1643,16 @@ function renderReview() {
     card.append(title, meta);
     list.append(card);
   }
-  for (const issue of issues) {
+  for (const group of issueGroups) {
     const card = document.createElement("article");
     card.className = "change-card";
     const title = document.createElement("strong");
-    title.textContent = "发布信息不完整";
+    title.textContent = `${group.label} · ${group.issues.length} 项`;
     const meta = document.createElement("small");
-    meta.textContent = issue;
+    const preview = group.metrics.slice(0, 8);
+    meta.textContent = preview.length
+      ? `影响指标：${preview.join("、")}${group.metrics.length > preview.length ? `，另有 ${group.metrics.length - preview.length} 项` : ""}`
+      : group.issues[0];
     card.append(title, meta);
     list.append(card);
   }
@@ -1826,6 +1972,6 @@ async function initialize() {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = {catalogStatusCounts, catalogStatusLabel, compactDimensions, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricExpressionLabel, metricFilterLabel, metricFormulaLabel, metricTimeDetail, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, sharedTimeMetadata, shiftDate, timezoneParts, verificationLabel, zonedMidnightISO, shellQuote};
+  module.exports = {catalogStatusCounts, catalogStatusLabel, catalogStatusShortLabel, compactDimensions, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, groupPublicationIssues, humanOwner, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricCalculationNote, metricDetailQuery, metricExpressionLabel, metricFilterLabel, metricFormulaLabel, metricTimeDetail, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, sharedTimeMetadata, shiftDate, timezoneParts, verificationLabel, zonedMidnightISO, shellQuote};
 }
 if (typeof document !== "undefined") initialize();

@@ -797,8 +797,11 @@ func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(data, []byte("resource")) || bytes.Contains(data, []byte("expression")) || bytes.Contains(data, []byte("model_name")) {
+	if bytes.Contains(data, []byte("resource")) || bytes.Contains(data, []byte("physical")) {
 		t.Fatalf("catalog response leaked execution details: %s", data)
+	}
+	if !bytes.Contains(data, []byte("expression")) || !bytes.Contains(data, []byte("semantic_model_name")) {
+		t.Fatalf("catalog response hid the governed semantic definition: %s", data)
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/", nil)
