@@ -11,6 +11,7 @@ const state = {
   catalogCursor: "",
   catalogCounts: null,
   catalogIncomplete: false,
+  catalogLoading: false,
   queryCatalog: new Map(),
   metricDetailSequence: 0,
   metricPlanCache: new Map(),
@@ -204,6 +205,12 @@ function catalogStatusCounts(metrics) {
   }, {published: 0, draft: 0, governance: 0});
 }
 
+function catalogVisibleTotal(counts, status) {
+  if (status === "governance") return counts.governance;
+  if (status === "queryable") return counts.published + counts.draft;
+  return counts.total ?? counts.published + counts.draft + counts.governance;
+}
+
 function filterCatalogEntries(metrics, status = "queryable") {
   if (status === "all") return metrics;
   if (status === "governance") return metrics.filter((metric) => metric.catalog_status === "governance");
@@ -369,6 +376,7 @@ async function switchNamespace(namespace) {
   state.catalogCounts = null;
   state.catalogIncomplete = false;
   state.catalogCursor = "";
+  state.catalogLoading = true;
   state.selectedCatalogIndex = -1;
   state.metricPlanCache.clear();
   state.queryMetricKeys.clear();
@@ -394,6 +402,7 @@ async function loadCatalog(more = false) {
   const namespace = state.namespace;
   const startedAt = typeof performance !== "undefined" && performance.now ? performance.now() : 0;
   if (!state.namespace || (!hasPermission("query:execute") && !hasPermission("model:manage"))) {
+    state.catalogLoading = false;
     state.catalog = [];
     state.catalogView = [];
     renderCatalog();
@@ -402,6 +411,7 @@ async function loadCatalog(more = false) {
   const search = byID("catalog-search").value.trim();
   const status = byID("catalog-status-filter").value || "queryable";
   if (!more) {
+    state.catalogLoading = true;
     state.catalogCursor = "";
     state.catalogCounts = null;
     state.catalogIncomplete = false;
@@ -421,15 +431,18 @@ async function loadCatalog(more = false) {
     state.catalogCounts = page.counts;
     state.catalogIncomplete = Boolean(page.incomplete);
     state.catalogCursor = page.next_cursor || "";
+    state.catalogLoading = false;
     state.catalog = state.catalogView.filter((metric) => metric.catalog_status !== "governance");
     for (const metric of state.catalog) state.queryCatalog.set(metricKey(metric), metric);
     if (state.selectedCatalogIndex >= state.catalogView.length) state.selectedCatalogIndex = -1;
     renderCatalog();
     updateQueryBuilder();
     const elapsed = startedAt ? ` · ${Math.round(performance.now() - startedAt)}ms` : "";
-    setNotice(`已显示 ${state.catalogView.length} / ${page.incomplete ? "至少 " : ""}${page.counts.total} 个指标${elapsed}${page.incomplete ? "；目录达到服务端扫描上限，请缩小搜索范围。" : "。"}`, page.incomplete ? "warning" : "success");
+    setNotice(`已显示 ${state.catalogView.length} / ${page.incomplete ? "至少 " : ""}${catalogVisibleTotal(page.counts, status)} 个指标${elapsed}${page.incomplete ? "；目录达到服务端扫描上限，请缩小搜索范围。" : "。"}`, page.incomplete ? "warning" : "success");
   } catch (error) {
     if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
+    state.catalogLoading = false;
+    if (!more) renderCatalog();
     if (error?.name !== "AbortError") setNotice(errorMessage(error), "error");
   } finally {
     if (loadSequence === state.catalogLoadSequence) byID("catalog-more").disabled = false;
@@ -441,16 +454,17 @@ function renderCatalog() {
   const {published: publishedCount, draft: draftCount, governance: governanceCount} = counts;
   const statusFilter = byID("catalog-status-filter").value || "queryable";
   const visibleEntries = filterCatalogEntries(state.catalogView, statusFilter);
+  const visibleTotal = catalogVisibleTotal(counts, statusFilter);
   byID("catalog-more").hidden = !state.catalogCursor;
   byID("catalog-count").textContent = publishedCount || draftCount || governanceCount
-    ? `显示 ${visibleEntries.length} / ${state.catalogIncomplete ? "至少 " : ""}${counts.total || state.catalogView.length} · ${publishedCount} 已发布 · ${draftCount} 可试查 · ${governanceCount} 待治理`
+    ? `显示 ${visibleEntries.length} / ${state.catalogIncomplete ? "至少 " : ""}${visibleTotal} · ${publishedCount} 已发布 · ${draftCount} 可试查 · ${governanceCount} 待治理`
     : `${state.catalogView.length} 个指标`;
   const list = byID("catalog-list");
   list.replaceChildren();
   if (!visibleEntries.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = state.catalogView.length
+    empty.textContent = state.catalogLoading ? "正在搜索指标目录…" : state.catalogView.length
       ? "当前状态筛选下没有匹配指标。请切换显示状态或调整搜索词。"
       : hasPermission("model:manage")
         ? "没有找到匹配的已发布指标或草稿。请确认业务域、搜索词和草稿录入情况。"
@@ -1991,6 +2005,6 @@ async function initialize() {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = {catalogStatusCounts, catalogStatusLabel, catalogStatusShortLabel, compactDimensions, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, groupPublicationIssues, humanOwner, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricCalculationNote, metricDetailQuery, metricExpressionLabel, metricFilterLabel, metricFormulaLabel, metricTimeDetail, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, sharedTimeMetadata, shiftDate, timezoneParts, verificationLabel, zonedMidnightISO, shellQuote};
+  module.exports = {catalogStatusCounts, catalogVisibleTotal, catalogStatusLabel, catalogStatusShortLabel, compactDimensions, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, groupPublicationIssues, humanOwner, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricCalculationNote, metricDetailQuery, metricExpressionLabel, metricFilterLabel, metricFormulaLabel, metricTimeDetail, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, sharedTimeMetadata, shiftDate, timezoneParts, verificationLabel, zonedMidnightISO, shellQuote};
 }
 if (typeof document !== "undefined") initialize();

@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const {catalogStatusCounts, catalogStatusLabel, catalogStatusShortLabel, compactDimensions, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, groupPublicationIssues, humanOwner, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricCalculationNote, metricDetailQuery, metricExpressionLabel, metricFilterLabel, planSummaryRows, preferredTimeGranularity, resolvePresetRange, sharedTimeMetadata, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
+const {catalogStatusCounts, catalogVisibleTotal, catalogStatusLabel, catalogStatusShortLabel, compactDimensions, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, groupPublicationIssues, humanOwner, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricCalculationNote, metricDetailQuery, metricExpressionLabel, metricFilterLabel, planSummaryRows, preferredTimeGranularity, resolvePresetRange, sharedTimeMetadata, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
 const {execFileSync} = require("node:child_process");
 
 test("copied request preserves apostrophes and shell characters as literal JSON", () => {
@@ -49,6 +49,13 @@ test("catalog status counts do not double count drafts shadowed by a published m
     [{name: "iap_amount", catalog_status: "draft"}, {name: "level_count", catalog_status: "governance"}],
   );
   assert.deepEqual(catalogStatusCounts(view), {published: 1, draft: 0, governance: 1});
+});
+
+test("catalog pagination denominator follows the selected status", () => {
+  const counts = {published: 330, draft: 0, governance: 149, total: 479};
+  assert.equal(catalogVisibleTotal(counts, "queryable"), 330);
+  assert.equal(catalogVisibleTotal(counts, "governance"), 149);
+  assert.equal(catalogVisibleTotal(counts, "all"), 479);
 });
 
 test("catalog defaults to queryable entries and keeps governance records explicitly reachable", () => {
@@ -371,7 +378,7 @@ test("successful namespace switching clears the previous query metric search", a
   assert.equal(context.document.getElementById("query-status").textContent, "");
   assert.equal(context.document.getElementById("result-panel").hidden, true);
   assert.equal(context.document.getElementById("catalog-list").children.length, 1);
-  assert.match(context.document.getElementById("catalog-list").children[0].textContent, /没有找到匹配/);
+  assert.match(context.document.getElementById("catalog-list").children[0].textContent, /正在搜索指标目录/);
 });
 
 test("a stale catalog response cannot overwrite a newer namespace", async () => {
