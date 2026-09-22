@@ -890,6 +890,21 @@ func TestHTTPCatalogIndexIsScopedMergedAndPaginated(t *testing.T) {
 	if len(enriched.Items) != 1 || enriched.Items[0].CatalogStatus != "published" || enriched.Items[0].AuthoritativeSource == nil || enriched.Items[0].AuthoritativeSource.Resource != "orders" {
 		t.Fatalf("manager index did not merge source evidence=%#v", enriched)
 	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&q=source-backed", "preview", nil)
+	var searchByGovernance httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &searchByGovernance)
+	var refundMatches int
+	for _, entry := range searchByGovernance.Items {
+		if entry.Name == "refund_rate" {
+			refundMatches++
+			if entry.CatalogStatus != "published" {
+				t.Fatalf("published metric was demoted by governance-only search: %#v", entry)
+			}
+		}
+	}
+	if refundMatches != 1 {
+		t.Fatalf("governance search returned %d refund_rate entries", refundMatches)
+	}
 	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&status=governance", "manage", nil)
 	var manageOnly httpapi.CatalogIndexResponse
 	decodeResponse(t, response, &manageOnly)

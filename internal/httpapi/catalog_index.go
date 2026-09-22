@@ -30,23 +30,24 @@ type CatalogIndexCounts struct {
 
 type CatalogIndexEntry struct {
 	application.MetricCatalogEntry
-	CatalogStatus       string                       `json:"catalog_status"`
-	Verification        model.Verification           `json:"verification,omitempty"`
-	BusinessType        governance.BusinessType      `json:"business_type,omitempty"`
-	Origin              string                       `json:"origin,omitempty"`
-	CalculationKind     string                       `json:"calculation_kind,omitempty"`
-	FormulaSummary      string                       `json:"formula_summary,omitempty"`
-	DocumentedFormula   string                       `json:"documented_formula,omitempty"`
-	ServingFormula      string                       `json:"serving_formula,omitempty"`
-	AuthoritativeSource *governance.SourceReference  `json:"authoritative_source,omitempty"`
-	SourceReferences    []governance.SourceReference `json:"source_references,omitempty"`
-	FactGrain           string                       `json:"fact_grain,omitempty"`
-	ReadinessReason     string                       `json:"readiness_reason,omitempty"`
-	OwnerStatus         string                       `json:"owner_status,omitempty"`
-	Issues              []string                     `json:"issues,omitempty"`
-	SemanticReadiness   governance.SemanticReadiness `json:"semantic_readiness,omitempty"`
-	GovernanceRevision  int64                        `json:"governance_revision,omitempty"`
-	SourceImportID      string                       `json:"source_import_id,omitempty"`
+	CatalogStatus        string                       `json:"catalog_status"`
+	Verification         model.Verification           `json:"verification,omitempty"`
+	BusinessType         governance.BusinessType      `json:"business_type,omitempty"`
+	Origin               string                       `json:"origin,omitempty"`
+	CalculationKind      string                       `json:"calculation_kind,omitempty"`
+	FormulaSummary       string                       `json:"formula_summary,omitempty"`
+	DocumentedFormula    string                       `json:"documented_formula,omitempty"`
+	ServingFormula       string                       `json:"serving_formula,omitempty"`
+	AuthoritativeSource  *governance.SourceReference  `json:"authoritative_source,omitempty"`
+	SourceReferences     []governance.SourceReference `json:"source_references,omitempty"`
+	FactGrain            string                       `json:"fact_grain,omitempty"`
+	ReadinessReason      string                       `json:"readiness_reason,omitempty"`
+	OwnerStatus          string                       `json:"owner_status,omitempty"`
+	Issues               []string                     `json:"issues,omitempty"`
+	SemanticReadiness    governance.SemanticReadiness `json:"semantic_readiness,omitempty"`
+	GovernanceRevision   int64                        `json:"governance_revision,omitempty"`
+	SourceImportID       string                       `json:"source_import_id,omitempty"`
+	GovernanceSearchText string                       `json:"-"`
 }
 
 type CatalogIndexResponse struct {
@@ -119,7 +120,7 @@ func (server *Server) handleCatalogIndex(response http.ResponseWriter, request *
 				items, searchErr := server.deps.CatalogSearch.SearchActive(ctx, application.QueryScope{
 					Namespace: namespace,
 					Context:   model.RequestContext{Tenant: principal.Tenant, Principal: principal.Subject, Roles: principal.Roles, RequestID: requestID(request)},
-				}, request.URL.Query().Get("q"), application.MaxCatalogSearchResults)
+				}, "", application.MaxCatalogSearchResults)
 				publishedChannel <- catalogPublishedResult{items: items, duration: time.Since(queryStarted), err: searchErr}
 			}()
 		} else {
@@ -128,7 +129,7 @@ func (server *Server) handleCatalogIndex(response http.ResponseWriter, request *
 		if principal.Has(PermissionManage) {
 			go func() {
 				queryStarted := time.Now()
-				items, listErr := server.deps.Governance.List(ctx, namespace, request.URL.Query().Get("q"), governance.MaxImportRecords)
+				items, listErr := server.deps.Governance.List(ctx, namespace, "", governance.MaxImportRecords)
 				governanceChannel <- catalogGovernanceResult{items: items, duration: time.Since(queryStarted), err: listErr}
 			}()
 		} else {
@@ -143,7 +144,7 @@ func (server *Server) handleCatalogIndex(response http.ResponseWriter, request *
 			return governed.err
 		}
 
-		index := buildCatalogIndex(published.items, governed.items)
+		index := searchCatalogIndex(buildCatalogIndex(published.items, governed.items), request.URL.Query().Get("q"))
 		counts := countCatalogIndex(index)
 		filtered := filterCatalogIndex(index, status, after)
 		page := filtered
@@ -206,6 +207,28 @@ func catalogIndexKey(entry CatalogIndexEntry) string {
 	return entry.Name + "\x00" + entry.ModelName
 }
 
+func searchCatalogIndex(entries []CatalogIndexEntry, search string) []CatalogIndexEntry {
+	query := strings.ToLower(strings.TrimSpace(search))
+	if query == "" {
+		return entries
+	}
+	result := make([]CatalogIndexEntry, 0)
+	for _, entry := range entries {
+		fields := []string{entry.ExternalCode, entry.Name, entry.DisplayName, entry.Description, entry.Owner,
+			strings.Join(entry.Tags, " "), entry.FormulaSummary, entry.Origin, entry.CalculationKind, entry.GovernanceSearchText}
+		if entry.AuthoritativeSource != nil {
+			fields = append(fields, entry.AuthoritativeSource.Resource, entry.AuthoritativeSource.Field)
+		}
+		for _, field := range fields {
+			if strings.Contains(strings.ToLower(field), query) {
+				result = append(result, entry)
+				break
+			}
+		}
+	}
+	return result
+}
+
 func applyGovernanceFields(entry *CatalogIndexEntry, record governance.MetricRecord) {
 	definition := record.Definition
 	entry.Verification = definition.Verification
@@ -228,6 +251,8 @@ func applyGovernanceFields(entry *CatalogIndexEntry, record governance.MetricRec
 	entry.SemanticReadiness = definition.SemanticReadiness
 	entry.GovernanceRevision = record.Revision
 	entry.SourceImportID = record.SourceImportID
+	entry.GovernanceSearchText = strings.Join([]string{definition.DisplayName, definition.Description, definition.Owner,
+		string(definition.BusinessType), string(definition.SemanticReadiness), strings.Join(definition.Issues, " ")}, " ")
 }
 
 func countCatalogIndex(entries []CatalogIndexEntry) CatalogIndexCounts {
