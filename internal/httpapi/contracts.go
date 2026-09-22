@@ -143,22 +143,24 @@ type Config struct {
 	MCPVersion             string
 	TrialReleaseNamespaces []string // explicit deployment opt-in; business verification stays unverified
 	UIModels               []UIModelRoute
+	UISourcePrefixes       map[string]string // non-secret default catalog.schema per namespace, if unambiguous
 	RequestID              func() string
 }
 
 // UIModelRoute is the small, non-secret route list required by the embedded
-// product UI. Physical bindings and policy contents are never exposed.
+// product UI. Physical bindings and policy contents are never exposed here.
 type UIModelRoute struct {
 	Namespace string `json:"namespace"`
 	ModelName string `json:"model_name"`
 }
 
 type UIContext struct {
-	AuthenticationProfile string         `json:"authentication_profile"`
-	DisplayName           string         `json:"display_name"`
-	Permissions           []Permission   `json:"permissions"`
-	Namespaces            []string       `json:"namespaces"`
-	Models                []UIModelRoute `json:"models,omitempty"`
+	AuthenticationProfile string            `json:"authentication_profile"`
+	DisplayName           string            `json:"display_name"`
+	Permissions           []Permission      `json:"permissions"`
+	Namespaces            []string          `json:"namespaces"`
+	Models                []UIModelRoute    `json:"models,omitempty"`
+	SourcePrefixes        map[string]string `json:"source_prefixes,omitempty"`
 }
 
 type Problem struct {

@@ -17,13 +17,13 @@
 
       <nav id="workspace-tabs" class="side-nav" aria-label="主要功能" hidden>
         <button class="nav-item active" type="button" data-tab="catalog" aria-selected="true">
-          <span>01</span><strong>指标库</strong><small>发现可信指标</small>
+          <strong>指标目录</strong><small>搜索、理解与使用指标</small>
         </button>
         <button id="governance-tab" class="nav-item" type="button" data-tab="governance" aria-selected="false" hidden>
-          <span>02</span><strong>治理发布</strong><small>维护与版本管理</small>
+          <strong>指标治理</strong><small>草稿、审查与发布</small>
         </button>
-        <button id="query-tab" class="nav-item" type="button" data-tab="query" aria-selected="false" hidden>
-          <span>03</span><strong>查询验证</strong><small>生成规范请求</small>
+        <button id="query-tab" class="nav-item developer-nav" type="button" data-tab="query" aria-selected="false" hidden>
+          <strong>开发者工具</strong><small>验证查询与 API 请求</small>
         </button>
       </nav>
 
@@ -52,7 +52,7 @@
         <header class="page-heading">
           <div>
             <p class="eyebrow">可信指标目录</p>
-            <h1>指标库</h1>
+            <h1>指标目录</h1>
             <p>维护者可同时验收未发布草稿；只有已发布指标才能用于应用或 AI 查询。</p>
           </div>
           <span id="catalog-count" class="count-badge">0 个指标</span>
@@ -79,7 +79,15 @@
         </div>
 
         <div class="catalog-layout">
-          <div id="catalog-list" class="catalog-list" aria-live="polite"></div>
+          <div class="catalog-list-column">
+            <div class="catalog-table-shell">
+              <div class="catalog-table-head" aria-hidden="true">
+                <span>指标</span><span>计算逻辑</span><span>数据来源</span><span>状态</span>
+              </div>
+              <div id="catalog-list" class="catalog-list" role="table" aria-label="指标目录" aria-live="polite"></div>
+            </div>
+            <button id="catalog-more" class="button secondary catalog-more" type="button" hidden>加载更多指标</button>
+          </div>
           <article id="metric-detail" class="detail-panel">
             <div id="metric-detail-empty" class="empty-state">选择一个指标查看完整定义和可用维度。</div>
             <div id="metric-detail-content" hidden>
@@ -89,14 +97,40 @@
                   <h2 id="detail-name"></h2>
                   <code id="detail-code"></code>
                 </div>
-                <button id="detail-query-button" class="button primary" type="button">用于查询</button>
+                <button id="detail-query-button" class="button secondary compact" type="button">带入查询验证</button>
               </div>
-              <p id="detail-description" class="lead"></p>
+              <section class="detail-section definition-detail">
+                <h3>业务定义</h3>
+                <p id="detail-description" class="lead"></p>
+              </section>
+              <section class="detail-section formula-detail">
+                <div class="detail-section-heading"><h3>计算逻辑</h3><span id="detail-calculation-kind" class="detail-meta"></span></div>
+                <code id="detail-formula">尚未登记可执行口径</code>
+                <p id="detail-calculation-note" class="detail-note"></p>
+                <details id="detail-registered-formula-wrap" class="registered-formula" hidden>
+                  <summary>查看登记口径</summary>
+                  <code id="detail-registered-formula"></code>
+                </details>
+              </section>
+              <section class="detail-section source-detail">
+                <div class="detail-section-heading"><h3>数据来源</h3><span id="detail-source-state" class="detail-meta">正在解析</span></div>
+                <dl class="source-grid">
+                  <div><dt>语义模型</dt><dd id="detail-semantic-model"></dd></div>
+                  <div><dt>统计实体</dt><dd id="detail-entity"></dd></div>
+                  <div><dt>权威来源</dt><dd id="detail-authoritative-source"></dd></div>
+                  <div><dt>物理数据集</dt><dd id="detail-physical-source"></dd></div>
+                </dl>
+                <div id="detail-field-lineage" class="field-lineage"></div>
+                <p id="detail-fact-grain" class="detail-note"></p>
+                <div id="detail-source-evidence" class="source-evidence"></div>
+              </section>
               <dl class="detail-grid">
                 <div><dt>负责人</dt><dd id="detail-owner"></dd></div>
                 <div><dt>返回类型</dt><dd id="detail-type"></dd></div>
                 <div><dt>当前版本</dt><dd id="detail-release"></dd></div>
                 <div><dt>时间口径</dt><dd id="detail-time"></dd></div>
+                <div><dt>验证状态</dt><dd id="detail-verification"></dd></div>
+                <div><dt>可用维度</dt><dd id="detail-dimension-count"></dd></div>
               </dl>
               <section class="detail-section">
                 <h3>可用维度</h3>
@@ -118,107 +152,147 @@
       <section id="governance-workspace" class="view" data-workspace="governance" hidden>
         <header class="page-heading with-control">
           <div>
-            <p class="eyebrow">维护者工作台</p>
-            <h1>治理发布</h1>
-            <p>维护指标定义，检查变更影响，再决定发布。保存草稿不会改变线上查询。</p>
+            <p class="eyebrow">Metric registry</p>
+            <h1>指标治理</h1>
+            <p>先维护单条指标，再统一审查并发布。保存草稿不会影响正在使用的版本。</p>
           </div>
-          <label for="governance-route">维护对象
+          <label for="governance-route">语义模型
             <select id="governance-route"></select>
           </label>
         </header>
 
-        <div class="workflow-guide" aria-label="指标维护步骤">
-          <span><b>1</b> 编辑并应用</span><span><b>2</b> 检查影响、保存草稿</span><span><b>3</b> 填写说明、发布上线</span>
-        </div>
-
-        <div class="status-grid">
+        <div class="status-grid governance-status-grid">
+          <article><span>业务域</span><strong id="governance-namespace-value">—</strong><small>当前指标空间</small></article>
           <article><span>当前线上版本</span><strong id="active-release-value">—</strong><small id="active-release-meta">尚未读取</small></article>
           <article><span>草稿版本</span><strong id="draft-revision-value">—</strong><small id="draft-updated-meta">尚未读取</small></article>
-          <article><span>数据源绑定</span><strong id="binding-status-value">—</strong><small id="binding-status-meta">尚未检查</small></article>
+          <article><span>发布准备度</span><strong id="binding-status-value">—</strong><small id="binding-status-meta">尚未检查</small></article>
         </div>
 
-        <div class="governance-layout">
-          <section class="panel editor-panel">
-            <div class="panel-heading">
-              <div><p class="step">01 · 维护指标</p><h2>指标定义</h2></div>
+        <div class="metric-workbench">
+          <aside class="panel metric-index-panel">
+            <div class="panel-heading compact-heading">
+              <div><p class="step">指标清单</p><h2>当前草稿</h2></div>
               <button id="new-metric-button" class="button secondary" type="button">新增基础指标</button>
             </div>
-            <label for="metric-select">选择草稿中的指标
-              <select id="metric-select"></select>
+            <label class="metric-index-search">搜索指标
+              <input id="governance-metric-search" type="search" placeholder="编号、英文名或中文名">
             </label>
+            <select id="metric-select" hidden aria-hidden="true"></select>
+            <div class="metric-table-head" aria-hidden="true"><span>编号 / 指标</span><span>口径</span><span>状态</span></div>
+            <div id="metric-inventory" class="metric-inventory" aria-live="polite"></div>
+          </aside>
+
+          <section class="panel editor-panel metric-editor-panel">
+            <div class="panel-heading editor-heading">
+              <div><p class="step" id="metric-editor-kicker">指标详情</p><h2 id="metric-editor-title">选择一条指标</h2></div>
+              <button id="duplicate-metric-button" class="button secondary" type="button" hidden>复制为新指标</button>
+            </div>
 
             <form id="metric-form">
               <div id="editor-mode-note" class="inline-note"></div>
-              <div class="form-grid two">
-                <label>指标 code<input id="metric-code" required pattern="[a-z][a-z0-9_]*"></label>
-                <label>展示名称<input id="metric-display-name" required></label>
-              </div>
-              <label>业务定义<textarea id="metric-description" class="plain-textarea" rows="3" required></textarea></label>
-              <div class="form-grid three">
-                <label>负责人<input id="metric-owner" required></label>
-                <label>单位<input id="metric-unit"></label>
-                <label>标签<input id="metric-tags" placeholder="多个标签用逗号分隔"></label>
-              </div>
-              <label>常见使用示例<textarea id="metric-examples" class="plain-textarea" rows="2" placeholder="每行一个问题，最多 5 条；例如：按渠道查看上月付费订单数"></textarea></label>
+              <fieldset class="editor-section identity-section">
+                <legend>基本信息</legend>
+                <div class="form-grid four identity-grid">
+                  <label>业务编号 <span class="field-hint">可选，纯数字</span><input id="metric-external-code" inputmode="numeric" pattern="[0-9]*" placeholder="例如 1024"></label>
+                  <label>英文名 <span class="field-hint">查询使用</span><input id="metric-code" required pattern="[a-z][a-z0-9_]*" placeholder="daily_active_users"></label>
+                  <label>中文名<input id="metric-display-name" required placeholder="日活跃用户数"></label>
+                  <label>负责人<input id="metric-owner" required placeholder="团队或负责人"></label>
+                </div>
+                <label>指标定义<textarea id="metric-description" class="plain-textarea" rows="3" required placeholder="说明统计对象、时间边界和去重规则"></textarea></label>
+              </fieldset>
 
-              <fieldset class="form-section">
+              <fieldset class="editor-section formula-section">
                 <legend>计算口径</legend>
+                <div class="formula-preview">
+                  <span>结构化公式</span>
+                  <code id="metric-formula-preview">—</code>
+                </div>
                 <div class="form-grid four">
                   <label>业务实体<select id="metric-entity"></select></label>
                   <label>聚合方式<select id="metric-operation"><option value="sum">求和</option><option value="count">计数</option><option value="count_distinct">去重计数</option><option value="avg">平均值</option><option value="min">最小值</option><option value="max">最大值</option></select></label>
                   <label>计算字段<select id="metric-field"></select></label>
                   <label>结果类型<select id="metric-value-type"><option value="integer">整数</option><option value="decimal">小数</option></select></label>
                 </div>
+                <div class="form-grid two compact-grid">
+                  <label>单位<input id="metric-unit" placeholder="人、次、USD、%"></label>
+                  <label>默认时间维度<select id="metric-time-dimension"></select></label>
+                </div>
+                <div class="metric-filter-builder">
+                  <div class="subsection-heading">
+                    <div><strong>口径条件</strong><span>等价于聚合函数中的 CASE WHEN；条件之间使用 AND</span></div>
+                  </div>
+                  <div class="metric-filter-controls">
+                    <label>条件字段<select id="metric-filter-field"></select></label>
+                    <label>判断方式<select id="metric-filter-operator"><option value="eq">等于</option><option value="neq">不等于</option><option value="in">属于其中</option><option value="not_in">不属于其中</option><option value="is_null">为空</option><option value="is_not_null">不为空</option></select></label>
+                    <label class="grow">条件值<input id="metric-filter-values" placeholder="多个值用英文逗号分隔"></label>
+                    <button id="add-metric-filter-button" class="button secondary" type="button">添加条件</button>
+                  </div>
+                  <div id="metric-expression-filters" class="chips metric-expression-filters"></div>
+                </div>
                 <p id="execution-lock-note" class="muted"></p>
               </fieldset>
 
-              <fieldset class="form-section">
-                <legend>允许的分析方式</legend>
-                <div id="metric-dimension-options" class="chips"></div>
-                <label class="narrow-field">默认时间维度<select id="metric-time-dimension"></select></label>
+              <fieldset class="editor-section">
+                <legend>可用维度</legend>
+                <div id="metric-dimension-options" class="dimension-picker"></div>
+                <p class="muted">这里只决定调用方可以使用哪些维度分析该指标，不会改变计算口径。</p>
               </fieldset>
 
-              <fieldset class="form-section compact-section">
-                <legend>发布信息</legend>
+              <fieldset class="editor-section">
+                <legend>治理信息</legend>
                 <div class="form-grid two">
+                  <label>标签<input id="metric-tags" placeholder="多个标签用逗号分隔"></label>
                   <label>验证证据<input id="metric-evidence" placeholder="例如：与财务报表对账通过"></label>
-                  <label class="toggle"><input id="metric-verified" type="checkbox"><span id="metric-verification-label">口径已经验证</span></label>
                 </div>
-                <label class="toggle"><input id="metric-deprecated" type="checkbox"><span>标记为已弃用</span></label>
+                <label>常见使用示例<textarea id="metric-examples" class="plain-textarea" rows="2" placeholder="每行一个问题，最多 5 条"></textarea></label>
+                <div class="toggle-row">
+                  <label class="toggle"><input id="metric-verified" type="checkbox"><span id="metric-verification-label">口径已经验证</span></label>
+                  <label class="toggle"><input id="metric-deprecated" type="checkbox"><span>标记为已弃用</span></label>
+                </div>
                 <p id="business-verification-note" class="inline-note warning-note" hidden></p>
               </fieldset>
 
-              <p id="editor-status" class="result-status" role="status" aria-live="polite" hidden></p>
-              <button id="apply-metric-button" class="button primary" type="submit">应用编辑并检查</button>
-              <p class="muted">此步骤只更新当前页面。请继续“保存草稿”，确认后再“发布新版本”。</p>
+              <div class="editor-actions">
+                <p id="editor-status" class="result-status" role="status" aria-live="polite" hidden></p>
+                <div>
+                  <button id="discard-editor-button" class="button secondary" type="button">放弃未保存修改</button>
+                  <button id="apply-metric-button" class="button primary" type="submit">保存到草稿</button>
+                </div>
+              </div>
             </form>
           </section>
-
-          <aside class="review-column">
-            <section class="panel">
-              <div class="panel-heading"><div><p class="step">02 · 发布前检查</p><h2>变更与影响</h2></div></div>
-              <div id="review-status" class="result-status">载入草稿后显示检查结果。</div>
-              <div id="change-list" class="change-list"></div>
-            </section>
-            <section class="panel">
-              <div class="panel-heading"><div><p class="step">数据位置</p><h2>现有绑定</h2></div></div>
-              <div id="binding-summary" class="binding-summary">尚未读取。</div>
-            </section>
-          </aside>
         </div>
 
-        <section class="panel release-panel">
-          <div class="panel-heading">
-            <div><p class="step">03 · 保存与发布</p><h2>版本管理</h2></div>
-            <label class="release-note-field">发布说明<input id="release-note" placeholder="说明本次为什么修改"></label>
+        <div class="governance-inspector">
+          <section class="panel">
+            <div class="panel-heading"><div><p class="step">发布检查</p><h2>本次变化</h2></div></div>
+            <div id="review-status" class="result-status">载入草稿后显示检查结果。</div>
+            <div id="change-list" class="change-list"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-heading"><div><p class="step">执行边界</p><h2>数据源绑定</h2></div></div>
+            <div id="binding-summary" class="binding-summary">尚未读取。</div>
+          </section>
+        </div>
+
+        <section class="panel release-panel publication-panel">
+          <div class="publication-copy">
+            <p class="step">发布</p>
+            <h2>把已保存的草稿上线</h2>
+            <p>发布会创建不可变版本；已在线指标的执行口径不会被原地替换。</p>
           </div>
-          <div class="action-row">
-            <button id="review-draft-button" class="button secondary" type="button">重新检查</button>
-            <button id="save-draft-button" class="button secondary" type="button">保存草稿</button>
-            <button id="publish-button" class="button primary" type="button">发布新版本</button>
+          <div class="publication-actions">
+            <label>发布说明<input id="release-note" placeholder="说明本次为什么修改"></label>
+            <div class="action-row">
+              <button id="review-draft-button" class="button secondary" type="button">刷新发布检查</button>
+              <button id="publish-button" class="button primary" type="button">发布新版本</button>
+            </div>
           </div>
           <div id="governance-status" class="result-status" role="status" aria-live="polite" hidden></div>
-          <div id="release-list" class="release-list"></div>
+          <details class="release-history">
+            <summary>查看版本历史</summary>
+            <div id="release-list" class="release-list"></div>
+          </details>
         </section>
       </section>
 

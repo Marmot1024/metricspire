@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const {catalogStatusCounts, catalogStatusLabel, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, planSummaryRows, preferredTimeGranularity, resolvePresetRange, sharedTimeMetadata, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
+const {catalogStatusCounts, catalogVisibleTotal, catalogStatusLabel, catalogStatusShortLabel, compactDimensions, compactSourceName, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, groupPublicationIssues, humanOwner, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricCalculationNote, metricDetailQuery, metricExpressionLabel, metricFilterLabel, planSummaryRows, preferredTimeGranularity, resolvePresetRange, sharedTimeMetadata, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
 const {execFileSync} = require("node:child_process");
 
 test("copied request preserves apostrophes and shell characters as literal JSON", () => {
@@ -30,11 +30,17 @@ test("maintainer catalog exposes unverified drafts without making them published
 
 test("published metric wins over a same-code draft in the catalog view", () => {
   const published = [{name: "iap_amount", release_id: "rel_1"}];
-  const drafts = [{name: "iap_amount", catalog_status: "draft"}, {name: "level_count", catalog_status: "draft"}];
-  assert.deepEqual(mergeCatalogEntries(published, drafts), [
-    {name: "iap_amount", release_id: "rel_1", catalog_status: "published"},
-    {name: "level_count", catalog_status: "draft"},
-  ]);
+  const drafts = [{name: "iap_amount", catalog_status: "draft", formula_summary: "SUM(amount)",
+    authoritative_source: {resource: "payments", field: "amount"}, fact_grain: "player + date"},
+  {name: "level_count", catalog_status: "draft"}];
+  const view = mergeCatalogEntries(published, drafts);
+  assert.equal(view.length, 2);
+  assert.equal(view[0].catalog_status, "published");
+  assert.equal(view[0].release_id, "rel_1");
+  assert.equal(view[0].formula_summary, "SUM(amount)");
+  assert.equal(view[0].authoritative_source.resource, "payments");
+  assert.equal(view[0].fact_grain, "player + date");
+  assert.equal(view[1].name, "level_count");
 });
 
 test("catalog status counts do not double count drafts shadowed by a published metric", () => {
@@ -43,6 +49,13 @@ test("catalog status counts do not double count drafts shadowed by a published m
     [{name: "iap_amount", catalog_status: "draft"}, {name: "level_count", catalog_status: "governance"}],
   );
   assert.deepEqual(catalogStatusCounts(view), {published: 1, draft: 0, governance: 1});
+});
+
+test("catalog pagination denominator follows the selected status", () => {
+  const counts = {published: 330, draft: 0, governance: 149, total: 479};
+  assert.equal(catalogVisibleTotal(counts, "queryable"), 330);
+  assert.equal(catalogVisibleTotal(counts, "governance"), 149);
+  assert.equal(catalogVisibleTotal(counts, "all"), 479);
 });
 
 test("catalog defaults to queryable entries and keeps governance records explicitly reachable", () => {
@@ -64,6 +77,8 @@ test("trial metrics remain visibly business-unverified", () => {
   assert.equal(verificationLabel({verification: {status: "verified"}}), "口径已经验证");
   assert.equal(humanTag("business_type_atomic"), "原子指标");
   assert.equal(humanTag("governance_unverified"), "业务待验证");
+  assert.equal(catalogStatusShortLabel(metric), "试用");
+  assert.equal(humanOwner("pending_assignment"), "待分配");
 });
 
 test("query chooser shows selected metrics first and searches instead of listing the whole catalog", () => {
@@ -77,9 +92,51 @@ test("query chooser shows selected metrics first and searches instead of listing
   assert.deepEqual(matchingQueryMetrics(metrics, "missing", new Set()).map((metric) => metric.name), []);
 });
 
+test("metric registry searches external codes and presents structured formulas", () => {
+  const metric = {external_code: "1024", name: "paid_users", display_name: "付费用户数", expression: {
+    op: "count_distinct", field: "player.user_id", filters: [{field: "payment.amount", operator: "neq", values: ["0"]}],
+  }};
+  assert.equal(matchesCatalogSearch(metric, "1024"), true);
+  assert.equal(metricExpressionLabel(metric.expression), "COUNT(DISTINCT CASE WHEN payment.amount <> '0' THEN player.user_id ELSE NULL END)");
+  assert.equal(metricExpressionLabel({op: "divide", args: [{op: "metric", metric: "revenue"}, {op: "metric", metric: "buyers"}]}), "(revenue ÷ buyers)");
+  assert.equal(metricFilterLabel({field: "order.status", operator: "in", values: ["paid", "refunded"]}), "order.status IN ('paid', 'refunded')");
+  assert.equal(compactDimensions(["date", "country", "platform"]), "date · country · +1");
+  assert.equal(metricCalculationNote(metric), "去重计数字段 player.user_id；仅统计满足 payment.amount <> '0' 的记录。");
+});
+
+test("matchingstory list shortens only its own default physical source", () => {
+  const prefixes = {matchingstory: "mm.mm"};
+  assert.equal(compactSourceName("mm.mm.dws_daily_player_activity", "matchingstory", prefixes), "dws_daily_player_activity");
+  assert.equal(compactSourceName("other.db.events", "matchingstory", prefixes), "other.db.events");
+  assert.equal(compactSourceName("mm.mm.events", "acceptance", prefixes), "mm.mm.events");
+});
+
+test("metric detail plan query uses a bounded calendar range without executing SQL", () => {
+  const query = metricDetailQuery({name: "daily_active_users", time_dimension: "date",
+    dimension_details: [{name: "date", calendar_timezone: "UTC"}]}, new Date("2026-09-21T08:00:00Z"));
+  assert.equal(query.api_version, "metricspire.io/v1alpha1");
+  assert.equal(query.kind, "SemanticQuery");
+  assert.deepEqual(query.metrics, ["daily_active_users"]);
+  assert.deepEqual(query.time_range, {
+    dimension: "date", start: "2026-09-20T00:00:00.000Z", end: "2026-09-21T00:00:00.000Z", timezone: "UTC",
+  });
+  assert.equal(query.limit, 1);
+});
+
 test("common authorization and time-grouping failures explain the recovery action", () => {
   assert.match(errorMessage({status: 403, request_id: "req_1"}), /权限组.*req_1/);
   assert.match(errorMessage({detail: "grouped time dimensions require explicit grouping semantics", request_id: "req_2"}), /选择按日、按周或按月.*req_2/);
+});
+
+test("publication issues are grouped by actionable cause instead of rendering an error wall", () => {
+  const groups = groupPublicationIssues([
+    'metric "revenue" is not verified', 'metric "orders" is not verified',
+    'metric "revenue" has no owner', 'metric "orders" has no verification evidence',
+  ]);
+  assert.deepEqual(groups.map((group) => [group.key, group.issues.length]), [
+    ["not_verified", 2], ["owner", 1], ["evidence", 1],
+  ]);
+  assert.deepEqual(groups[0].metrics, ["revenue", "orders"]);
 });
 
 test("governance catalog keeps all records but only marks executable definitions as draft previews", () => {
@@ -93,6 +150,7 @@ test("governance catalog keeps all records but only marks executable definitions
   assert.deepEqual(entries.map((entry) => entry.catalog_status), ["draft", "governance"]);
   assert.equal(entries[0].semantic_model_name, "daily");
   assert.equal(entries[1].semantic_model_name, "");
+  assert.equal(entries[0].authoritative_source, null);
 });
 
 test("time dimension has a deterministic safe grouping default", () => {
@@ -140,10 +198,11 @@ test("explain and plan have a human-readable summary independent of raw JSON", (
 
 // Exercise the actual form handlers without adding a production DOM dependency.
 function editorContext() {
-  const context = vm.createContext({});
+  const context = vm.createContext({structuredClone, AbortController, URLSearchParams});
   vm.runInContext(fs.readFileSync(require.resolve("./app.js"), "utf8"), context);
-  const element = () => ({value: "", checked: false, dataset: {}, children: [], handlers: {},
+  const element = () => ({value: "", checked: false, disabled: false, dataset: {}, children: [], handlers: {},
     addEventListener(name, handler) { this.handlers[name] = handler; },
+    setAttribute(name, value) { this[name] = value; },
     append(...children) { this.children.push(...children); },
     replaceChildren(...children) { this.children = children; }});
   const elements = new Map();
@@ -169,6 +228,7 @@ test("query builder automatically completes grouped time semantics and keeps fil
   const {context, run} = editorContext();
   run(`state.catalog = [{name: 'game_start_count', display_name: '游戏启动次数', catalog_status: 'published',
     allowed_dimensions: ['date'], time_dimension: 'date', time_granularities: ['day', 'month']}];
+    state.queryCatalog.set('game_start_count', state.catalog[0]);
     state.queryMetricKeys = new Set(['game_start_count']); state.filters = [];`);
   context.document.querySelectorAll = (selector) => selector === "input[name='query-dimension']:checked" ? [{value: "date", checked: true}] : [];
   const values = {"row-limit": "10", "time-preset": "custom", "time-grain": "",
@@ -183,7 +243,7 @@ test("query builder automatically completes grouped time semantics and keeps fil
 test("new metric form submits an entity-qualified expression, not a physical dataset", () => {
   const {context, run} = editorContext();
   run("renderEntityFields('orders', 'orders.amount')");
-  const values = {"metric-code": "revenue", "metric-display-name": "收入",
+  const values = {"metric-external-code": "1001", "metric-code": "revenue", "metric-display-name": "收入",
     "metric-description": "订单金额合计", "metric-owner": "data-team",
     "metric-entity": "orders", "metric-operation": "sum", "metric-value-type": "decimal"};
   for (const [id, value] of Object.entries(values)) context.document.getElementById(id).value = value;
@@ -191,7 +251,23 @@ test("new metric form submits an entity-qualified expression, not a physical dat
   assert.equal(metric.expression.field, "orders.amount");
   assert.equal(metric.entity, "orders");
   assert.equal(metric.expression.op, "sum");
+  assert.equal(metric.external_code, "1001");
   assert.equal(context.document.getElementById("metric-field").value, "orders.amount");
+});
+
+test("metric editor preserves constrained CASE WHEN filters in the structured expression", () => {
+  const {context, run} = editorContext();
+  const values = {"metric-external-code": "1002", "metric-code": "paid_revenue", "metric-display-name": "付费收入",
+    "metric-description": "只汇总成功订单收入", "metric-owner": "data-team", "metric-entity": "orders",
+    "metric-operation": "sum", "metric-value-type": "decimal", "metric-field": "orders.amount",
+    "metric-filter-field": "orders.id", "metric-filter-operator": "neq", "metric-filter-values": "0"};
+  for (const [id, value] of Object.entries(values)) context.document.getElementById(id).value = value;
+  run("addMetricExpressionFilter()");
+  const metric = run("metricFromEditor()");
+  assert.deepEqual(JSON.parse(JSON.stringify(metric.expression)), {
+    op: "sum", field: "orders.amount", filters: [{field: "orders.id", operator: "neq", values: ["0"]}],
+  });
+  assert.equal(run("metricExpressionLabel(metricFromEditor().expression)"), "SUM(CASE WHEN orders.id <> '0' THEN orders.amount ELSE NULL END)");
 });
 
 test("editing an existing metric preserves its selected field and related dimensions", () => {
@@ -200,6 +276,40 @@ test("editing an existing metric preserves its selected field and related dimens
   assert.equal(context.document.getElementById("metric-field").value, "orders.amount");
   const inputs = context.document.getElementById("metric-dimension-options").children.map((label) => label.children[0]);
   assert.deepEqual(inputs.map((input) => [input.value, input.checked]), [["status", true], ["segment", true]]);
+});
+
+test("published derived metrics cannot be flattened through the aggregate copy form", () => {
+  const {context, run} = editorContext();
+  run(`state.review = {active_release: {id: 'rel_1'}, metric_changes: []};
+    renderMetricEditor({name: 'conversion_rate', display_name: '转化率', entity: 'orders', kind: 'ratio',
+      value_type: 'decimal', unit: '%', expression: {op: 'divide', args: [{op: 'metric', metric: 'buyers'}, {op: 'metric', metric: 'visitors'}]},
+      allowed_dimensions: ['status'], verification: {status: 'verified'}})`);
+  assert.equal(context.document.getElementById("duplicate-metric-button").hidden, true);
+  assert.match(context.document.getElementById("metric-formula-preview").textContent, /buyers.*visitors/);
+});
+
+test("saving a metric writes one draft revision without a separate browser-only apply step", async () => {
+  const {context, run} = editorContext();
+  run("state.draft.revision = 1; state.governanceRoute = {namespace: 'matchingstory', model_name: 'daily'}");
+  const values = {"metric-external-code": "1001", "metric-code": "daily_revenue", "metric-display-name": "日收入",
+    "metric-description": "按自然日汇总订单收入", "metric-owner": "data-team", "metric-entity": "orders",
+    "metric-operation": "sum", "metric-value-type": "decimal", "metric-field": "orders.amount"};
+  for (const [id, value] of Object.entries(values)) context.document.getElementById(id).value = value;
+  const calls = [];
+  context.requestJSON = async (path, options) => {
+    const body = JSON.parse(options.body);
+    calls.push([path, options.method, body]);
+    if (path.endsWith("/draft")) return {revision: 2, source: body.source, updated_by: "tester", updated_at: "2026-09-20T00:00:00Z"};
+    return {active_release: null, metric_changes: [{code: "daily_revenue", kind: "added"}], publication_issues: [],
+      structure_changed: false, binding: {status: "ready", message: "ready"}};
+  };
+  await run("applyMetric({preventDefault() {}})");
+  assert.equal(calls.filter(([path]) => path.endsWith("/draft")).length, 1);
+  assert.equal(calls[0][2].expected_revision, 1);
+  assert.equal(calls[0][2].source.spec.metrics[0].external_code, "1001");
+  assert.equal(run("state.draft.revision"), 2);
+  assert.equal(run("state.editorDirty"), false);
+  assert.match(context.document.getElementById("editor-status").textContent, /已保存到草稿/);
 });
 
 test("rollback uses the historical release and leaves an accurate success message after reload", async () => {
@@ -235,25 +345,21 @@ test("cancel button calls the existing job endpoint for the active job only", as
   assert.equal(calls.length, 1);
 });
 
-test("unapplied form edits cannot silently save or publish the old draft", async () => {
+test("unsaved form edits cannot silently publish the old draft", async () => {
   const {context, run} = editorContext();
   let requests = 0;
   context.requestJSON = async () => { requests++; };
   run("bindEvents()");
   context.document.getElementById("metric-form").handlers.input();
-  await run("saveDraft(); publishDraft()");
-  assert.equal(requests, 0);
-  assert.match(context.document.getElementById("editor-status").textContent, /尚未应用/);
-  run("state.editorDirty = false; state.dirty = true");
   await run("publishDraft()");
   assert.equal(requests, 0);
-  assert.match(context.document.getElementById("governance-status").textContent, /先保存草稿/);
+  assert.match(context.document.getElementById("editor-status").textContent, /尚未保存/);
 });
 
 test("cancelled navigation preserves unsaved draft and business domain", async () => {
   const {context, run} = editorContext();
   context.window = {confirm: () => false};
-  run("state.namespace = 'original'; state.dirty = true");
+  run("state.namespace = 'original'; state.editorDirty = true");
   const original = run("state.draft");
   await run("switchNamespace('other')");
   assert.equal(run("state.draft"), original);
@@ -279,25 +385,101 @@ test("successful namespace switching clears the previous query metric search", a
   assert.equal(context.document.getElementById("query-status").textContent, "");
   assert.equal(context.document.getElementById("result-panel").hidden, true);
   assert.equal(context.document.getElementById("catalog-list").children.length, 1);
-  assert.match(context.document.getElementById("catalog-list").children[0].textContent, /没有找到匹配/);
+  assert.match(context.document.getElementById("catalog-list").children[0].textContent, /正在搜索指标目录/);
 });
 
 test("a stale catalog response cannot overwrite a newer namespace", async () => {
   const {context, run} = editorContext();
   const pending = new Map();
-  context.requestJSON = (path) => new Promise((resolve) => pending.set(path, resolve));
+  const signals = new Map();
+  context.requestJSON = (path, options) => { signals.set(path, options.signal); return new Promise((resolve) => pending.set(path, resolve)); };
   context.renderCatalog = () => {};
   context.updateQueryBuilder = () => {};
   run("state.context = {permissions: ['query:execute'], models: []}; state.namespace = 'old'");
   const oldLoad = run("loadCatalog()");
   run("state.namespace = 'new'");
   const newLoad = run("loadCatalog()");
+  assert.equal(signals.get("/api/v1/catalog/index?namespace=old&q=&status=queryable&limit=50&view=summary").aborted, true);
   const metric = (name) => ({name, display_name: name, description: name, owner: 'owner', value_type: 'integer', unit: 'times', allowed_dimensions: [], tags: [], examples: []});
-  pending.get("/api/v1/catalog/search?namespace=new&q=&limit=100")([metric("new_metric")]);
+  pending.get("/api/v1/catalog/index?namespace=new&q=&status=queryable&limit=50&view=summary")({items: [metric("new_metric")], counts: {published: 1, draft: 0, governance: 0, total: 1}});
   await newLoad;
-  pending.get("/api/v1/catalog/search?namespace=old&q=&limit=100")([metric("old_metric")]);
+  pending.get("/api/v1/catalog/index?namespace=old&q=&status=queryable&limit=50&view=summary")({items: [metric("old_metric")], counts: {published: 1, draft: 0, governance: 0, total: 1}});
   await oldLoad;
   assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalog.map((entry) => entry.name)"))), ["new_metric"]);
+});
+
+test("maintainer catalog uses one server-composed page and keeps total counts", async () => {
+  const {context, run} = editorContext();
+  let finishPage;
+  const paths = [];
+  context.requestJSON = (path) => { paths.push(path); return new Promise((resolve) => { finishPage = resolve; }); };
+  context.renderCatalog = () => {};
+  context.updateQueryBuilder = () => {};
+  run("state.context = {permissions: ['query:execute', 'model:manage'], models: []}; state.namespace = 'matchingstory'");
+  const loading = run("loadCatalog()");
+  finishPage({items: [{name: "daily_active_users", release_id: "rel_1", catalog_status: "published"}],
+    counts: {published: 1, draft: 4, governance: 30, total: 35}, next_cursor: "next"});
+  await loading;
+  assert.equal(paths.length, 1);
+  assert.match(paths[0], /\/catalog\/index\?/);
+  assert.match(paths[0], /view=summary/);
+  assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalogView.map((entry) => entry.name)"))), ["daily_active_users"]);
+  assert.equal(run("state.catalogCounts.total"), 35);
+  assert.equal(run("state.catalogCursor"), "next");
+});
+
+test("selecting a summary loads only that metric's authorized full detail", async () => {
+  const {context, run} = editorContext();
+  const summary = {namespace: "matchingstory", name: "revenue", semantic_model_name: "daily", catalog_status: "published", summary: true};
+  context.metric = summary;
+  run("state.namespace = 'matchingstory'");
+  run("state.catalogView = [metric]");
+  const calls = [];
+  context.requestJSON = async (path) => {
+    calls.push(path);
+    return {...summary, summary: false, description: "已登记业务口径"};
+  };
+  let displayed;
+  context.renderMetricDetail = (metric) => { displayed = metric; };
+  await run("loadMetricDetail(metric, state.metricDetailSequence)");
+  assert.deepEqual(calls, ["/api/v1/catalog/detail?namespace=matchingstory&name=revenue&model=daily"]);
+  assert.equal(displayed.description, "已登记业务口径");
+  assert.equal(run("state.catalogView[0].summary"), false);
+  await run("loadMetricDetail(metric, state.metricDetailSequence)");
+  assert.equal(calls.length, 1);
+});
+
+test("next-page failure preserves already rendered metrics", async () => {
+  const {context, run} = editorContext();
+  let requests = 0;
+  context.requestJSON = async () => {
+    if (++requests === 1) return {items: [{name: "daily_active_users", release_id: "rel_1", catalog_status: "published"}],
+      counts: {published: 2, draft: 0, governance: 0, total: 2}, next_cursor: "next"};
+    throw {detail: "page unavailable"};
+  };
+  context.renderCatalog = () => {};
+  context.updateQueryBuilder = () => {};
+  run("state.context = {permissions: ['query:execute', 'model:manage'], models: []}; state.namespace = 'matchingstory'");
+  await run("loadCatalog()");
+  await run("loadCatalog(true)");
+  assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalogView.map((entry) => entry.name)"))), ["daily_active_users"]);
+  assert.match(context.document.getElementById("notice").textContent, /page unavailable/);
+});
+
+test("selected query metric survives a new catalog search and page replacement", async () => {
+  const {context, run} = editorContext();
+  let requests = 0;
+  context.requestJSON = async () => ({items: [{name: ++requests === 1 ? "orders" : "revenue", catalog_status: "published", allowed_dimensions: []}],
+    counts: {published: 1, draft: 0, governance: 0, total: 1}});
+  context.renderCatalog = () => {};
+  context.updateQueryBuilder = () => {};
+  run("state.context = {permissions: ['query:execute']}; state.namespace = 'demo'");
+  await run("loadCatalog()");
+  run("state.queryMetricKeys.add('orders')");
+  context.document.getElementById("catalog-search").value = "revenue";
+  await run("loadCatalog()");
+  assert.deepEqual(JSON.parse(JSON.stringify(run("selectedQueryMetrics().map((entry) => entry.name)"))), ["orders"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalog.map((entry) => entry.name)"))), ["revenue"]);
 });
 
 test("new query failure clears old results and unlocks controls without retry", async () => {

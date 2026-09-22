@@ -33,7 +33,7 @@ BindingResolver + EngineCapabilities
 
 ## Semantic truth and portability
 
-`SemanticModel` contains portable metric codes, descriptions, ownership, dimensions, relationships, and a constrained expression tree. It never accepts an arbitrary SQL expression. `SemanticManifest` is normalized, validated, immutable, and addressed by SHA-256.
+`SemanticModel` contains stable English query names, optional numeric external codes, localized display names, descriptions, ownership, dimensions, relationships, and a constrained expression tree. The external code is searchable but is not the internal identity; once assigned to a published metric it cannot be replaced. The model never accepts an arbitrary SQL expression. `SemanticManifest` is normalized, validated, immutable, and addressed by SHA-256.
 
 `LogicalPlan` explains metric dependencies, dimensions, safe join paths, time semantics, output order, and lineage without selecting a SQL dialect. `PhysicalPlan` applies one validated `SourceBinding` after capability checks. An engine adapter then emits its own parameterized statement.
 
@@ -41,7 +41,7 @@ This is portability by explicit translation, not a claim that all engines are eq
 
 ## Catalog lifecycle
 
-Drafts use optimistic revisions. Publication recompiles the exact expected revision, enforces required ownership/business/verification metadata, compares it with the active release, and inserts a new immutable release. Releases carry a structured `certified` or `trial` channel; trial publication requires an explicit deployment allowlist and never changes an unverified definition to verified. A published metric code cannot disappear or change execution semantics silently; deprecation is explicit and irreversible. Rollback changes the active pointer to an existing immutable release. Deactivation removes that pointer without deleting release history. Both actions record events.
+Drafts use optimistic revisions. An unpublished metric may still change its structured formula; after publication, changing execution semantics requires a new metric identity. Publication recompiles the exact expected revision, enforces required ownership/business/verification metadata, compares it with the active release, and inserts a new immutable release. Releases carry a structured `certified` or `trial` channel; trial publication requires an explicit deployment allowlist and never changes an unverified definition to verified. A published metric code cannot disappear or change execution semantics silently; deprecation is explicit and irreversible. Rollback changes the active pointer to an existing immutable release. Deactivation removes that pointer without deleting release history. Both actions record events.
 
 Query execution resolves the active release on the server. A caller cannot select an unpublished manifest or stale fingerprint.
 
@@ -77,9 +77,9 @@ Small typed JSON results are the v0.1 boundary. Streaming export, external resul
 
 ## HTTP and UI boundary
 
-Management and query permissions are separate. Management endpoints validate, save drafts, publish, list releases, and rollback; query endpoints search the active catalog, explain, plan, submit jobs, fetch status, and cancel. Catalog search includes authorized dimension descriptions, types, supported time grains, and fixed calendar timezones without exposing physical resources. Explain creates only an authorized logical plan. Plan may resolve a physical binding but never calls an analytical engine. Query submission is asynchronous, so network write deadlines are independent of query deadlines.
+Management and query permissions are separate. Management endpoints validate, save drafts, publish, list releases, and rollback; query endpoints search the active catalog, explain, plan, submit jobs, fetch status, and cancel. Catalog search includes the governed semantic model, entity, typed metric expression, authorized dimension descriptions, supported time grains, and fixed calendar timezones without exposing physical resources. Explain creates only an authorized logical plan. Plan may resolve a physical binding and field lineage but never calls an analytical engine. Query submission is asynchronous, so network write deadlines are independent of query deadlines.
 
-All dynamic JSON is decoded with unknown-field and duplicate-key rejection plus a byte limit. Responses carry request IDs, no-store and browser security headers; cross-origin state changes are rejected. Errors use one `application/problem+json` shape. The embedded UI has no separate business logic, token field, or fake login; catalog, explain/plan/query, job cancellation, draft load/save/validation, publication, release listing, and rollback all call the same API and use the OIDC session.
+All dynamic JSON is decoded with unknown-field and duplicate-key rejection plus a byte limit. Responses carry request IDs, no-store and browser security headers; cross-origin state changes are rejected. Errors use one `application/problem+json` shape. The embedded UI has no separate business logic, token field, or fake login. Its management flow is registry list -> metric draft editor -> release review/publication; saving one metric writes a real optimistic draft revision, while publication remains a separate explicit action. Catalog, explain/plan/query, job cancellation, draft load/save/validation, publication, release listing, and rollback all call the same API and use the OIDC session.
 
 `metricspire serve --config` performs explicit dependency assembly. Non-secret HTTP/OIDC/policy/binding routes come from strict YAML or JSON. PostgreSQL URLs, the 32-byte session key, optional OIDC client secret, and Databricks credentials come only from environment variables. Startup does not run migrations or perform an analytical query. Shutdown stops HTTP admission, cancels and waits for background jobs and their completion audit, then closes PostgreSQL.
 

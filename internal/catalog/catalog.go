@@ -296,6 +296,9 @@ func validateCompatibleRelease(active, candidate model.SemanticManifest) error {
 		if previous.Deprecated && !next.Deprecated {
 			return fmt.Errorf("%w: published metric %q cannot be undeprecated", ErrNotPublishable, previous.Name)
 		}
+		if previous.ExternalCode != "" && previous.ExternalCode != next.ExternalCode {
+			return fmt.Errorf("%w: published metric %q cannot change its external code", ErrNotPublishable, previous.Name)
+		}
 		if !sameMetricExecutionContract(previous, next) {
 			return fmt.Errorf("%w: published metric %q cannot change execution semantics", ErrNotPublishable, previous.Name)
 		}

@@ -141,7 +141,9 @@ func changedMetricFields(before, after model.Metric) ([]string, bool) {
 			fields = append(fields, name)
 		}
 	}
+	externalCodeChanged := before.ExternalCode != after.ExternalCode
 	add("display_name", before.DisplayName != after.DisplayName)
+	add("external_code", externalCodeChanged)
 	add("description", before.Description != after.Description)
 	add("owner", before.Owner != after.Owner)
 	add("tags", !slices.Equal(before.Tags, after.Tags))
@@ -149,7 +151,7 @@ func changedMetricFields(before, after model.Metric) ([]string, bool) {
 	add("deprecated", before.Deprecated != after.Deprecated)
 	add("verification", !reflect.DeepEqual(before.Verification, after.Verification))
 
-	breaking := false
+	breaking := before.ExternalCode != "" && externalCodeChanged
 	addExecution := func(name string, changed bool) {
 		add(name, changed)
 		breaking = breaking || changed

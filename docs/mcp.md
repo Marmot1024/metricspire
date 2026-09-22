@@ -33,7 +33,15 @@ codex mcp add metricspire --url 'https://<your-app-origin>/api/v1/mcp' --oauth-c
 codex mcp login metricspire
 ```
 
-The observed Databricks staging scope is `sql`, but client scope and redirect settings depend on the actual deployment and installed client version. The redirect must match its host, port, and callback path exactly; changing the complete MCP URL may change the callback path. Do not put a `client_secret`, access token, or static Authorization header in a checked-in file. Keep the final server name stable because stored OAuth credentials are keyed to that connection; after a rename, log in again under the final name. Start a new Codex session and call `metricspire.list_namespaces`; an OAuth success screen alone does not prove MCP tool calls work. See [Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+### First connection and re-authentication
+
+The first connection has two separate steps: the MCP client must start OAuth, and the user must complete the browser consent. Typing `metricspire` or `use metricspire` selects a server; it does not start OAuth by itself. In Codex, use the server's **Authenticate** action in `/mcp`, or run `codex mcp login metricspire` immediately when `/mcp` reports `authentication required (0 tools)`. Do not wait for an MCP tool call to time out.
+
+After the command reports that login completed, start a fresh Codex session (or reload the MCP configuration if the client exposes that action) and call `metricspire.list_namespaces`. A successful browser callback alone is not a tool-call acceptance test. With a valid refresh credential, later access-token renewal should be silent; a browser should be required only after the refresh credential is no longer valid or has been revoked.
+
+For Databricks Apps, the platform ingress authenticates the initial request before it reaches MetricSpire. An anonymous `401` may therefore contain no application-generated `WWW-Authenticate` header even though the platform publishes the protected-resource metadata and the OAuth flow is configured correctly. This is expected for the Apps deployment profile and is not a reason to add a static token or a broader scope.
+
+The observed Databricks staging scope is `sql`, but client scope and redirect settings depend on the deployment and client version. The redirect must match its host, port, and callback path exactly; changing the MCP URL may change the callback path. Do not put a `client_secret`, access token, or static Authorization header in a checked-in file. Keep the server name stable because stored OAuth credentials are keyed to that connection. See [Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 For a deployment that intentionally uses bearer-token trials, `bearer_token_env_var` is supported, but it is a separate path from native OAuth. Do not combine a helper, static bearer header, and OAuth on one connection. Never paste a token into prompts, command arguments, checked-in files, or issue reports.
 

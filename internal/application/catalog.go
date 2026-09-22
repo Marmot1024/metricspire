@@ -17,6 +17,8 @@ type ActiveReleaseLister interface {
 	ListActiveReleases(context.Context, string) ([]catalog.Release, error)
 }
 
+const MaxCatalogSearchResults = 1000
+
 // ResolveActiveModel keeps the public query boundary metric-first. It returns
 // one internal model only when every requested metric exists in, and is
 // authorized from, exactly one active release. Callers never choose the model.
@@ -87,11 +89,12 @@ func (service *CatalogService) ResolveActiveModel(ctx context.Context, scope Que
 
 type MetricCatalogEntry struct {
 	Namespace           string                   `json:"namespace"`
-	ModelName           string                   `json:"-"`
+	ModelName           string                   `json:"semantic_model_name"`
 	ReleaseID           string                   `json:"release_id"`
 	ReleaseChannel      catalog.ReleaseChannel   `json:"release_channel"`
 	ManifestFingerprint string                   `json:"manifest_fingerprint"`
 	Name                string                   `json:"name"`
+	ExternalCode        string                   `json:"external_code,omitempty"`
 	DisplayName         string                   `json:"display_name"`
 	Description         string                   `json:"description"`
 	Owner               string                   `json:"owner"`
@@ -99,8 +102,11 @@ type MetricCatalogEntry struct {
 	Tags                []string                 `json:"tags,omitempty"`
 	UsageExamples       []string                 `json:"usage_examples,omitempty"`
 	Deprecated          bool                     `json:"deprecated"`
+	Entity              string                   `json:"entity"`
+	Kind                model.MetricKind         `json:"metric_kind"`
 	ValueType           model.DataType           `json:"value_type"`
 	Unit                string                   `json:"unit,omitempty"`
+	Expression          model.Expression         `json:"expression"`
 	AllowedDimensions   []string                 `json:"allowed_dimensions"`
 	DimensionDetails    []MetricDimensionEntry   `json:"dimension_details,omitempty"`
 	TimeDimension       string                   `json:"time_dimension,omitempty"`
@@ -165,8 +171,8 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 	if strings.TrimSpace(scope.Namespace) == "" || strings.TrimSpace(scope.Context.Tenant) == "" || strings.TrimSpace(scope.Context.Principal) == "" {
 		return nil, errors.New("catalog search scope is incomplete")
 	}
-	if limit < 1 || limit > 100 {
-		return nil, errors.New("catalog search limit must be between 1 and 100")
+	if limit < 1 || limit > MaxCatalogSearchResults {
+		return nil, fmt.Errorf("catalog search limit must be between 1 and %d", MaxCatalogSearchResults)
 	}
 	releases, err := service.releases.ListActiveReleases(ctx, scope.Namespace)
 	if err != nil {
@@ -222,10 +228,12 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 			results = append(results, MetricCatalogEntry{
 				Namespace: release.Namespace, ModelName: release.Name, ReleaseID: release.ID,
 				ReleaseChannel: release.Channel, ManifestFingerprint: release.ManifestFingerprint, Name: metric.Name,
-				DisplayName: metric.DisplayName, Description: metric.Description, Owner: metric.Owner,
+				ExternalCode: metric.ExternalCode,
+				DisplayName:  metric.DisplayName, Description: metric.Description, Owner: metric.Owner,
 				VerificationStatus: metric.Verification.Status,
 				Tags:               append([]string(nil), metric.Tags...), UsageExamples: append([]string(nil), metric.UsageExamples...), Deprecated: metric.Deprecated,
-				ValueType: metric.ValueType, Unit: metric.Unit,
+				Entity: metric.Entity, Kind: metric.Kind, ValueType: metric.ValueType, Unit: metric.Unit,
+				Expression:        metric.Expression,
 				AllowedDimensions: authorizedDimensions, DimensionDetails: dimensionDetails, TimeDimension: metric.TimeDimension,
 				TimeGranularities: granularities,
 			})
@@ -301,7 +309,7 @@ func matchesMetricCatalogQuery(query string, metric model.Metric) bool {
 	if query == "" {
 		return true
 	}
-	values := []string{metric.Name, metric.DisplayName, metric.Description, metric.Owner, strings.Join(metric.Tags, " ")}
+	values := []string{metric.ExternalCode, metric.Name, metric.DisplayName, metric.Description, metric.Owner, strings.Join(metric.Tags, " ")}
 	for _, value := range values {
 		if strings.Contains(strings.ToLower(value), query) {
 			return true
