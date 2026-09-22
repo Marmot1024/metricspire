@@ -877,6 +877,27 @@ func TestHTTPCatalogIndexIsScopedMergedAndPaginated(t *testing.T) {
 	if len(second.Items) != 1 || second.Items[0].Name == first.Items[0].Name || second.Counts != first.Counts {
 		t.Fatalf("second index page=%#v", second)
 	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&q=refund_rate&view=summary", "preview", nil)
+	var summary struct {
+		Items []httpapi.CatalogIndexSummary `json:"items"`
+	}
+	decodeResponse(t, response, &summary)
+	if len(summary.Items) != 1 || !summary.Items[0].Summary || summary.Items[0].Name != "refund_rate" || summary.Items[0].SourceResource != "orders" {
+		t.Fatalf("catalog summary=%#v", summary)
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/detail?namespace=demo&name=refund_rate", "preview", nil)
+	var detail httpapi.CatalogIndexEntry
+	decodeResponse(t, response, &detail)
+	if detail.CatalogStatus != "published" || detail.AuthoritativeSource == nil || detail.AuthoritativeSource.Reference != "sheet:1" {
+		t.Fatalf("catalog detail=%#v", detail)
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/detail?namespace=demo&name=pending_metric", "query", nil)
+	assertProblem(t, response, http.StatusNotFound, "not_found")
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/detail?namespace=demo&name=pending_metric", "manage", nil)
+	decodeResponse(t, response, &detail)
+	if detail.CatalogStatus != "governance" {
+		t.Fatalf("manager detail=%#v", detail)
+	}
 
 	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&q=refund_rate", "query", nil)
 	var queryOnly httpapi.CatalogIndexResponse
@@ -911,7 +932,7 @@ func TestHTTPCatalogIndexIsScopedMergedAndPaginated(t *testing.T) {
 	if len(manageOnly.Items) != 2 || manageOnly.Counts.Published != 0 || manageOnly.Counts.Draft != 1 || manageOnly.Counts.Governance != 2 {
 		t.Fatalf("manage-only index=%#v", manageOnly)
 	}
-	for _, invalid := range []string{"cursor=not_base64!", "limit=101", "status=unknown"} {
+	for _, invalid := range []string{"cursor=not_base64!", "limit=101", "status=unknown", "view=full"} {
 		response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&"+invalid, "preview", nil)
 		assertProblem(t, response, http.StatusBadRequest, "invalid_request")
 	}

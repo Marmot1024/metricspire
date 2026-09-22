@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const {catalogStatusCounts, catalogVisibleTotal, catalogStatusLabel, catalogStatusShortLabel, compactDimensions, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, groupPublicationIssues, humanOwner, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricCalculationNote, metricDetailQuery, metricExpressionLabel, metricFilterLabel, planSummaryRows, preferredTimeGranularity, resolvePresetRange, sharedTimeMetadata, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
+const {catalogStatusCounts, catalogVisibleTotal, catalogStatusLabel, catalogStatusShortLabel, compactDimensions, compactSourceName, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, groupPublicationIssues, humanOwner, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricCalculationNote, metricDetailQuery, metricExpressionLabel, metricFilterLabel, planSummaryRows, preferredTimeGranularity, resolvePresetRange, sharedTimeMetadata, verificationLabel, zonedMidnightISO, shellQuote} = require("./app.js");
 const {execFileSync} = require("node:child_process");
 
 test("copied request preserves apostrophes and shell characters as literal JSON", () => {
@@ -102,6 +102,13 @@ test("metric registry searches external codes and presents structured formulas",
   assert.equal(metricFilterLabel({field: "order.status", operator: "in", values: ["paid", "refunded"]}), "order.status IN ('paid', 'refunded')");
   assert.equal(compactDimensions(["date", "country", "platform"]), "date · country · +1");
   assert.equal(metricCalculationNote(metric), "去重计数字段 player.user_id；仅统计满足 payment.amount <> '0' 的记录。");
+});
+
+test("matchingstory list shortens only its own default physical source", () => {
+  const prefixes = {matchingstory: "mm.mm"};
+  assert.equal(compactSourceName("mm.mm.dws_daily_player_activity", "matchingstory", prefixes), "dws_daily_player_activity");
+  assert.equal(compactSourceName("other.db.events", "matchingstory", prefixes), "other.db.events");
+  assert.equal(compactSourceName("mm.mm.events", "acceptance", prefixes), "mm.mm.events");
 });
 
 test("metric detail plan query uses a bounded calendar range without executing SQL", () => {
@@ -392,11 +399,11 @@ test("a stale catalog response cannot overwrite a newer namespace", async () => 
   const oldLoad = run("loadCatalog()");
   run("state.namespace = 'new'");
   const newLoad = run("loadCatalog()");
-  assert.equal(signals.get("/api/v1/catalog/index?namespace=old&q=&status=queryable&limit=50").aborted, true);
+  assert.equal(signals.get("/api/v1/catalog/index?namespace=old&q=&status=queryable&limit=50&view=summary").aborted, true);
   const metric = (name) => ({name, display_name: name, description: name, owner: 'owner', value_type: 'integer', unit: 'times', allowed_dimensions: [], tags: [], examples: []});
-  pending.get("/api/v1/catalog/index?namespace=new&q=&status=queryable&limit=50")({items: [metric("new_metric")], counts: {published: 1, draft: 0, governance: 0, total: 1}});
+  pending.get("/api/v1/catalog/index?namespace=new&q=&status=queryable&limit=50&view=summary")({items: [metric("new_metric")], counts: {published: 1, draft: 0, governance: 0, total: 1}});
   await newLoad;
-  pending.get("/api/v1/catalog/index?namespace=old&q=&status=queryable&limit=50")({items: [metric("old_metric")], counts: {published: 1, draft: 0, governance: 0, total: 1}});
+  pending.get("/api/v1/catalog/index?namespace=old&q=&status=queryable&limit=50&view=summary")({items: [metric("old_metric")], counts: {published: 1, draft: 0, governance: 0, total: 1}});
   await oldLoad;
   assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalog.map((entry) => entry.name)"))), ["new_metric"]);
 });
@@ -415,9 +422,31 @@ test("maintainer catalog uses one server-composed page and keeps total counts", 
   await loading;
   assert.equal(paths.length, 1);
   assert.match(paths[0], /\/catalog\/index\?/);
+  assert.match(paths[0], /view=summary/);
   assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalogView.map((entry) => entry.name)"))), ["daily_active_users"]);
   assert.equal(run("state.catalogCounts.total"), 35);
   assert.equal(run("state.catalogCursor"), "next");
+});
+
+test("selecting a summary loads only that metric's authorized full detail", async () => {
+  const {context, run} = editorContext();
+  const summary = {namespace: "matchingstory", name: "revenue", semantic_model_name: "daily", catalog_status: "published", summary: true};
+  context.metric = summary;
+  run("state.namespace = 'matchingstory'");
+  run("state.catalogView = [metric]");
+  const calls = [];
+  context.requestJSON = async (path) => {
+    calls.push(path);
+    return {...summary, summary: false, description: "已登记业务口径"};
+  };
+  let displayed;
+  context.renderMetricDetail = (metric) => { displayed = metric; };
+  await run("loadMetricDetail(metric, state.metricDetailSequence)");
+  assert.deepEqual(calls, ["/api/v1/catalog/detail?namespace=matchingstory&name=revenue&model=daily"]);
+  assert.equal(displayed.description, "已登记业务口径");
+  assert.equal(run("state.catalogView[0].summary"), false);
+  await run("loadMetricDetail(metric, state.metricDetailSequence)");
+  assert.equal(calls.length, 1);
 });
 
 test("next-page failure preserves already rendered metrics", async () => {

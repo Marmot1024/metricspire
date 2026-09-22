@@ -15,6 +15,8 @@ const state = {
   queryCatalog: new Map(),
   metricDetailSequence: 0,
   metricPlanCache: new Map(),
+  metricDetailCache: new Map(),
+  metricDetailRequests: new Map(),
   selectedCatalogIndex: -1,
   queryMetricKeys: new Set(),
   filters: [],
@@ -379,6 +381,8 @@ async function switchNamespace(namespace) {
   state.catalogLoading = true;
   state.selectedCatalogIndex = -1;
   state.metricPlanCache.clear();
+  state.metricDetailCache.clear();
+  state.metricDetailRequests.clear();
   state.queryMetricKeys.clear();
   state.queryCatalog.clear();
   byID("query-metric-search").value = "";
@@ -423,7 +427,7 @@ async function loadCatalog(more = false) {
   setNotice(more ? "正在加载更多指标…" : "正在搜索指标目录…");
   byID("catalog-more").disabled = true;
   try {
-    const params = new URLSearchParams({namespace, q: search, status, limit: "50"});
+    const params = new URLSearchParams({namespace, q: search, status, limit: "50", view: "summary"});
     if (more && state.catalogCursor) params.set("cursor", state.catalogCursor);
     const page = await requestJSON(`/api/v1/catalog/index?${params}`, {signal: controller.signal});
     if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
@@ -494,8 +498,8 @@ function renderCatalog() {
     formula.title = metricFormulaLabel(metric);
     const source = document.createElement("span");
     source.className = "catalog-source";
-    source.textContent = metric.authoritative_source?.resource || metric.semantic_model_name || metric.entity || "来源待补充";
-    source.title = [metric.semantic_model_name, metric.authoritative_source?.resource, metric.authoritative_source?.field].filter(Boolean).join(" · ");
+    source.textContent = compactSourceName(metric.source_resource || metric.authoritative_source?.resource || metric.semantic_model_name || metric.entity || "来源待补充", metric.namespace);
+    source.title = [metric.semantic_model_name, metric.authoritative_source?.resource || metric.source_resource, metric.authoritative_source?.field].filter(Boolean).join(" · ");
     const status = document.createElement("span");
     const statusLabel = catalogStatusShortLabel(metric);
     status.className = `badge catalog-row-status${metric.catalog_status !== "published" || metric.deprecated || isBusinessUnverified(metric) ? " warning" : ""}`;
@@ -518,9 +522,14 @@ function renderCatalog() {
 }
 
 function renderMetricDetail(metric) {
-  byID("metric-detail-empty").hidden = Boolean(metric);
-  byID("metric-detail-content").hidden = !metric;
   const sequence = ++state.metricDetailSequence;
+  byID("metric-detail-empty").hidden = Boolean(metric && !metric.summary);
+  byID("metric-detail-content").hidden = !metric || Boolean(metric.summary);
+  if (metric?.summary) {
+    byID("metric-detail-empty").textContent = `正在加载“${metric.display_name || metric.name}”的完整定义…`;
+    loadMetricDetail(metric, sequence);
+    return;
+  }
   if (!metric) return;
   const draft = metric.catalog_status === "draft";
   const pending = metric.catalog_status === "governance";
@@ -549,7 +558,7 @@ function renderMetricDetail(metric) {
   byID("detail-semantic-model").textContent = metric.semantic_model_name || "待补充";
   byID("detail-entity").textContent = metric.entity || "待补充";
   const authoritative = metric.authoritative_source || {};
-  byID("detail-authoritative-source").textContent = [authoritative.resource, authoritative.field].filter(Boolean).join(" · ") || "待补充";
+  byID("detail-authoritative-source").textContent = [compactSourceName(authoritative.resource, metric.namespace), authoritative.field].filter(Boolean).join(" · ") || "待补充";
   byID("detail-physical-source").textContent = pending ? "尚未绑定" : "正在解析…";
   byID("detail-source-state").textContent = pending ? "待治理" : "正在解析";
   byID("detail-field-lineage").replaceChildren();
@@ -575,6 +584,36 @@ function renderMetricDetail(metric) {
   byID("detail-query-button").disabled = pending || metric.deprecated || !hasPermission("query:execute") || (draft && !hasPermission("model:manage"));
   byID("detail-query-button").onclick = () => addMetricToQuery(metric);
   if (!pending && (hasPermission("query:execute") || (draft && hasPermission("model:manage")))) loadMetricLineage(metric, sequence);
+}
+
+function catalogDetailKey(metric) {
+  return [metric.namespace, metric.name, metric.semantic_model_name || ""].join("\u0000");
+}
+
+async function loadMetricDetail(metric, sequence) {
+  const key = catalogDetailKey(metric);
+  try {
+    let detail = state.metricDetailCache.get(key);
+    if (!detail) {
+      let pending = state.metricDetailRequests.get(key);
+      if (!pending) {
+        const params = new URLSearchParams({namespace: metric.namespace, name: metric.name});
+        if (metric.semantic_model_name) params.set("model", metric.semantic_model_name);
+        pending = requestJSON(`/api/v1/catalog/detail?${params}`);
+        state.metricDetailRequests.set(key, pending);
+      }
+      try { detail = await pending; } finally { state.metricDetailRequests.delete(key); }
+      state.metricDetailCache.set(key, detail);
+    }
+    if (sequence !== state.metricDetailSequence || metric.namespace !== state.namespace) return;
+    const index = state.catalogView.indexOf(metric);
+    if (index >= 0) state.catalogView[index] = detail;
+    if (detail.catalog_status !== "governance") state.queryCatalog.set(metricKey(detail), detail);
+    renderMetricDetail(detail);
+  } catch (error) {
+    if (sequence !== state.metricDetailSequence) return;
+    byID("metric-detail-empty").textContent = `完整定义暂不可用：${errorMessage(error)}。重新选择指标可重试。`;
+  }
 }
 
 function metricCalculationNote(metric) {
@@ -990,6 +1029,12 @@ function querySummaryRows(query, metrics = selectedQueryMetrics()) {
 function resourceLabel(resource = {}) {
   if (resource.uri) return resource.uri;
   return [resource.catalog, resource.schema, resource.table].filter(Boolean).join(".") || "由服务端绑定解析";
+}
+
+function compactSourceName(resource, namespace, prefixes = state.context?.source_prefixes || {}) {
+  if (!resource) return "";
+  const prefix = prefixes[namespace];
+  return prefix && resource.startsWith(`${prefix}.`) ? resource.slice(prefix.length + 1) : resource;
 }
 
 function planSummaryRows(operation, result, metrics = []) {
@@ -2005,6 +2050,6 @@ async function initialize() {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = {catalogStatusCounts, catalogVisibleTotal, catalogStatusLabel, catalogStatusShortLabel, compactDimensions, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, groupPublicationIssues, humanOwner, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricCalculationNote, metricDetailQuery, metricExpressionLabel, metricFilterLabel, metricFormulaLabel, metricTimeDetail, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, sharedTimeMetadata, shiftDate, timezoneParts, verificationLabel, zonedMidnightISO, shellQuote};
+  module.exports = {catalogStatusCounts, catalogVisibleTotal, catalogStatusLabel, catalogStatusShortLabel, compactDimensions, compactSourceName, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, groupPublicationIssues, humanOwner, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricCalculationNote, metricDetailQuery, metricExpressionLabel, metricFilterLabel, metricFormulaLabel, metricTimeDetail, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, sharedTimeMetadata, shiftDate, timezoneParts, verificationLabel, zonedMidnightISO, shellQuote};
 }
 if (typeof document !== "undefined") initialize();

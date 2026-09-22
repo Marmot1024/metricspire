@@ -57,6 +57,50 @@ type CatalogIndexResponse struct {
 	Incomplete bool                `json:"incomplete,omitempty"`
 }
 
+// CatalogIndexSummary contains only fields needed to render the list and
+// construct a bounded query. Full definitions and evidence are fetched when
+// a row is selected.
+type CatalogIndexSummary struct {
+	Namespace          string                             `json:"namespace"`
+	ModelName          string                             `json:"semantic_model_name"`
+	Name               string                             `json:"name"`
+	ExternalCode       string                             `json:"external_code,omitempty"`
+	DisplayName        string                             `json:"display_name"`
+	Owner              string                             `json:"owner"`
+	CatalogStatus      string                             `json:"catalog_status"`
+	VerificationStatus model.VerificationStatus           `json:"verification_status"`
+	Deprecated         bool                               `json:"deprecated"`
+	Tags               []string                           `json:"tags,omitempty"`
+	ReleaseID          string                             `json:"release_id,omitempty"`
+	ValueType          model.DataType                     `json:"value_type"`
+	Unit               string                             `json:"unit,omitempty"`
+	AllowedDimensions  []string                           `json:"allowed_dimensions"`
+	DimensionDetails   []application.MetricDimensionEntry `json:"dimension_details,omitempty"`
+	TimeDimension      string                             `json:"time_dimension,omitempty"`
+	TimeGranularities  []model.TimeGranularity            `json:"time_granularities,omitempty"`
+	Expression         model.Expression                   `json:"expression,omitempty"`
+	FormulaSummary     string                             `json:"formula_summary,omitempty"`
+	SourceResource     string                             `json:"source_resource,omitempty"`
+	Summary            bool                               `json:"summary"`
+}
+
+func summarizeCatalogIndex(entry CatalogIndexEntry) CatalogIndexSummary {
+	summary := CatalogIndexSummary{
+		Namespace: entry.Namespace, ModelName: entry.ModelName, Name: entry.Name,
+		ExternalCode: entry.ExternalCode, DisplayName: entry.DisplayName, Owner: entry.Owner,
+		CatalogStatus: entry.CatalogStatus, VerificationStatus: entry.VerificationStatus,
+		Deprecated: entry.Deprecated, Tags: entry.Tags, ReleaseID: entry.ReleaseID,
+		ValueType: entry.ValueType, Unit: entry.Unit, AllowedDimensions: entry.AllowedDimensions,
+		DimensionDetails: entry.DimensionDetails, TimeDimension: entry.TimeDimension,
+		TimeGranularities: entry.TimeGranularities, Expression: entry.Expression,
+		FormulaSummary: entry.FormulaSummary, Summary: true,
+	}
+	if entry.AuthoritativeSource != nil {
+		summary.SourceResource = entry.AuthoritativeSource.Resource
+	}
+	return summary
+}
+
 type catalogPublishedResult struct {
 	items    []application.MetricCatalogEntry
 	duration time.Duration
@@ -109,6 +153,11 @@ func (server *Server) handleCatalogIndex(response http.ResponseWriter, request *
 		server.writeProblem(response, request, http.StatusBadRequest, "invalid_request", "Invalid request", "cursor is invalid", "cursor")
 		return
 	}
+	view := request.URL.Query().Get("view")
+	if view != "" && view != "summary" {
+		server.writeProblem(response, request, http.StatusBadRequest, "invalid_request", "Invalid request", "view must be summary", "view")
+		return
+	}
 
 	started := time.Now()
 	server.withTimeout(response, request, server.config.ControlTimeout, func(ctx context.Context) error {
@@ -155,10 +204,73 @@ func (server *Server) handleCatalogIndex(response http.ResponseWriter, request *
 		}
 		response.Header().Set("Server-Timing", fmt.Sprintf("published;dur=%.1f, governance;dur=%.1f, catalog_index;dur=%.1f",
 			milliseconds(published.duration), milliseconds(governed.duration), milliseconds(time.Since(started))))
-		return writeJSON(response, http.StatusOK, CatalogIndexResponse{
+		result := CatalogIndexResponse{
 			Items: page, Counts: counts, NextCursor: nextCursor,
 			Incomplete: len(published.items) == application.MaxCatalogSearchResults || len(governed.items) == governance.MaxImportRecords,
-		})
+		}
+		if view == "summary" {
+			summaries := make([]CatalogIndexSummary, 0, len(page))
+			for _, entry := range page {
+				summaries = append(summaries, summarizeCatalogIndex(entry))
+			}
+			return writeJSON(response, http.StatusOK, struct {
+				Items      []CatalogIndexSummary `json:"items"`
+				Counts     CatalogIndexCounts    `json:"counts"`
+				NextCursor string                `json:"next_cursor,omitempty"`
+				Incomplete bool                  `json:"incomplete,omitempty"`
+			}{summaries, result.Counts, result.NextCursor, result.Incomplete})
+		}
+		return writeJSON(response, http.StatusOK, result)
+	})
+}
+
+func (server *Server) handleCatalogDetail(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		server.methodNotAllowed(response, request, http.MethodGet)
+		return
+	}
+	principal, ok := server.authenticate(response, request)
+	if !ok {
+		return
+	}
+	if !principal.Has(PermissionQuery) && !principal.Has(PermissionManage) {
+		server.writeProblem(response, request, http.StatusForbidden, "permission_denied", "Permission denied", "catalog access requires query or management permission", "")
+		return
+	}
+	namespace := strings.TrimSpace(request.URL.Query().Get("namespace"))
+	name := strings.TrimSpace(request.URL.Query().Get("name"))
+	modelName := strings.TrimSpace(request.URL.Query().Get("model"))
+	if namespace == "" || name == "" {
+		server.writeProblem(response, request, http.StatusBadRequest, "invalid_request", "Invalid request", "namespace and name are required", "name")
+		return
+	}
+	server.withTimeout(response, request, server.config.ControlTimeout, func(ctx context.Context) error {
+		var published []application.MetricCatalogEntry
+		var records []governance.MetricRecord
+		if principal.Has(PermissionQuery) {
+			var err error
+			published, err = server.deps.CatalogSearch.SearchActive(ctx, application.QueryScope{
+				Namespace: namespace,
+				Context:   model.RequestContext{Tenant: principal.Tenant, Principal: principal.Subject, Roles: principal.Roles, RequestID: requestID(request)},
+			}, name, application.MaxCatalogSearchResults)
+			if err != nil {
+				return err
+			}
+		}
+		if principal.Has(PermissionManage) {
+			var err error
+			records, err = server.deps.Governance.List(ctx, namespace, name, governance.MaxImportRecords)
+			if err != nil {
+				return err
+			}
+		}
+		for _, entry := range buildCatalogIndex(published, records) {
+			if entry.Name == name && (modelName == "" || entry.ModelName == modelName) {
+				return writeJSON(response, http.StatusOK, entry)
+			}
+		}
+		server.writeProblem(response, request, http.StatusNotFound, "not_found", "Not found", "metric is not visible in this namespace", "name")
+		return nil
 	})
 }
 
