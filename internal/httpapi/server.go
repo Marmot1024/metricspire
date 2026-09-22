@@ -105,6 +105,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/explain", server.handleMetricExplain)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/plan", server.handleMetricPlan)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/query", server.handleMetricQuery)
+	server.mux.HandleFunc(APIPrefix+"/catalog/index", server.handleCatalogIndex)
 	server.mux.HandleFunc(APIPrefix+"/catalog/search", server.handleCatalogSearch)
 	server.mux.HandleFunc(APIPrefix+"/ui/context", server.handleUIContext)
 	server.mux.HandleFunc(APIPrefix+"/jobs/{job}", server.handleJob)

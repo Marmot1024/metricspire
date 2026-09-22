@@ -7,6 +7,11 @@ const state = {
   catalog: [],
   catalogView: [],
   catalogLoadSequence: 0,
+  catalogAbortController: null,
+  catalogCursor: "",
+  catalogCounts: null,
+  catalogIncomplete: false,
+  queryCatalog: new Map(),
   metricDetailSequence: 0,
   metricPlanCache: new Map(),
   selectedCatalogIndex: -1,
@@ -272,7 +277,7 @@ function matchingQueryMetrics(metrics, search, selectedKeys, limit = 12) {
 }
 
 function selectedQueryMetrics() {
-	return state.catalog.filter((metric) => state.queryMetricKeys.has(metricKey(metric)));
+  return [...state.queryMetricKeys].map((key) => state.queryCatalog.get(key)).filter(Boolean);
 }
 
 function queryMode(metrics = selectedQueryMetrics()) {
@@ -361,9 +366,13 @@ async function switchNamespace(namespace) {
   byID("current-namespace").textContent = namespace || "没有配置业务域";
   state.catalog = [];
   state.catalogView = [];
+  state.catalogCounts = null;
+  state.catalogIncomplete = false;
+  state.catalogCursor = "";
   state.selectedCatalogIndex = -1;
   state.metricPlanCache.clear();
   state.queryMetricKeys.clear();
+  state.queryCatalog.clear();
   byID("query-metric-search").value = "";
   state.filters = [];
   resetQueryFeedback();
@@ -377,8 +386,11 @@ async function switchNamespace(namespace) {
   if (!byID("governance-workspace").hidden && state.governanceRoute) await loadGovernance();
 }
 
-async function loadCatalog() {
+async function loadCatalog(more = false) {
   const loadSequence = ++state.catalogLoadSequence;
+  state.catalogAbortController?.abort();
+  const controller = new AbortController();
+  state.catalogAbortController = controller;
   const namespace = state.namespace;
   const startedAt = typeof performance !== "undefined" && performance.now ? performance.now() : 0;
   if (!state.namespace || (!hasPermission("query:execute") && !hasPermission("model:manage"))) {
@@ -388,76 +400,50 @@ async function loadCatalog() {
     return;
   }
   const search = byID("catalog-search").value.trim();
-  setNotice(hasPermission("model:manage") ? "正在读取已发布指标和治理目录…" : "正在读取当前业务域的已发布指标…");
-  const canQuery = hasPermission("query:execute");
-  const canManage = hasPermission("model:manage");
-  const publishedRequest = canQuery
-    ? requestJSON(`/api/v1/catalog/search?namespace=${escapePath(namespace)}&q=${encodeURIComponent(search)}&limit=100`)
-    : Promise.resolve([]);
-  const governanceRequest = canManage
-    ? requestJSON(`/api/v1/namespaces/${escapePath(namespace)}/governance/metrics?q=${encodeURIComponent(search)}&limit=1000`)
-    : Promise.resolve([]);
-  let published = [];
-  try {
-    published = await publishedRequest;
-    if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
-    state.catalogView = mergeCatalogEntries(published, []);
-    state.catalog = state.catalogView.filter((metric) => metric.catalog_status !== "governance");
-    state.queryMetricKeys = new Set([...state.queryMetricKeys].filter((key) => state.catalog.some((metric) => metricKey(metric) === key)));
-    if (state.selectedCatalogIndex >= state.catalogView.length) state.selectedCatalogIndex = -1;
-    renderCatalog();
-    updateQueryBuilder();
-    if (!canManage) {
-      const elapsed = startedAt ? ` · ${Math.round(performance.now() - startedAt)}ms` : "";
-      setNotice(`已载入 ${published.length} 个已发布指标${elapsed}。选择指标查看口径与可用维度。`, "success");
-      return;
-    }
-    setNotice(`已显示 ${published.length} 个已发布指标，正在补充治理状态…`);
-  } catch (error) {
-    if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
-    if (!canManage) {
-      state.catalog = [];
-      state.catalogView = [];
-      renderCatalog();
-      updateQueryBuilder();
-      setNotice(errorMessage(error), "error");
-      return;
-    }
-  }
-  try {
-    const governanceRecords = await governanceRequest;
-    if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
-    const governed = governanceCatalogEntries(governanceRecords).filter((metric) => matchesCatalogSearch(metric, search));
-    state.catalogView = mergeCatalogEntries(published, governed);
-    state.catalog = state.catalogView.filter((metric) => metric.catalog_status !== "governance");
-    state.queryMetricKeys = new Set([...state.queryMetricKeys].filter((key) => state.catalog.some((metric) => metricKey(metric) === key)));
-    if (state.selectedCatalogIndex >= state.catalogView.length) state.selectedCatalogIndex = -1;
-    renderCatalog();
-    updateQueryBuilder();
-    const counts = catalogStatusCounts(state.catalogView);
-    const elapsed = startedAt ? ` · ${Math.round(performance.now() - startedAt)}ms` : "";
-    setNotice(`已载入 ${counts.published} 个已发布指标、${counts.draft} 个可试查定义和 ${counts.governance} 个待治理指标${elapsed}。`, "success");
-  } catch (error) {
-    if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
-    if (published.length) {
-      setNotice(`已显示 ${published.length} 个已发布指标；治理状态暂时加载失败。${errorMessage(error)}`, "warning");
-      return;
-    }
+  const status = byID("catalog-status-filter").value || "queryable";
+  if (!more) {
+    state.catalogCursor = "";
+    state.catalogCounts = null;
+    state.catalogIncomplete = false;
     state.catalog = [];
     state.catalogView = [];
+    state.selectedCatalogIndex = -1;
+    renderCatalog();
+  }
+  setNotice(more ? "正在加载更多指标…" : "正在搜索指标目录…");
+  byID("catalog-more").disabled = true;
+  try {
+    const params = new URLSearchParams({namespace, q: search, status, limit: "50"});
+    if (more && state.catalogCursor) params.set("cursor", state.catalogCursor);
+    const page = await requestJSON(`/api/v1/catalog/index?${params}`, {signal: controller.signal});
+    if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
+    state.catalogView = more ? [...state.catalogView, ...page.items] : page.items;
+    state.catalogCounts = page.counts;
+    state.catalogIncomplete = Boolean(page.incomplete);
+    state.catalogCursor = page.next_cursor || "";
+    state.catalog = state.catalogView.filter((metric) => metric.catalog_status !== "governance");
+    for (const metric of state.catalog) state.queryCatalog.set(metricKey(metric), metric);
+    if (state.selectedCatalogIndex >= state.catalogView.length) state.selectedCatalogIndex = -1;
     renderCatalog();
     updateQueryBuilder();
-    setNotice(errorMessage(error), "error");
+    const elapsed = startedAt ? ` · ${Math.round(performance.now() - startedAt)}ms` : "";
+    setNotice(`已显示 ${state.catalogView.length} / ${page.incomplete ? "至少 " : ""}${page.counts.total} 个指标${elapsed}${page.incomplete ? "；目录达到服务端扫描上限，请缩小搜索范围。" : "。"}`, page.incomplete ? "warning" : "success");
+  } catch (error) {
+    if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
+    if (error?.name !== "AbortError") setNotice(errorMessage(error), "error");
+  } finally {
+    if (loadSequence === state.catalogLoadSequence) byID("catalog-more").disabled = false;
   }
 }
 
 function renderCatalog() {
-  const counts = catalogStatusCounts(state.catalogView);
+  const counts = state.catalogCounts || catalogStatusCounts(state.catalogView);
   const {published: publishedCount, draft: draftCount, governance: governanceCount} = counts;
   const statusFilter = byID("catalog-status-filter").value || "queryable";
   const visibleEntries = filterCatalogEntries(state.catalogView, statusFilter);
+  byID("catalog-more").hidden = !state.catalogCursor;
   byID("catalog-count").textContent = publishedCount || draftCount || governanceCount
-    ? `显示 ${visibleEntries.length} / ${state.catalogView.length} · ${publishedCount} 已发布 · ${draftCount} 可试查 · ${governanceCount} 待治理`
+    ? `显示 ${visibleEntries.length} / ${state.catalogIncomplete ? "至少 " : ""}${counts.total || state.catalogView.length} · ${publishedCount} 已发布 · ${draftCount} 可试查 · ${governanceCount} 待治理`
     : `${state.catalogView.length} 个指标`;
   const list = byID("catalog-list");
   list.replaceChildren();
@@ -673,6 +659,7 @@ function addMetricToQuery(metric) {
   const incompatible = selected.some((candidate) => candidate.catalog_status !== metric.catalog_status ||
     (metric.catalog_status === "draft" && candidate.semantic_model_name !== metric.semantic_model_name));
   if (incompatible) state.queryMetricKeys.clear();
+  state.queryCatalog.set(metricKey(metric), metric);
   state.queryMetricKeys.add(metricKey(metric));
   byID("query-metric-search").value = "";
   activateTab("query");
@@ -709,21 +696,22 @@ function renderMetricOptions() {
   const selected = selectedQueryMetrics();
   const search = byID("query-metric-search").value.trim();
   byID("query-metric-selection-status").textContent = selected.length
-    ? `已选择 ${selected.length} 个指标。输入名称或 code 可继续添加。`
-    : "先从指标库带入指标，或在这里输入名称或 code 搜索。";
-  if (!state.catalog.length) {
+    ? `已选择 ${selected.length} 个指标。可在目录搜索并带入更多指标。`
+    : "先在指标目录搜索、确认口径并带入；这里可筛选当前已载入的指标。";
+  if (!state.catalog.length && !selected.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.textContent = "请先在指标库中找到可查询指标。";
     container.append(empty);
     return;
   }
-  const visibleMetrics = matchingQueryMetrics(state.catalog, search, state.queryMetricKeys);
+  const available = [...new Map([...selected, ...state.catalog].map((metric) => [metricKey(metric), metric])).values()];
+  const visibleMetrics = matchingQueryMetrics(available, search, state.queryMetricKeys);
   if (!visibleMetrics.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.textContent = search
-      ? "没有找到匹配的可查询指标。请调整名称或 code。"
+      ? "当前已载入指标中没有匹配项；请到指标目录搜索。"
       : "尚未选择指标。建议先在指标库确认口径，再点击“用于查询”。";
     container.append(empty);
     return;
@@ -1885,12 +1873,12 @@ function bindEvents() {
     state.draft = null;
     await loadGovernance();
   });
-  byID("catalog-search-button").addEventListener("click", loadCatalog);
+  byID("catalog-search-button").addEventListener("click", () => loadCatalog());
   byID("catalog-search").addEventListener("keydown", (event) => { if (event.key === "Enter") loadCatalog(); });
   byID("catalog-status-filter").addEventListener("change", () => {
-    state.selectedCatalogIndex = -1;
-    renderCatalog();
+    loadCatalog();
   });
+  byID("catalog-more").addEventListener("click", () => loadCatalog(true));
   byID("query-metric-search").addEventListener("input", renderMetricOptions);
   for (const button of document.querySelectorAll("[data-tab]")) button.addEventListener("click", () => activateTab(button.dataset.tab));
   byID("metric-select").addEventListener("change", (event) => {

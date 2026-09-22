@@ -827,10 +827,78 @@ func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
 	response = recorder.Result()
 	script := readRawBody(t, response)
 	if response.StatusCode != http.StatusOK || !strings.Contains(script, "/api/v1/ui/context") ||
-		!strings.Contains(script, "/api/v1/catalog/search") || !strings.Contains(script, "reviewGovernance") ||
+		!strings.Contains(script, "/api/v1/catalog/index") || !strings.Contains(script, "reviewGovernance") ||
 		!strings.Contains(script, "rollbackRelease") || !strings.Contains(script, "/cancel") ||
 		!strings.Contains(script, "result-table") || !strings.Contains(script, "previous_month") {
 		t.Fatal("UI JavaScript does not call the product API")
+	}
+}
+
+func TestHTTPCatalogIndexIsScopedMergedAndPaginated(t *testing.T) {
+	handler, _, _ := newTestServer(t, httpapi.Config{UIModels: []httpapi.UIModelRoute{{Namespace: "demo", ModelName: "commerce"}}})
+	definition := func(code string, readiness governance.SemanticReadiness) governance.MetricDefinition {
+		modelName := ""
+		if readiness == governance.ReadinessExecutableUnverified {
+			modelName = "commerce"
+		}
+		return governance.MetricDefinition{
+			Code: code, DisplayName: code, Description: "source-backed definition", Owner: "owner", Status: "unverified",
+			BusinessType: governance.BusinessAtomic, SemanticReadiness: readiness, SemanticModelName: modelName,
+			AuthoritativeSource: governance.SourceReference{Reference: "sheet:1", Resource: "orders", Field: "amount"},
+			ValueType:           model.DataTypeDecimal, Verification: model.Verification{Status: model.VerificationUnverified},
+		}
+	}
+	response := performJSON(handler, http.MethodPost, "/api/v1/namespaces/demo/governance/imports", "manage", httpapi.GovernanceImportRequest{
+		SourceFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Records: []governance.MetricDefinition{
+			definition("draft_metric", governance.ReadinessExecutableUnverified),
+			definition("pending_metric", governance.ReadinessNeedsRemediation),
+			definition("refund_rate", governance.ReadinessNeedsRemediation),
+		},
+	})
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("import status=%d body=%s", response.StatusCode, readRawBody(t, response))
+	}
+
+	path := "/api/v1/catalog/index?namespace=demo&limit=1&status=all"
+	response = performJSON(handler, http.MethodGet, path, "preview", nil)
+	if response.Header.Get("Server-Timing") == "" {
+		t.Fatal("catalog index did not report server timings")
+	}
+	var first httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &first)
+	if first.Counts.Published < 1 || first.Counts.Draft != 1 || first.Counts.Governance != 1 || first.Counts.Total != first.Counts.Published+2 ||
+		len(first.Items) != 1 || first.NextCursor == "" {
+		t.Fatalf("first index page=%#v", first)
+	}
+	response = performJSON(handler, http.MethodGet, path+"&cursor="+first.NextCursor, "preview", nil)
+	var second httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &second)
+	if len(second.Items) != 1 || second.Items[0].Name == first.Items[0].Name || second.Counts != first.Counts {
+		t.Fatalf("second index page=%#v", second)
+	}
+
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&q=refund_rate", "query", nil)
+	var queryOnly httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &queryOnly)
+	if len(queryOnly.Items) != 1 || queryOnly.Items[0].CatalogStatus != "published" || queryOnly.Items[0].AuthoritativeSource != nil || queryOnly.Counts.Governance != 0 {
+		t.Fatalf("query-only index=%#v", queryOnly)
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&q=refund_rate", "preview", nil)
+	var enriched httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &enriched)
+	if len(enriched.Items) != 1 || enriched.Items[0].CatalogStatus != "published" || enriched.Items[0].AuthoritativeSource == nil || enriched.Items[0].AuthoritativeSource.Resource != "orders" {
+		t.Fatalf("manager index did not merge source evidence=%#v", enriched)
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&status=governance", "manage", nil)
+	var manageOnly httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &manageOnly)
+	if len(manageOnly.Items) != 2 || manageOnly.Counts.Published != 0 || manageOnly.Counts.Draft != 1 || manageOnly.Counts.Governance != 2 {
+		t.Fatalf("manage-only index=%#v", manageOnly)
+	}
+	for _, invalid := range []string{"cursor=not_base64!", "limit=101", "status=unknown"} {
+		response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&"+invalid, "preview", nil)
+		assertProblem(t, response, http.StatusBadRequest, "invalid_request")
 	}
 }
 
@@ -1078,7 +1146,7 @@ func newTestServerWithDependencies(t *testing.T, config httpapi.Config, engine *
 		case "Bearer manage":
 			return httpapi.Principal{Tenant: "demo", Subject: "manager@example.com", Roles: []string{"manager"}, Permissions: []httpapi.Permission{httpapi.PermissionManage}}, nil
 		case "Bearer preview":
-			return httpapi.Principal{Tenant: "demo", Subject: "manager@example.com", Roles: []string{"manager"}, Permissions: []httpapi.Permission{httpapi.PermissionManage, httpapi.PermissionQuery}}, nil
+			return httpapi.Principal{Tenant: "demo", Subject: "manager@example.com", Roles: []string{"manager", "analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionManage, httpapi.PermissionQuery}}, nil
 		default:
 			return httpapi.Principal{}, httpapi.ErrUnauthenticated
 		}

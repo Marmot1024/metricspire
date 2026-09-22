@@ -17,6 +17,8 @@ type ActiveReleaseLister interface {
 	ListActiveReleases(context.Context, string) ([]catalog.Release, error)
 }
 
+const MaxCatalogSearchResults = 1000
+
 // ResolveActiveModel keeps the public query boundary metric-first. It returns
 // one internal model only when every requested metric exists in, and is
 // authorized from, exactly one active release. Callers never choose the model.
@@ -169,8 +171,8 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 	if strings.TrimSpace(scope.Namespace) == "" || strings.TrimSpace(scope.Context.Tenant) == "" || strings.TrimSpace(scope.Context.Principal) == "" {
 		return nil, errors.New("catalog search scope is incomplete")
 	}
-	if limit < 1 || limit > 100 {
-		return nil, errors.New("catalog search limit must be between 1 and 100")
+	if limit < 1 || limit > MaxCatalogSearchResults {
+		return nil, fmt.Errorf("catalog search limit must be between 1 and %d", MaxCatalogSearchResults)
 	}
 	releases, err := service.releases.ListActiveReleases(ctx, scope.Namespace)
 	if err != nil {

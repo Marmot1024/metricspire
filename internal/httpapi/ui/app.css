@@ -113,7 +113,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .text-button { width: fit-content; border: 0; padding: 3px 0; background: transparent; color: #b8d3c2; text-decoration: none; font-size: .74rem; font-weight: 750; cursor: pointer; }
 
 .catalog-layout { display: grid; grid-template-columns: minmax(700px, 1.55fr) minmax(370px, .82fr); gap: 16px; align-items: start; }
+.catalog-list-column { min-width: 0; }
 .catalog-table-shell { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.catalog-more { display: block; margin: 14px auto 0; }
 .catalog-table-head, .catalog-row { display: grid; grid-template-columns: minmax(190px, 1.15fr) minmax(250px, 1.45fr) minmax(170px, .9fr) 68px; align-items: center; gap: 16px; }
 .catalog-table-head { min-height: 40px; padding: 0 16px; border-bottom: 1px solid var(--line); background: #f8f8f5; color: #737b76; font-size: .63rem; font-weight: 760; letter-spacing: .045em; }
 .catalog-list { display: grid; max-height: 730px; overflow: auto; }

@@ -184,7 +184,7 @@ test("explain and plan have a human-readable summary independent of raw JSON", (
 
 // Exercise the actual form handlers without adding a production DOM dependency.
 function editorContext() {
-  const context = vm.createContext({structuredClone});
+  const context = vm.createContext({structuredClone, AbortController, URLSearchParams});
   vm.runInContext(fs.readFileSync(require.resolve("./app.js"), "utf8"), context);
   const element = () => ({value: "", checked: false, disabled: false, dataset: {}, children: [], handlers: {},
     addEventListener(name, handler) { this.handlers[name] = handler; },
@@ -214,6 +214,7 @@ test("query builder automatically completes grouped time semantics and keeps fil
   const {context, run} = editorContext();
   run(`state.catalog = [{name: 'game_start_count', display_name: '游戏启动次数', catalog_status: 'published',
     allowed_dimensions: ['date'], time_dimension: 'date', time_granularities: ['day', 'month']}];
+    state.queryCatalog.set('game_start_count', state.catalog[0]);
     state.queryMetricKeys = new Set(['game_start_count']); state.filters = [];`);
   context.document.querySelectorAll = (selector) => selector === "input[name='query-dimension']:checked" ? [{value: "date", checked: true}] : [];
   const values = {"row-limit": "10", "time-preset": "custom", "time-grain": "",
@@ -376,53 +377,73 @@ test("successful namespace switching clears the previous query metric search", a
 test("a stale catalog response cannot overwrite a newer namespace", async () => {
   const {context, run} = editorContext();
   const pending = new Map();
-  context.requestJSON = (path) => new Promise((resolve) => pending.set(path, resolve));
+  const signals = new Map();
+  context.requestJSON = (path, options) => { signals.set(path, options.signal); return new Promise((resolve) => pending.set(path, resolve)); };
   context.renderCatalog = () => {};
   context.updateQueryBuilder = () => {};
   run("state.context = {permissions: ['query:execute'], models: []}; state.namespace = 'old'");
   const oldLoad = run("loadCatalog()");
   run("state.namespace = 'new'");
   const newLoad = run("loadCatalog()");
+  assert.equal(signals.get("/api/v1/catalog/index?namespace=old&q=&status=queryable&limit=50").aborted, true);
   const metric = (name) => ({name, display_name: name, description: name, owner: 'owner', value_type: 'integer', unit: 'times', allowed_dimensions: [], tags: [], examples: []});
-  pending.get("/api/v1/catalog/search?namespace=new&q=&limit=100")([metric("new_metric")]);
+  pending.get("/api/v1/catalog/index?namespace=new&q=&status=queryable&limit=50")({items: [metric("new_metric")], counts: {published: 1, draft: 0, governance: 0, total: 1}});
   await newLoad;
-  pending.get("/api/v1/catalog/search?namespace=old&q=&limit=100")([metric("old_metric")]);
+  pending.get("/api/v1/catalog/index?namespace=old&q=&status=queryable&limit=50")({items: [metric("old_metric")], counts: {published: 1, draft: 0, governance: 0, total: 1}});
   await oldLoad;
   assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalog.map((entry) => entry.name)"))), ["new_metric"]);
 });
 
-test("maintainer catalog renders published metrics before governance finishes", async () => {
+test("maintainer catalog uses one server-composed page and keeps total counts", async () => {
   const {context, run} = editorContext();
-  let finishPublished;
-  let finishGovernance;
-  context.requestJSON = (path) => new Promise((resolve) => {
-    if (path.includes("/catalog/search")) finishPublished = resolve;
-    else finishGovernance = resolve;
-  });
+  let finishPage;
+  const paths = [];
+  context.requestJSON = (path) => { paths.push(path); return new Promise((resolve) => { finishPage = resolve; }); };
   context.renderCatalog = () => {};
   context.updateQueryBuilder = () => {};
   run("state.context = {permissions: ['query:execute', 'model:manage'], models: []}; state.namespace = 'matchingstory'");
   const loading = run("loadCatalog()");
-  finishPublished([{name: "daily_active_users", release_id: "rel_1"}]);
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalogView.map((entry) => entry.name)"))), ["daily_active_users"]);
-  assert.match(context.document.getElementById("notice").textContent, /正在补充治理状态/);
-  finishGovernance([]);
+  finishPage({items: [{name: "daily_active_users", release_id: "rel_1", catalog_status: "published"}],
+    counts: {published: 1, draft: 4, governance: 30, total: 35}, next_cursor: "next"});
   await loading;
+  assert.equal(paths.length, 1);
+  assert.match(paths[0], /\/catalog\/index\?/);
+  assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalogView.map((entry) => entry.name)"))), ["daily_active_users"]);
+  assert.equal(run("state.catalogCounts.total"), 35);
+  assert.equal(run("state.catalogCursor"), "next");
 });
 
-test("governance failure preserves already rendered published metrics", async () => {
+test("next-page failure preserves already rendered metrics", async () => {
   const {context, run} = editorContext();
-  context.requestJSON = async (path) => {
-    if (path.includes("/catalog/search")) return [{name: "daily_active_users", release_id: "rel_1"}];
-    throw {detail: "governance unavailable"};
+  let requests = 0;
+  context.requestJSON = async () => {
+    if (++requests === 1) return {items: [{name: "daily_active_users", release_id: "rel_1", catalog_status: "published"}],
+      counts: {published: 2, draft: 0, governance: 0, total: 2}, next_cursor: "next"};
+    throw {detail: "page unavailable"};
   };
   context.renderCatalog = () => {};
   context.updateQueryBuilder = () => {};
   run("state.context = {permissions: ['query:execute', 'model:manage'], models: []}; state.namespace = 'matchingstory'");
   await run("loadCatalog()");
+  await run("loadCatalog(true)");
   assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalogView.map((entry) => entry.name)"))), ["daily_active_users"]);
-  assert.match(context.document.getElementById("notice").textContent, /治理状态暂时加载失败/);
+  assert.match(context.document.getElementById("notice").textContent, /page unavailable/);
+});
+
+test("selected query metric survives a new catalog search and page replacement", async () => {
+  const {context, run} = editorContext();
+  let requests = 0;
+  context.requestJSON = async () => ({items: [{name: ++requests === 1 ? "orders" : "revenue", catalog_status: "published", allowed_dimensions: []}],
+    counts: {published: 1, draft: 0, governance: 0, total: 1}});
+  context.renderCatalog = () => {};
+  context.updateQueryBuilder = () => {};
+  run("state.context = {permissions: ['query:execute']}; state.namespace = 'demo'");
+  await run("loadCatalog()");
+  run("state.queryMetricKeys.add('orders')");
+  context.document.getElementById("catalog-search").value = "revenue";
+  await run("loadCatalog()");
+  assert.deepEqual(JSON.parse(JSON.stringify(run("selectedQueryMetrics().map((entry) => entry.name)"))), ["orders"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalog.map((entry) => entry.name)"))), ["revenue"]);
 });
 
 test("new query failure clears old results and unlocks controls without retry", async () => {

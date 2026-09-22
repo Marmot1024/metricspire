@@ -79,11 +79,14 @@
         </div>
 
         <div class="catalog-layout">
-          <div class="catalog-table-shell">
-            <div class="catalog-table-head" aria-hidden="true">
-              <span>指标</span><span>计算逻辑</span><span>数据来源</span><span>状态</span>
+          <div class="catalog-list-column">
+            <div class="catalog-table-shell">
+              <div class="catalog-table-head" aria-hidden="true">
+                <span>指标</span><span>计算逻辑</span><span>数据来源</span><span>状态</span>
+              </div>
+              <div id="catalog-list" class="catalog-list" role="table" aria-label="指标目录" aria-live="polite"></div>
             </div>
-            <div id="catalog-list" class="catalog-list" role="table" aria-label="指标目录" aria-live="polite"></div>
+            <button id="catalog-more" class="button secondary catalog-more" type="button" hidden>加载更多指标</button>
           </div>
           <article id="metric-detail" class="detail-panel">
             <div id="metric-detail-empty" class="empty-state">选择一个指标查看完整定义和可用维度。</div>
