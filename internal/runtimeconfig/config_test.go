@@ -3,8 +3,46 @@ package runtimeconfig_test
 import (
 	"testing"
 
+	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/marmot1024/metricspire/internal/runtimeconfig"
 )
+
+func TestOnlineConfigurationRequiresExplicitReviewedScopeAndBudgets(t *testing.T) {
+	base := runtimeconfig.Config{
+		APIVersion: runtimeconfig.APIVersion, Kind: runtimeconfig.Kind,
+		HTTP:           runtimeconfig.HTTPConfig{Address: "127.0.0.1:8080", PublicURL: "https://metrics.example.com"},
+		Authentication: runtimeconfig.AuthenticationConfig{Provider: runtimeconfig.AuthenticationOIDC, OIDC: &runtimeconfig.OIDCConfig{IssuerURL: "https://identity.example.com", ClientID: "metricspire", BearerAudience: "metricspire-api"}},
+		Policies:       []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: "commerce", Tenant: "demo", Path: "policy.yaml"}},
+		Bindings:       []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: "commerce", Path: "binding.yaml"}},
+	}
+	valid := runtimeconfig.OnlineConfig{Tenant: "demo", Namespaces: []string{"demo"}, DataAccess: "tenant_shared", Resources: []model.ResourceRef{{Kind: model.ResourceTable, Schema: "serving", Table: "daily_sales"}}, MaxDataAge: "5m"}
+	base.Online = &valid
+	if err := base.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		change func(*runtimeconfig.OnlineConfig)
+	}{
+		{"implicit access", func(c *runtimeconfig.OnlineConfig) { c.DataAccess = "" }},
+		{"other tenant", func(c *runtimeconfig.OnlineConfig) { c.Tenant = "other" }},
+		{"unknown namespace", func(c *runtimeconfig.OnlineConfig) { c.Namespaces = []string{"unknown"} }},
+		{"no freshness", func(c *runtimeconfig.OnlineConfig) { c.MaxDataAge = "" }},
+		{"invalid freshness", func(c *runtimeconfig.OnlineConfig) { c.MaxDataAge = "0s" }},
+		{"unbounded timeout", func(c *runtimeconfig.OnlineConfig) { c.Timeout = "11s" }},
+		{"unbounded concurrency", func(c *runtimeconfig.OnlineConfig) { c.MaxConcurrency = 33 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := valid
+			test.change(&candidate)
+			config := base
+			config.Online = &candidate
+			if err := config.Validate(); err == nil {
+				t.Fatal("unsafe online configuration accepted")
+			}
+		})
+	}
+}
 
 func TestRuntimeConfigRequiresHTTPSAndUniqueTrustedRoutes(t *testing.T) {
 	valid := runtimeconfig.Config{

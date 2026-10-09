@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/marmot1024/metricspire/internal/contractio"
+	"github.com/marmot1024/metricspire/internal/model"
 )
 
 const (
@@ -28,6 +29,19 @@ type Config struct {
 	ReleasePolicy  ReleasePolicyConfig  `json:"release_policy,omitempty" yaml:"release_policy,omitempty"`
 	Policies       []PolicyRoute        `json:"policies" yaml:"policies"`
 	Bindings       []BindingRoute       `json:"bindings" yaml:"bindings"`
+	Online         *OnlineConfig        `json:"online,omitempty" yaml:"online,omitempty"`
+}
+
+// Online serving is opt-in and uses a dedicated read-only database credential.
+// tenant_shared explicitly describes data access; UC user policies are not copied.
+type OnlineConfig struct {
+	Tenant         string              `json:"tenant" yaml:"tenant"`
+	Namespaces     []string            `json:"namespaces" yaml:"namespaces"`
+	DataAccess     string              `json:"data_access" yaml:"data_access"`
+	Resources      []model.ResourceRef `json:"resources" yaml:"resources"`
+	MaxDataAge     string              `json:"max_data_age" yaml:"max_data_age"`
+	Timeout        string              `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	MaxConcurrency int                 `json:"max_concurrency,omitempty" yaml:"max_concurrency,omitempty"`
 }
 
 type ReleasePolicyConfig struct {
@@ -110,6 +124,35 @@ func (config Config) Validate() error {
 	}
 	if err := config.validateAuthentication(); err != nil {
 		return err
+	}
+	if config.Online != nil {
+		online := config.Online
+		if online.Tenant == "" || len(online.Namespaces) == 0 || len(online.Resources) == 0 || online.DataAccess != "tenant_shared" || online.MaxDataAge == "" {
+			return errors.New("online serving requires a tenant, namespaces, sources, max_data_age and explicit tenant_shared access review")
+		}
+		if config.Authentication.Provider != AuthenticationOIDC {
+			return errors.New("the first PostgreSQL online slice supports portable OIDC only; Apps data-export authorization is not accepted")
+		}
+		if online.MaxConcurrency < 0 || online.MaxConcurrency > 32 {
+			return errors.New("online.max_concurrency must be between 1 and 32 when set")
+		}
+		if d, err := ParseDuration(online.Timeout, 2*time.Second); err != nil || d > 10*time.Second {
+			return errors.New("online.timeout must be positive and at most 10s")
+		}
+		if _, err := ParseDuration(online.MaxDataAge, time.Minute); err != nil {
+			return errors.New("online.max_data_age must be a positive duration")
+		}
+		for _, namespace := range online.Namespaces {
+			found := false
+			for _, route := range config.Policies {
+				if route.Namespace == namespace && route.Tenant == online.Tenant {
+					found = true
+				}
+			}
+			if !found {
+				return errors.New("online namespace requires a policy route for the reviewed tenant")
+			}
+		}
 	}
 	if config.HTTP.MaxBodyBytes < 0 {
 		return errors.New("http.max_body_bytes cannot be negative")

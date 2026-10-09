@@ -105,6 +105,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/explain", server.handleMetricExplain)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/plan", server.handleMetricPlan)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/query", server.handleMetricQuery)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/online-query", server.handleOnlineQuery)
 	server.mux.HandleFunc(APIPrefix+"/catalog/index", server.handleCatalogIndex)
 	server.mux.HandleFunc(APIPrefix+"/catalog/detail", server.handleCatalogDetail)
 	server.mux.HandleFunc(APIPrefix+"/catalog/search", server.handleCatalogSearch)
@@ -945,6 +946,15 @@ func (server *Server) handleError(response http.ResponseWriter, request *http.Re
 		status := http.StatusUnprocessableEntity
 		if domain.Code == "permission_denied" {
 			status = http.StatusForbidden
+		}
+		switch domain.Code {
+		case "online_overloaded":
+			status = http.StatusTooManyRequests
+			response.Header().Set("Retry-After", "1")
+		case "online_not_enabled":
+			status = http.StatusNotFound
+		case "online_data_unavailable", "online_data_stale", "online_engine_unavailable":
+			status = http.StatusServiceUnavailable
 		}
 		server.writeProblem(response, request, status, domain.Code, "Request rejected", domain.Message, domain.Path)
 	default:

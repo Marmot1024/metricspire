@@ -7,6 +7,8 @@ MetricSpire is a development preview. Start with the [project overview](../READM
 | [Getting started](getting-started.md) | Run the offline semantic example and local catalog. |
 | [MCP integration](mcp.md) | Connect an AI client to a deployed service. |
 | [HTTP API](http-api.md) | Understand the stable request, permission, and audit boundary. |
+| [PostgreSQL online query](online-query.md) | Opt-in synchronous numeric-code queries over reviewed aggregates. |
+| [PostgreSQL table responsibilities](postgres-tables.md) | Separate control/history tables from business aggregates and cleanup decisions. |
 | [Architecture](architecture.md) | Understand semantic, identity, storage, and engine boundaries. |
 | [Development status](development-status.md) | Check preview maturity and unverified paths. |
 

@@ -476,8 +476,16 @@ type ExecutionJob struct {
 }
 
 type ExecutionSnapshot struct {
-	Job    ExecutionJob `json:"job"`
-	Result *TypedResult `json:"result,omitempty"`
+	Job          ExecutionJob  `json:"job"`
+	Result       *TypedResult  `json:"result,omitempty"`
+	DataSnapshot *DataSnapshot `json:"data_snapshot,omitempty"`
+}
+
+// DataSnapshot is supplied by an online engine from the same read transaction.
+// DataAsOf describes input data coverage, not cache or query creation time.
+type DataSnapshot struct {
+	BatchID  string    `json:"batch_id"`
+	DataAsOf time.Time `json:"data_as_of"`
 }
 
 // TypedResult keeps Databricks' exact schema alongside decoded scalar rows.

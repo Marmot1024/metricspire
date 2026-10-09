@@ -131,6 +131,11 @@ type Dependencies struct {
 	Queries             QueryService
 	Jobs                JobService
 	ExecutionCredential ExecutionCredentialProvider
+	Online              OnlineQueryService // optional; absent by default, never falls back to SQL Warehouse
+}
+
+type OnlineQueryService interface {
+	Execute(context.Context, application.QueryScope, application.OnlineQuery) (application.OnlineResult, error)
 }
 
 type Config struct {

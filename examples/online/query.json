@@ -1,0 +1,9 @@
+{
+  "metric_codes": ["10001", "10002", "10003"],
+  "dimensions": ["date"],
+  "time_range": {"dimension": "date", "start": "2026-09-01T00:00:00Z", "end": "2026-09-03T00:00:00Z", "timezone": "UTC"},
+  "time_grouping": {"dimension": "date", "granularity": "day", "timezone": "UTC"},
+  "filters": [{"dimension": "region", "operator": "eq", "values": ["east"]}],
+  "order_by": [{"field": "date", "direction": "asc"}],
+  "limit": 10
+}
