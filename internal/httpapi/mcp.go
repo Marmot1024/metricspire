@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/audit"
@@ -15,6 +16,8 @@ import (
 )
 
 type remoteMCPBackendKey struct{}
+
+var publicQueryReferencePath = regexp.MustCompile(`^(metrics(\[[0-9]+\])?|dimensions|filters\[[0-9]+\]\.dimension|order_by\[[0-9]+\]\.field)$`)
 
 type remoteMCPBackend struct {
 	server    *Server
@@ -157,7 +160,7 @@ func (backend *remoteMCPBackend) safeError(err error) error {
 		code = "conflict"
 	case errors.As(err, &domain):
 		code = domain.Code
-		if safeMCPDomainDetail(code) {
+		if safeMCPDomainDetail(domain) {
 			return mcpbridge.SanitizedDomainError(code, domain.Path, domain.Message, requestID(backend.request))
 		}
 	default:
@@ -168,10 +171,18 @@ func (backend *remoteMCPBackend) safeError(err error) error {
 	return mcpbridge.SanitizedAPIError(code, requestID(backend.request))
 }
 
-func safeMCPDomainDetail(code string) bool {
-	switch code {
+func safeMCPDomainDetail(problem *model.Problem) bool {
+	switch problem.Code {
 	case "required", "duplicate_value", "invalid_query", "invalid_time", "time_range_required", "time_range_exceeded", "unsupported_timezone", "limit_exceeded", "budget_exceeded":
 		return true
+	case "unknown_reference":
+		// The same code is also used for internal bindings and expression
+		// fields. Only caller-facing query references can disclose detail.
+		return publicQueryReferencePath.MatchString(problem.Path)
+	case "capability_missing":
+		return problem.Path == "joins" || problem.Path == "metrics" || problem.Path == "time_grouping.granularity"
+	case "metric_route_not_found", "metric_route_ambiguous":
+		return problem.Path == "metrics"
 	default:
 		return false
 	}

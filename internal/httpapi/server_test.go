@@ -1121,6 +1121,10 @@ func newTestServerWithCredential(t *testing.T, config httpapi.Config, engine *fa
 }
 
 func newTestServerWithDependencies(t *testing.T, config httpapi.Config, engine *fakeEngine, recorder audit.Recorder, readiness httpapi.ReadinessChecker, credential httpapi.ExecutionCredentialProvider) (http.Handler, *fakeEngine, *observedResolvers) {
+	return newTestServerWithAuthentication(t, config, engine, recorder, readiness, credential, nil)
+}
+
+func newTestServerWithAuthentication(t *testing.T, config httpapi.Config, engine *fakeEngine, recorder audit.Recorder, readiness httpapi.ReadinessChecker, credential httpapi.ExecutionCredentialProvider, authenticator httpapi.Authenticator) (http.Handler, *fakeEngine, *observedResolvers) {
 	t.Helper()
 	repository := catalog.NewMemoryRepository()
 	management, err := catalog.NewService(repository)
@@ -1194,22 +1198,24 @@ func newTestServerWithDependencies(t *testing.T, config httpapi.Config, engine *
 	if err != nil {
 		t.Fatal(err)
 	}
-	authenticator := httpapi.AuthenticatorFunc(func(_ context.Context, request *http.Request) (httpapi.Principal, error) {
-		switch request.Header.Get("Authorization") {
-		case "Bearer query":
-			return httpapi.Principal{Tenant: "demo", Subject: "analyst@example.com", DisplayName: "Analyst", Roles: []string{"analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionQuery}}, nil
-		case "Bearer secret-mcp-request-token":
-			return httpapi.Principal{Tenant: "demo", Subject: "analyst@example.com", DisplayName: "Analyst", Roles: []string{"analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionQuery}}, nil
-		case "Bearer other-query":
-			return httpapi.Principal{Tenant: "demo", Subject: "other@example.com", Roles: []string{"analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionQuery}}, nil
-		case "Bearer manage":
-			return httpapi.Principal{Tenant: "demo", Subject: "manager@example.com", Roles: []string{"manager"}, Permissions: []httpapi.Permission{httpapi.PermissionManage}}, nil
-		case "Bearer preview":
-			return httpapi.Principal{Tenant: "demo", Subject: "manager@example.com", Roles: []string{"manager", "analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionManage, httpapi.PermissionQuery}}, nil
-		default:
-			return httpapi.Principal{}, httpapi.ErrUnauthenticated
-		}
-	})
+	if authenticator == nil {
+		authenticator = httpapi.AuthenticatorFunc(func(_ context.Context, request *http.Request) (httpapi.Principal, error) {
+			switch request.Header.Get("Authorization") {
+			case "Bearer query":
+				return httpapi.Principal{Tenant: "demo", Subject: "analyst@example.com", DisplayName: "Analyst", Roles: []string{"analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionQuery}}, nil
+			case "Bearer secret-mcp-request-token":
+				return httpapi.Principal{Tenant: "demo", Subject: "analyst@example.com", DisplayName: "Analyst", Roles: []string{"analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionQuery}}, nil
+			case "Bearer other-query":
+				return httpapi.Principal{Tenant: "demo", Subject: "other@example.com", Roles: []string{"analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionQuery}}, nil
+			case "Bearer manage":
+				return httpapi.Principal{Tenant: "demo", Subject: "manager@example.com", Roles: []string{"manager"}, Permissions: []httpapi.Permission{httpapi.PermissionManage}}, nil
+			case "Bearer preview":
+				return httpapi.Principal{Tenant: "demo", Subject: "manager@example.com", Roles: []string{"manager", "analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionManage, httpapi.PermissionQuery}}, nil
+			default:
+				return httpapi.Principal{}, httpapi.ErrUnauthenticated
+			}
+		})
+	}
 	if readiness == nil {
 		readiness = httpapi.ReadinessFunc(func(context.Context) error { return nil })
 	}

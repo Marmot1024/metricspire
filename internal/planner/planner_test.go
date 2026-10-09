@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,24 @@ type fixture struct {
 	query        model.SemanticQuery
 	binding      model.SourceBinding
 	capabilities model.EngineCapabilities
+}
+
+func TestUnsupportedTimeGrainReportsAllowedChoices(t *testing.T) {
+	values := loadFixtureWithSource(t, func(source *model.SemanticSource) {
+		for i := range source.Spec.Dimensions {
+			if source.Spec.Dimensions[i].Name == "order_date" {
+				source.Spec.Dimensions[i].TimeGranularities = []model.TimeGranularity{model.GrainDay}
+			}
+		}
+	})
+	values.query.GroupBy = []string{"order_date"}
+	values.query.TimeGrouping = &model.TimeGrouping{Dimension: "order_date", Timezone: "Asia/Shanghai", Granularity: model.GrainWeek, WeekStart: model.WeekStartMonday}
+	_, err := planner.BuildLogical(values.manifest, values.bundle, values.context, values.query)
+	var problem *model.Problem
+	if !errors.As(err, &problem) || problem.Code != "invalid_time" || problem.Path != "time_grouping.granularity" ||
+		!strings.Contains(problem.Message, "allowed granularities: [day]") {
+		t.Fatalf("unsupported week did not explain its allowed choice: %v", err)
+	}
 }
 
 func TestPlansMatchGoldenAndIncludeSafeJoin(t *testing.T) {

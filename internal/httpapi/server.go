@@ -29,6 +29,14 @@ import (
 
 var ErrUnauthenticated = errors.New("request is not authenticated")
 
+// ErrAuthenticationUnavailable means identity verification could not complete,
+// rather than proving that the caller's credential is invalid.
+var ErrAuthenticationUnavailable = errors.New("authentication dependency is unavailable")
+
+// ErrAuthenticationDenied is a verified identity-level denial, such as a
+// disabled account. Replacing a valid credential cannot restore that account.
+var ErrAuthenticationDenied = errors.New("verified identity is not permitted")
+
 //go:embed ui/*
 var uiFiles embed.FS
 
@@ -822,7 +830,24 @@ func (server *Server) authenticate(response http.ResponseWriter, request *http.R
 	if err != nil {
 		var diagnostic interface{ SafeAuthenticationReason() string }
 		if errors.As(err, &diagnostic) {
-			server.logger.Warn("authentication rejected", "request_id", requestID(request), "reason", diagnostic.SafeAuthenticationReason())
+			fields := []any{"request_id", requestID(request), "reason", diagnostic.SafeAuthenticationReason()}
+			var upstream interface{ SafeAuthenticationUpstreamStatus() int }
+			if errors.As(err, &upstream) && upstream.SafeAuthenticationUpstreamStatus() > 0 {
+				fields = append(fields, "upstream_status", upstream.SafeAuthenticationUpstreamStatus())
+			}
+			server.logger.Warn("authentication failed", fields...)
+		}
+		if errors.Is(err, ErrAuthenticationUnavailable) {
+			status := http.StatusServiceUnavailable
+			if errors.Is(err, context.DeadlineExceeded) {
+				status = http.StatusGatewayTimeout
+			}
+			server.writeProblem(response, request, status, "authentication_unavailable", "Authentication temporarily unavailable", "identity verification could not complete; try again later or contact support with request_id if the problem continues", "")
+			return Principal{}, false
+		}
+		if errors.Is(err, ErrAuthenticationDenied) {
+			server.writeProblem(response, request, http.StatusForbidden, "permission_denied", "Permission denied", "the verified identity is not permitted to access this service; contact the operator with request_id", "")
+			return Principal{}, false
 		}
 		server.setMCPAuthenticationChallenge(response, request)
 		server.writeProblem(response, request, http.StatusUnauthorized, "unauthenticated", "Authentication required", "valid authentication is required", "")
