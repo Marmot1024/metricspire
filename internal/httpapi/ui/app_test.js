@@ -548,3 +548,40 @@ test("relative presets become explicit half-open absolute ranges", () => {
     end: "2026-08-31T16:00:00.000Z",
   });
 });
+
+
+test("a copied published aggregate gets an editable new identity", () => {
+  const {context, run} = editorContext();
+  context.window = {confirm: () => true};
+  run(`state.creatingMetric = false; state.metricIndex = 0;
+    state.review = {active_release: {id: 'rel_1'}, metric_changes: []};
+    state.draft.source.spec.metrics = [{name: 'revenue', display_name: 'Revenue', description: 'Order amount', owner: 'data-team', entity: 'orders', kind: 'aggregate',
+      expression: {op: 'sum', field: 'orders.amount'}, value_type: 'decimal',
+      allowed_dimensions: ['status'], verification: {status: 'verified'}}];
+    duplicateMetric()`);
+  assert.equal(context.document.getElementById("metric-code").value, "");
+  assert.equal(context.document.getElementById("metric-code").disabled, false);
+  assert.equal(run("metricIsPublished(state.draft.source.spec.metrics[0])"), true);
+  assert.equal(run("metricRegistryStatus(state.draft.source.spec.metrics[0])"), "线上");
+  context.document.getElementById("metric-code").value = "new_revenue";
+  assert.equal(run("metricFromEditor().name"), "new_revenue");
+});
+
+test("catalog reload discards cached and in-flight details from an old release", async () => {
+  const {context, run} = editorContext();
+  const summary = {namespace: 'demo', name: 'orders', semantic_model_name: 'commerce', summary: true};
+  context.metric = summary;
+  run("state.namespace = 'demo'; state.context = {permissions: ['query:execute']}; state.catalogView = [metric]");
+  let resolveOld;
+  context.requestJSON = (path) => path.includes('/detail?')
+    ? new Promise((resolve) => { resolveOld = resolve; })
+    : Promise.resolve({items: [{...summary, release_id: 'rel_new'}], counts: {published: 1}});
+  const oldDetail = run("loadMetricDetail(metric, state.metricDetailSequence)");
+  context.renderCatalog = () => {};
+  context.updateQueryBuilder = () => {};
+  await run("loadCatalog()");
+  resolveOld({...summary, summary: false, release_id: 'rel_old'});
+  await oldDetail;
+  assert.equal(run("state.metricDetailCache.size"), 0);
+  assert.equal(run("state.catalogView[0].release_id"), "rel_new");
+});

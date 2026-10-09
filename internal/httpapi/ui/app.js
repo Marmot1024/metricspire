@@ -415,6 +415,10 @@ async function loadCatalog(more = false) {
   const search = byID("catalog-search").value.trim();
   const status = byID("catalog-status-filter").value || "queryable";
   if (!more) {
+    state.metricDetailSequence++;
+    state.metricDetailCache.clear();
+    state.metricDetailRequests.clear();
+    state.metricPlanCache.clear();
     state.catalogLoading = true;
     state.catalogCursor = "";
     state.catalogCounts = null;
@@ -602,7 +606,10 @@ async function loadMetricDetail(metric, sequence) {
         pending = requestJSON(`/api/v1/catalog/detail?${params}`);
         state.metricDetailRequests.set(key, pending);
       }
-      try { detail = await pending; } finally { state.metricDetailRequests.delete(key); }
+      try { detail = await pending; } finally {
+        if (state.metricDetailRequests.get(key) === pending) state.metricDetailRequests.delete(key);
+      }
+      if (sequence !== state.metricDetailSequence || metric.namespace !== state.namespace) return;
       state.metricDetailCache.set(key, detail);
     }
     if (sequence !== state.metricDetailSequence || metric.namespace !== state.namespace) return;
@@ -1275,7 +1282,7 @@ function metricFormulaLabel(metric = {}) {
 }
 
 function metricIsPublished(metric) {
-  if (!metric || !state.review?.active_release) return false;
+  if (!metric?.name || !state.review?.active_release) return false;
   const change = (state.review.metric_changes || []).find((candidate) => candidate.code === metric.name);
   return !change || change.kind !== "added";
 }

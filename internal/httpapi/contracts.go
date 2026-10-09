@@ -80,6 +80,7 @@ type CatalogReader interface {
 }
 
 type CatalogSearcher interface {
+	SearchActiveCodes(context.Context, application.QueryScope, []string) ([]application.MetricCatalogEntry, error)
 	SearchActive(context.Context, application.QueryScope, string, int) ([]application.MetricCatalogEntry, error)
 	ResolveActiveModel(context.Context, application.QueryScope, []string) (string, error)
 }
@@ -94,6 +95,7 @@ type QueryService interface {
 }
 
 type GovernanceService interface {
+	ListByCodes(context.Context, string, []string) ([]governance.MetricRecord, error)
 	Import(context.Context, governance.ImportInput) (governance.ImportBatch, error)
 	List(context.Context, string, string, int) ([]governance.MetricRecord, error)
 	GetImport(context.Context, string, string) (governance.ImportBatch, error)

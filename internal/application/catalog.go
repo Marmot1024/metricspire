@@ -168,6 +168,26 @@ func (service *CatalogService) trialNamespaceEnabled(namespace string) bool {
 // SearchActive returns only metrics in active releases that the trusted
 // principal is authorized to query. Physical bindings are never exposed.
 func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScope, search string, limit int) ([]MetricCatalogEntry, error) {
+	return service.searchActive(ctx, scope, search, nil, limit)
+}
+
+// SearchActiveCodes resolves exact counterparts for a bounded catalog merge.
+// Authorization is identical to SearchActive; codes do not bypass policy.
+func (service *CatalogService) SearchActiveCodes(ctx context.Context, scope QueryScope, codes []string) ([]MetricCatalogEntry, error) {
+	if len(codes) == 0 {
+		return nil, nil
+	}
+	if len(codes) > MaxCatalogSearchResults {
+		return nil, errors.New("too many catalog counterpart codes")
+	}
+	wanted := make(map[string]struct{}, len(codes))
+	for _, code := range codes {
+		wanted[code] = struct{}{}
+	}
+	return service.searchActive(ctx, scope, "", wanted, MaxCatalogSearchResults)
+}
+
+func (service *CatalogService) searchActive(ctx context.Context, scope QueryScope, search string, codes map[string]struct{}, limit int) ([]MetricCatalogEntry, error) {
 	if strings.TrimSpace(scope.Namespace) == "" || strings.TrimSpace(scope.Context.Tenant) == "" || strings.TrimSpace(scope.Context.Principal) == "" {
 		return nil, errors.New("catalog search scope is incomplete")
 	}
@@ -210,6 +230,11 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 				}
 				return nil, err
 			}
+			if codes != nil {
+				if _, wanted := codes[metric.Name]; !wanted {
+					continue
+				}
+			}
 			if !matchesMetricCatalogQuery(query, metric) {
 				continue
 			}
@@ -217,7 +242,7 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 			if err != nil {
 				return nil, err
 			}
-			dimensionDetails := catalogDimensionDetails(release.Manifest, resolvedBinding, authorizedDimensions)
+			dimensionDetails := CatalogDimensionDetails(release.Manifest, resolvedBinding, authorizedDimensions)
 			var granularities []model.TimeGranularity
 			for _, dimension := range release.Manifest.Definitions.Dimensions {
 				if dimension.Name == metric.TimeDimension {
@@ -245,7 +270,8 @@ func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScop
 	return results, nil
 }
 
-func catalogDimensionDetails(manifest model.SemanticManifest, binding model.SourceBinding, names []string) []MetricDimensionEntry {
+// CatalogDimensionDetails describes semantic dimensions using a reviewed binding.
+func CatalogDimensionDetails(manifest model.SemanticManifest, binding model.SourceBinding, names []string) []MetricDimensionEntry {
 	dimensions := make(map[string]model.Dimension, len(manifest.Definitions.Dimensions))
 	entities := make(map[string]model.Entity, len(manifest.Definitions.Entities))
 	datasets := make(map[string]model.Dataset, len(manifest.Definitions.Datasets))

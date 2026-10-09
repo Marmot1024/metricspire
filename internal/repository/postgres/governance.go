@@ -106,16 +106,20 @@ VALUES ($1, $2, $3, $4)`, id, definition.Code, previousRevision, next); err != n
 }
 
 func (s *Store) List(ctx context.Context, namespace, search string, limit int) ([]governance.MetricRecord, error) {
-	pattern := "%" + strings.ToLower(search) + "%"
+	query := strings.ToLower(search)
 	rows, err := s.pool.Query(ctx, `
 SELECT namespace, revision, source_import_id, updated_by, updated_at, definition
 FROM metricspire_governance_records
-WHERE namespace = $1 AND ($2 = '%%' OR lower(definition::text) LIKE $2)
+WHERE namespace = $1 AND ($2 = '' OR strpos(lower(definition::text), $2) > 0)
 ORDER BY metric_code
-LIMIT $3`, namespace, pattern, limit)
+LIMIT $3`, namespace, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list governance records: %w", err)
 	}
+	return readGovernanceRecords(rows)
+}
+
+func readGovernanceRecords(rows pgx.Rows) ([]governance.MetricRecord, error) {
 	defer rows.Close()
 	result := make([]governance.MetricRecord, 0)
 	for rows.Next() {
@@ -134,6 +138,18 @@ LIMIT $3`, namespace, pattern, limit)
 		return nil, fmt.Errorf("list governance records: %w", err)
 	}
 	return result, nil
+}
+
+func (s *Store) ListByCodes(ctx context.Context, namespace string, codes []string) ([]governance.MetricRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT namespace, revision, source_import_id, updated_by, updated_at, definition
+FROM metricspire_governance_records
+WHERE namespace = $1 AND metric_code = ANY($2::text[])
+ORDER BY metric_code`, namespace, codes)
+	if err != nil {
+		return nil, fmt.Errorf("find governance counterparts: %w", err)
+	}
+	return readGovernanceRecords(rows)
 }
 
 func (s *Store) GetImport(ctx context.Context, namespace, id string) (governance.ImportBatch, error) {

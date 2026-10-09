@@ -372,3 +372,46 @@ func loadSource(t *testing.T) model.SemanticSource {
 	}
 	return source
 }
+
+func TestExternalCodeSurvivesRollbackAndDeactivation(t *testing.T) {
+	for _, deactivate := range []bool{false, true} {
+		t.Run(map[bool]string{false: "rollback", true: "deactivate"}[deactivate], func(t *testing.T) {
+			ctx := context.Background()
+			repository := catalog.NewMemoryRepository()
+			service, _ := catalog.NewService(repository)
+			source := loadSource(t)
+			draft, err := service.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "owner"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := service.Publish(ctx, "demo", source.Metadata.Name, draft.Revision, "owner", "initial")
+			if err != nil {
+				t.Fatal(err)
+			}
+			source.Spec.Metrics[0].ExternalCode = "1001"
+			draft, err = service.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "owner", ExpectedRevision: draft.Revision})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.Publish(ctx, "demo", source.Metadata.Name, draft.Revision, "owner", "assign"); err != nil {
+				t.Fatal(err)
+			}
+			if deactivate {
+				_, err = service.Deactivate(ctx, "demo", source.Metadata.Name, "owner", "test")
+			} else {
+				_, err = service.Rollback(ctx, "demo", source.Metadata.Name, first.ID, "owner", "test")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			source.Spec.Metrics[0].ExternalCode = "1002"
+			draft, err = service.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "owner", ExpectedRevision: draft.Revision})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.Publish(ctx, "demo", source.Metadata.Name, draft.Revision, "owner", "replace"); !errors.Is(err, catalog.ErrNotPublishable) {
+				t.Fatalf("historical external code replaced: %v", err)
+			}
+		})
+	}
+}
