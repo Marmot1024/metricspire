@@ -16,6 +16,7 @@ import (
 )
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+var externalCodePattern = regexp.MustCompile(`^[0-9]+$`)
 var decimalPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?$`)
 
 type catalog struct {
@@ -370,6 +371,7 @@ func validateSpec(spec model.SemanticSpec) (catalog, error) {
 		result.relationships[relationship.Name] = relationship
 	}
 
+	externalCodes := make(map[string]string, len(spec.Metrics))
 	for i, metric := range spec.Metrics {
 		path := fmt.Sprintf("spec.metrics[%d]", i)
 		if err := validateName(metric.Name, path+".name"); err != nil {
@@ -377,6 +379,15 @@ func validateSpec(spec model.SemanticSpec) (catalog, error) {
 		}
 		if _, exists := result.metrics[metric.Name]; exists {
 			return result, problem("duplicate_name", path+".name", "metric %q is duplicated", metric.Name)
+		}
+		if metric.ExternalCode != "" {
+			if !externalCodePattern.MatchString(metric.ExternalCode) {
+				return result, problem("invalid_metric", path+".external_code", "external metric code must contain digits only")
+			}
+			if existing, exists := externalCodes[metric.ExternalCode]; exists {
+				return result, problem("duplicate_name", path+".external_code", "external metric code %q is already used by metric %q", metric.ExternalCode, existing)
+			}
+			externalCodes[metric.ExternalCode] = metric.Name
 		}
 		if _, exists := result.entities[metric.Entity]; !exists {
 			return result, problem("unknown_reference", path+".entity", "entity %q does not exist", metric.Entity)

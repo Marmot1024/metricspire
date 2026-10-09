@@ -4,6 +4,7 @@ package appsauth
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/marmot1024/metricspire/internal/executionauth"
@@ -26,6 +28,8 @@ const (
 
 	maximumIdentityHeaderBytes = 4 << 10
 	maximumCurrentUserBytes    = 256 << 10
+	defaultCurrentUserCacheTTL = 15 * time.Second
+	maximumCachedCurrentUsers  = 512
 )
 
 type Runtime struct {
@@ -57,6 +61,7 @@ type Config struct {
 	QueryRole           string
 	PublisherGroupID    string
 	HTTPClient          *http.Client
+	CurrentUserCacheTTL time.Duration
 }
 
 type CurrentUser struct {
@@ -124,6 +129,14 @@ func New(config Config, runtime Runtime, verifier CurrentUserVerifier) (*Authent
 	if verifier == nil {
 		verifier = &currentUserClient{host: workspaceHost, http: configuredHTTPClient(config.HTTPClient)}
 	}
+	cacheTTL := config.CurrentUserCacheTTL
+	if cacheTTL < 0 {
+		return nil, errors.New("current-user cache TTL cannot be negative")
+	}
+	if cacheTTL == 0 {
+		cacheTTL = defaultCurrentUserCacheTTL
+	}
+	verifier = newCachedCurrentUserVerifier(verifier, cacheTTL)
 	return &Authenticator{
 		tenant: tenant, publicHost: strings.ToLower(publicURL.Host), queryRole: queryRole,
 		publisherGroupID: publisherGroupID, currentUsers: verifier,
@@ -138,9 +151,6 @@ func (authenticator *Authenticator) Authenticate(ctx context.Context, request *h
 	if err != nil {
 		return httpapi.Principal{}, rejected("forwarded_token")
 	}
-	// Deliberately verify once per authenticated API request. This keeps user
-	// status and publisher membership fail-closed without adding a token cache;
-	// optimize only after deployed latency and availability are measured.
 	current, err := authenticator.currentUsers.CurrentUser(ctx, token)
 	if err != nil || !current.Active || strings.TrimSpace(current.ID) == "" || strings.TrimSpace(current.Username) == "" {
 		return httpapi.Principal{}, rejected("current_user")
@@ -194,6 +204,85 @@ func (authenticator *Authenticator) validateIngress(request *http.Request) error
 type currentUserClient struct {
 	host *url.URL
 	http *http.Client
+}
+
+type cachedCurrentUser struct {
+	user      CurrentUser
+	expiresAt time.Time
+}
+
+type currentUserCall struct {
+	done chan struct{}
+	user CurrentUser
+	err  error
+}
+
+type cachedCurrentUserVerifier struct {
+	next     CurrentUserVerifier
+	ttl      time.Duration
+	mu       sync.Mutex
+	entries  map[[sha256.Size]byte]cachedCurrentUser
+	inFlight map[[sha256.Size]byte]*currentUserCall
+}
+
+func newCachedCurrentUserVerifier(next CurrentUserVerifier, ttl time.Duration) *cachedCurrentUserVerifier {
+	return &cachedCurrentUserVerifier{
+		next: next, ttl: ttl,
+		entries:  make(map[[sha256.Size]byte]cachedCurrentUser),
+		inFlight: make(map[[sha256.Size]byte]*currentUserCall),
+	}
+}
+
+func (verifier *cachedCurrentUserVerifier) CurrentUser(ctx context.Context, token string) (CurrentUser, error) {
+	key := sha256.Sum256([]byte(token))
+	now := time.Now()
+	verifier.mu.Lock()
+	if cached, ok := verifier.entries[key]; ok && now.Before(cached.expiresAt) {
+		verifier.mu.Unlock()
+		return cloneCurrentUser(cached.user), nil
+	}
+	delete(verifier.entries, key)
+	if call := verifier.inFlight[key]; call != nil {
+		verifier.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return CurrentUser{}, ctx.Err()
+		case <-call.done:
+			return cloneCurrentUser(call.user), call.err
+		}
+	}
+	call := &currentUserCall{done: make(chan struct{})}
+	verifier.inFlight[key] = call
+	verifier.mu.Unlock()
+
+	call.user, call.err = verifier.next.CurrentUser(ctx, token)
+	verifier.mu.Lock()
+	if call.err == nil {
+		if len(verifier.entries) >= maximumCachedCurrentUsers {
+			for entryKey, entry := range verifier.entries {
+				if !now.Before(entry.expiresAt) {
+					delete(verifier.entries, entryKey)
+				}
+			}
+			if len(verifier.entries) >= maximumCachedCurrentUsers {
+				for entryKey := range verifier.entries {
+					delete(verifier.entries, entryKey)
+					break
+				}
+			}
+		}
+		verifier.entries[key] = cachedCurrentUser{user: cloneCurrentUser(call.user), expiresAt: time.Now().Add(verifier.ttl)}
+	}
+	delete(verifier.inFlight, key)
+	close(call.done)
+	verifier.mu.Unlock()
+	return cloneCurrentUser(call.user), call.err
+}
+
+func cloneCurrentUser(user CurrentUser) CurrentUser {
+	user.Emails = append([]string(nil), user.Emails...)
+	user.Groups = append([]CurrentUserGroup(nil), user.Groups...)
+	return user
 }
 
 func (client *currentUserClient) CurrentUser(ctx context.Context, token string) (CurrentUser, error) {

@@ -197,6 +197,21 @@ func (s *Service) publish(ctx context.Context, namespace, name string, expectedR
 	case !errors.Is(err, ErrNotFound):
 		return Release{}, fmt.Errorf("get active release for compatibility check: %w", err)
 	}
+	history, err := s.repository.ListReleases(ctx, namespace, name)
+	if err != nil {
+		return Release{}, fmt.Errorf("list releases for external-code compatibility: %w", err)
+	}
+	codes := make(map[string]string, len(manifest.Definitions.Metrics))
+	for _, metric := range manifest.Definitions.Metrics {
+		codes[metric.Name] = metric.ExternalCode
+	}
+	for _, release := range history {
+		for _, previous := range release.Manifest.Definitions.Metrics {
+			if previous.ExternalCode != "" && codes[previous.Name] != previous.ExternalCode {
+				return Release{}, fmt.Errorf("%w: published metric %q cannot change its external code", ErrNotPublishable, previous.Name)
+			}
+		}
+	}
 	id := releaseID(manifest.Fingerprint, expectedRevision)
 	return s.repository.Publish(ctx, PublishInput{
 		Namespace: namespace, Name: name, ExpectedRevision: expectedRevision,
@@ -295,6 +310,9 @@ func validateCompatibleRelease(active, candidate model.SemanticManifest) error {
 		}
 		if previous.Deprecated && !next.Deprecated {
 			return fmt.Errorf("%w: published metric %q cannot be undeprecated", ErrNotPublishable, previous.Name)
+		}
+		if previous.ExternalCode != "" && previous.ExternalCode != next.ExternalCode {
+			return fmt.Errorf("%w: published metric %q cannot change its external code", ErrNotPublishable, previous.Name)
 		}
 		if !sameMetricExecutionContract(previous, next) {
 			return fmt.Errorf("%w: published metric %q cannot change execution semantics", ErrNotPublishable, previous.Name)

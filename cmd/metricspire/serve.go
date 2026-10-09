@@ -162,6 +162,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		AuthenticationProfile:  config.Authentication.Provider, MCPVersion: version,
 		TrialReleaseNamespaces: trialNamespaces,
 		UIModels:               configuredUIModels(config.Bindings),
+		UISourcePrefixes:       configuredUISourcePrefixes(bindings),
 	}, httpapi.Dependencies{
 		Authenticator: authenticator, AuthEndpoints: authEndpoints,
 		Readiness:  store,
@@ -246,6 +247,30 @@ func configuredUIModels(routes []runtimeconfig.BindingRoute) []httpapi.UIModelRo
 		models = append(models, httpapi.UIModelRoute{Namespace: route.Namespace, ModelName: route.ModelName})
 	}
 	return models
+}
+
+func configuredUISourcePrefixes(bindings []application.BindingConfiguration) map[string]string {
+	prefixes := make(map[string]string)
+	ambiguous := make(map[string]bool)
+	for _, route := range bindings {
+		for _, dataset := range route.Binding.Datasets {
+			resource := dataset.Resource
+			prefix := ""
+			if resource.Kind == model.ResourceTable && resource.Catalog != "" && resource.Schema != "" {
+				prefix = resource.Catalog + "." + resource.Schema
+			}
+			if prefix == "" || (prefixes[route.Namespace] != "" && prefixes[route.Namespace] != prefix) {
+				ambiguous[route.Namespace] = true
+			}
+			if !ambiguous[route.Namespace] {
+				prefixes[route.Namespace] = prefix
+			}
+		}
+	}
+	for namespace := range ambiguous {
+		delete(prefixes, namespace)
+	}
+	return prefixes
 }
 
 func buildServeAuthentication(ctx context.Context, config runtimeconfig.Config, environment serveEnvironment, getenv func(string) string) (httpapi.Authenticator, http.Handler, httpapi.ExecutionCredentialProvider, error) {

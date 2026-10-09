@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/marmot1024/metricspire/internal/auth/appsauth"
 	"github.com/marmot1024/metricspire/internal/executionauth"
@@ -66,6 +69,69 @@ func TestAuthenticatorDefaultsNonPublisherToQueryOnly(t *testing.T) {
 	if principal.Subject != "456" || !principal.Has(httpapi.PermissionQuery) || principal.Has(httpapi.PermissionManage) ||
 		len(principal.Roles) != 1 || principal.Roles[0] != "analyst" {
 		t.Fatalf("principal = %#v", principal)
+	}
+}
+
+func TestAuthenticatorCoalescesAndCachesCurrentUserVerification(t *testing.T) {
+	var calls atomic.Int32
+	release := make(chan struct{})
+	verifier := currentUserVerifierFunc(func(context.Context, string) (appsauth.CurrentUser, error) {
+		calls.Add(1)
+		<-release
+		return appsauth.CurrentUser{Active: true, ID: "123", Username: "analyst@example.com", Emails: []string{"analyst@example.com"}}, nil
+	})
+	authenticator := newAuthenticatorWithConfig(t, verifier, func(config *appsauth.Config) {
+		config.CurrentUserCacheTTL = time.Minute
+	})
+	var group sync.WaitGroup
+	errorsSeen := make(chan error, 2)
+	group.Add(2)
+	for range 2 {
+		go func() {
+			defer group.Done()
+			_, err := authenticator.Authenticate(context.Background(), appsRequest("same-token"))
+			errorsSeen <- err
+		}()
+	}
+	for calls.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	group.Wait()
+	close(errorsSeen)
+	for err := range errorsSeen {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("current-user calls = %d, want 1", calls.Load())
+	}
+	if _, err := authenticator.Authenticate(context.Background(), appsRequest("same-token")); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("cached current-user calls = %d, want 1", calls.Load())
+	}
+}
+
+func TestAuthenticatorDoesNotCacheCurrentUserFailures(t *testing.T) {
+	var calls atomic.Int32
+	verifier := currentUserVerifierFunc(func(context.Context, string) (appsauth.CurrentUser, error) {
+		if calls.Add(1) == 1 {
+			return appsauth.CurrentUser{}, errors.New("temporary failure")
+		}
+		return appsauth.CurrentUser{Active: true, ID: "123", Username: "analyst@example.com", Emails: []string{"analyst@example.com"}}, nil
+	})
+	authenticator := newAuthenticator(t, verifier)
+	if _, err := authenticator.Authenticate(context.Background(), appsRequest("retry-token")); !errors.Is(err, httpapi.ErrUnauthenticated) {
+		t.Fatalf("first Authenticate() error = %v", err)
+	}
+	if _, err := authenticator.Authenticate(context.Background(), appsRequest("retry-token")); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("current-user calls = %d, want 2", calls.Load())
 	}
 }
 
@@ -194,7 +260,16 @@ func (function currentUserVerifierFunc) CurrentUser(ctx context.Context, token s
 
 func newAuthenticator(t *testing.T, verifier appsauth.CurrentUserVerifier) *appsauth.Authenticator {
 	t.Helper()
-	authenticator, err := appsauth.New(validConfig(), appsauth.Runtime{
+	return newAuthenticatorWithConfig(t, verifier, nil)
+}
+
+func newAuthenticatorWithConfig(t *testing.T, verifier appsauth.CurrentUserVerifier, configure func(*appsauth.Config)) *appsauth.Authenticator {
+	t.Helper()
+	config := validConfig()
+	if configure != nil {
+		configure(&config)
+	}
+	authenticator, err := appsauth.New(config, appsauth.Runtime{
 		AppName: "metricspire", WorkspaceID: "314", Host: "https://workspace.example.com",
 	}, verifier)
 	if err != nil {

@@ -112,6 +112,7 @@ const CardinalityManyToOne Cardinality = "many_to_one"
 
 type Metric struct {
 	Name              string       `json:"name" yaml:"name"`
+	ExternalCode      string       `json:"external_code,omitempty" yaml:"external_code,omitempty"`
 	DisplayName       string       `json:"display_name,omitempty" yaml:"display_name,omitempty"`
 	Description       string       `json:"description,omitempty" yaml:"description,omitempty"`
 	Owner             string       `json:"owner,omitempty" yaml:"owner,omitempty"`

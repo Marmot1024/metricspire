@@ -118,6 +118,7 @@ type ImportBatch struct {
 type Repository interface {
 	Import(context.Context, string, ImportInput) (ImportBatch, error)
 	List(context.Context, string, string, int) ([]MetricRecord, error)
+	ListByCodes(context.Context, string, []string) ([]MetricRecord, error)
 	GetImport(context.Context, string, string) (ImportBatch, error)
 	RollbackImport(context.Context, string, string, string) (ImportBatch, error)
 }
@@ -171,6 +172,17 @@ func (service *Service) List(ctx context.Context, namespace, search string, limi
 		return nil, fmt.Errorf("%w: limit must be between 1 and %d", ErrInvalid, MaxImportRecords)
 	}
 	return service.repository.List(ctx, namespace, strings.TrimSpace(search), limit)
+}
+
+// ListByCodes enriches only the bounded, exact metric codes selected by a catalog search.
+func (service *Service) ListByCodes(ctx context.Context, namespace string, codes []string) ([]MetricRecord, error) {
+	if strings.TrimSpace(namespace) == "" || len(codes) > MaxImportRecords {
+		return nil, fmt.Errorf("%w: invalid catalog counterpart scope", ErrInvalid)
+	}
+	if len(codes) == 0 {
+		return nil, nil
+	}
+	return service.repository.ListByCodes(ctx, namespace, codes)
 }
 
 func (service *Service) GetImport(ctx context.Context, namespace, importID string) (ImportBatch, error) {

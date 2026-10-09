@@ -81,6 +81,36 @@ func TestGovernanceReviewReportsPublicationIssuesBeforePublish(t *testing.T) {
 	}
 }
 
+func TestGovernanceReviewTreatsAssignedExternalCodeAsStable(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		before     string
+		after      string
+		isBreaking bool
+	}{
+		{name: "first assignment", before: "", after: "1001", isBreaking: false},
+		{name: "renumber", before: "1001", after: "1002", isBreaking: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := readGovernanceContract[model.SemanticSource](t, "model.yaml")
+			source.Spec.Metrics[0].ExternalCode = test.before
+			manifest, err := compiler.Compile(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			active := &catalog.Release{ID: "release-1", SourceRevision: 1, ManifestFingerprint: manifest.Fingerprint, Manifest: manifest}
+			source.Spec.Metrics[0].ExternalCode = test.after
+			review, err := application.ReviewGovernance(source, active, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(review.MetricChanges) != 1 || review.MetricChanges[0].Breaking != test.isBreaking {
+				t.Fatalf("metric changes = %#v", review.MetricChanges)
+			}
+		})
+	}
+}
+
 func readGovernanceContract[T any](t *testing.T, name string) T {
 	t.Helper()
 	path := filepath.Join("..", "..", "examples", "orders", name)

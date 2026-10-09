@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -797,8 +798,11 @@ func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(data, []byte("resource")) || bytes.Contains(data, []byte("expression")) || bytes.Contains(data, []byte("model_name")) {
+	if bytes.Contains(data, []byte("resource")) || bytes.Contains(data, []byte("physical")) {
 		t.Fatalf("catalog response leaked execution details: %s", data)
+	}
+	if !bytes.Contains(data, []byte("expression")) || !bytes.Contains(data, []byte("semantic_model_name")) {
+		t.Fatalf("catalog response hid the governed semantic definition: %s", data)
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/", nil)
@@ -809,11 +813,11 @@ func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
 		t.Fatalf("UI response = %d %#v", response.StatusCode, response.Header)
 	}
 	body := readRawBody(t, response)
-	if !strings.Contains(body, "<h1>指标库</h1>") || !strings.Contains(body, "/assets/app.js") ||
+	if !strings.Contains(body, "<h1>指标目录</h1>") || !strings.Contains(body, "/assets/app.js") ||
 		!strings.Contains(body, "catalog-status-filter") || !strings.Contains(body, "query-metric-search") ||
 		!strings.Contains(body, "business-verification-note") ||
 		!strings.Contains(body, "run-query-button") || !strings.Contains(body, "governance-tab") ||
-		!strings.Contains(body, "<h1>治理发布</h1>") || !strings.Contains(body, "editor-status") ||
+		!strings.Contains(body, "<h1>指标治理</h1>") || !strings.Contains(body, "metric-inventory") || !strings.Contains(body, "editor-status") ||
 		!strings.Contains(body, "<h1>查询验证</h1>") {
 		t.Fatal("UI is missing a catalog, governance, query or feedback entry")
 	}
@@ -824,10 +828,136 @@ func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
 	response = recorder.Result()
 	script := readRawBody(t, response)
 	if response.StatusCode != http.StatusOK || !strings.Contains(script, "/api/v1/ui/context") ||
-		!strings.Contains(script, "/api/v1/catalog/search") || !strings.Contains(script, "reviewGovernance") ||
+		!strings.Contains(script, "/api/v1/catalog/index") || !strings.Contains(script, "reviewGovernance") ||
 		!strings.Contains(script, "rollbackRelease") || !strings.Contains(script, "/cancel") ||
 		!strings.Contains(script, "result-table") || !strings.Contains(script, "previous_month") {
 		t.Fatal("UI JavaScript does not call the product API")
+	}
+}
+
+func TestHTTPCatalogIndexIsScopedMergedAndPaginated(t *testing.T) {
+	handler, _, _ := newTestServer(t, httpapi.Config{UIModels: []httpapi.UIModelRoute{{Namespace: "demo", ModelName: "commerce"}}})
+	source := readSource(t)
+	draftMetric := source.Spec.Metrics[0]
+	draftMetric.Name = "draft_metric"
+	draftMetric.Verification = model.Verification{Status: model.VerificationUnverified}
+	source.Spec.Metrics = append(source.Spec.Metrics, draftMetric)
+	seed := performJSON(handler, http.MethodPut, "/api/v1/namespaces/demo/models/commerce/draft", "manage", httpapi.SaveDraftRequest{Source: source, ExpectedRevision: 1})
+	if seed.StatusCode != http.StatusOK {
+		t.Fatalf("seed draft: %d %s", seed.StatusCode, readRawBody(t, seed))
+	}
+
+	definition := func(code string, readiness governance.SemanticReadiness) governance.MetricDefinition {
+		modelName := ""
+		if readiness == governance.ReadinessExecutableUnverified {
+			modelName = "commerce"
+		}
+		return governance.MetricDefinition{
+			Code: code, DisplayName: code, Description: "source-backed definition", Owner: "owner", Status: "unverified",
+			BusinessType: governance.BusinessAtomic, SemanticReadiness: readiness, SemanticModelName: modelName,
+			AuthoritativeSource: governance.SourceReference{Reference: "sheet:1", Resource: "orders", Field: "amount"},
+			ValueType:           model.DataTypeDecimal, Verification: model.Verification{Status: model.VerificationUnverified},
+		}
+	}
+	response := performJSON(handler, http.MethodPost, "/api/v1/namespaces/demo/governance/imports", "manage", httpapi.GovernanceImportRequest{
+		SourceFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Records: []governance.MetricDefinition{
+			definition("draft_metric", governance.ReadinessExecutableUnverified),
+			definition("pending_metric", governance.ReadinessNeedsRemediation),
+			definition("refund_rate", governance.ReadinessNeedsRemediation),
+		},
+	})
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("import status=%d body=%s", response.StatusCode, readRawBody(t, response))
+	}
+
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/detail?namespace=demo&name=draft_metric", "preview", nil)
+	var draftDetail httpapi.CatalogIndexEntry
+	decodeResponse(t, response, &draftDetail)
+	if draftDetail.CatalogStatus != "draft" || draftDetail.Entity != draftMetric.Entity || draftDetail.Kind != draftMetric.Kind || draftDetail.Expression.Field != draftMetric.Expression.Field || len(draftDetail.TimeGranularities) == 0 || len(draftDetail.DimensionDetails) == 0 {
+		t.Fatalf("semantic draft fields lost: %#v", draftDetail)
+	}
+	path := "/api/v1/catalog/index?namespace=demo&limit=1&status=all"
+	response = performJSON(handler, http.MethodGet, path, "preview", nil)
+	if response.Header.Get("Server-Timing") == "" {
+		t.Fatal("catalog index did not report server timings")
+	}
+	var first httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &first)
+	if first.Counts.Published < 1 || first.Counts.Draft != 1 || first.Counts.Governance != 1 || first.Counts.Total != first.Counts.Published+2 ||
+		len(first.Items) != 1 || first.NextCursor == "" {
+		t.Fatalf("first index page=%#v", first)
+	}
+	response = performJSON(handler, http.MethodGet, path+"&cursor="+first.NextCursor, "preview", nil)
+	var second httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &second)
+	if len(second.Items) != 1 || second.Items[0].Name == first.Items[0].Name || second.Counts != first.Counts {
+		t.Fatalf("second index page=%#v", second)
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&q=refund_rate&view=summary", "preview", nil)
+	var summary struct {
+		Items []httpapi.CatalogIndexSummary `json:"items"`
+	}
+	decodeResponse(t, response, &summary)
+	if len(summary.Items) != 1 || !summary.Items[0].Summary || summary.Items[0].Name != "refund_rate" || summary.Items[0].SourceResource != "orders" {
+		t.Fatalf("catalog summary=%#v", summary)
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/detail?namespace=demo&name=refund_rate", "preview", nil)
+	var detail httpapi.CatalogIndexEntry
+	decodeResponse(t, response, &detail)
+	if detail.CatalogStatus != "published" || detail.AuthoritativeSource == nil || detail.AuthoritativeSource.Reference != "sheet:1" {
+		t.Fatalf("catalog detail=%#v", detail)
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/detail?namespace=demo&name=pending_metric", "query", nil)
+	assertProblem(t, response, http.StatusNotFound, "not_found")
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/detail?namespace=demo&name=pending_metric", "manage", nil)
+	decodeResponse(t, response, &detail)
+	if detail.CatalogStatus != "governance" {
+		t.Fatalf("manager detail=%#v", detail)
+	}
+
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&q=refund_rate", "query", nil)
+	var queryOnly httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &queryOnly)
+	if len(queryOnly.Items) != 1 || queryOnly.Items[0].CatalogStatus != "published" || queryOnly.Items[0].AuthoritativeSource != nil || queryOnly.Counts.Governance != 0 {
+		t.Fatalf("query-only index=%#v", queryOnly)
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&q=refund_rate", "preview", nil)
+	var enriched httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &enriched)
+	if len(enriched.Items) != 1 || enriched.Items[0].CatalogStatus != "published" || enriched.Items[0].AuthoritativeSource == nil || enriched.Items[0].AuthoritativeSource.Resource != "orders" {
+		t.Fatalf("manager index did not merge source evidence=%#v", enriched)
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&q=source-backed", "preview", nil)
+	var searchByGovernance httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &searchByGovernance)
+	var refundMatches int
+	for _, entry := range searchByGovernance.Items {
+		if entry.Name == "refund_rate" {
+			refundMatches++
+			if entry.CatalogStatus != "published" {
+				t.Fatalf("published metric was demoted by governance-only search: %#v", entry)
+			}
+		}
+	}
+	if refundMatches != 1 {
+		t.Fatalf("governance search returned %d refund_rate entries", refundMatches)
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&q=sheet%3A1", "preview", nil)
+	var sourceSearch httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &sourceSearch)
+	if len(sourceSearch.Items) != 2 || sourceSearch.Counts.Governance != 1 {
+		t.Fatalf("source-reference search lost definitions: %#v", sourceSearch)
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&status=governance", "manage", nil)
+	var manageOnly httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &manageOnly)
+	if len(manageOnly.Items) != 2 || manageOnly.Counts.Published != 0 || manageOnly.Counts.Draft != 1 || manageOnly.Counts.Governance != 2 {
+		t.Fatalf("manage-only index=%#v", manageOnly)
+	}
+	for _, invalid := range []string{"cursor=not_base64!", "limit=101", "status=unknown", "view=full"} {
+		response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&"+invalid, "preview", nil)
+		assertProblem(t, response, http.StatusBadRequest, "invalid_request")
 	}
 }
 
@@ -1075,7 +1205,7 @@ func newTestServerWithDependencies(t *testing.T, config httpapi.Config, engine *
 		case "Bearer manage":
 			return httpapi.Principal{Tenant: "demo", Subject: "manager@example.com", Roles: []string{"manager"}, Permissions: []httpapi.Permission{httpapi.PermissionManage}}, nil
 		case "Bearer preview":
-			return httpapi.Principal{Tenant: "demo", Subject: "manager@example.com", Roles: []string{"manager"}, Permissions: []httpapi.Permission{httpapi.PermissionManage, httpapi.PermissionQuery}}, nil
+			return httpapi.Principal{Tenant: "demo", Subject: "manager@example.com", Roles: []string{"manager", "analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionManage, httpapi.PermissionQuery}}, nil
 		default:
 			return httpapi.Principal{}, httpapi.ErrUnauthenticated
 		}
@@ -1320,3 +1450,59 @@ func modelPath(action string) string {
 }
 
 func queryPath(action string) string { return modelPath(action) }
+
+func TestCatalogSearchFindsMatchesBeyondSourceCaps(t *testing.T) {
+	handler, _, _ := newTestServer(t, httpapi.Config{})
+	source := readSource(t)
+	base := source.Spec.Metrics[0]
+	for i := range application.MaxCatalogSearchResults {
+		metric := base
+		metric.Name = fmt.Sprintf("sample_%04d", i)
+		source.Spec.Metrics = append(source.Spec.Metrics, metric)
+	}
+	target := base
+	target.Name = "zz_outside_scan"
+	source.Spec.Metrics = append(source.Spec.Metrics, target)
+	response := performJSON(handler, http.MethodPut, "/api/v1/namespaces/demo/models/commerce/draft", "manage", httpapi.SaveDraftRequest{Source: source, ExpectedRevision: 1})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("seed large draft: %d", response.StatusCode)
+	}
+	response = performJSON(handler, http.MethodPost, "/api/v1/namespaces/demo/models/commerce/publish", "manage", httpapi.PublishRequest{ExpectedRevision: 2})
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("publish large catalog: %d %s", response.StatusCode, readRawBody(t, response))
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&q=zz_outside_scan", "query", nil)
+	var index httpapi.CatalogIndexResponse
+	decodeResponse(t, response, &index)
+	if len(index.Items) != 1 || index.Items[0].Name != target.Name {
+		t.Fatalf("published match outside cap lost: %#v", index)
+	}
+
+	definition := func(code string) governance.MetricDefinition {
+		return governance.MetricDefinition{Code: code, DisplayName: code, Description: "neutral definition", Owner: "data-team", Status: "unverified",
+			BusinessType: governance.BusinessAtomic, SemanticReadiness: governance.ReadinessNeedsRemediation,
+			AuthoritativeSource: governance.SourceReference{Reference: "fixture", Resource: "orders", Field: "amount"},
+			ValueType:           model.DataTypeDecimal, Verification: model.Verification{Status: model.VerificationUnverified}}
+	}
+	records := make([]governance.MetricDefinition, governance.MaxImportRecords)
+	for i := range records {
+		records[i] = definition(fmt.Sprintf("record_%04d", i))
+	}
+	response = performJSON(handler, http.MethodPost, "/api/v1/namespaces/demo/governance/imports", "manage", httpapi.GovernanceImportRequest{SourceFingerprint: "sha256:" + strings.Repeat("a", 64), Records: records})
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("seed governance catalog: %d", response.StatusCode)
+	}
+	var batch governance.ImportBatch
+	decodeResponse(t, response, &batch)
+	last := definition(target.Name)
+	last.Description = "metadata-only-target"
+	response = performJSON(handler, http.MethodPost, "/api/v1/namespaces/demo/governance/imports", "manage", httpapi.GovernanceImportRequest{SourceFingerprint: "sha256:" + strings.Repeat("b", 64), ExpectedPreviousImportID: batch.ID, Records: []governance.MetricDefinition{last}})
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("append governance target: %d %s", response.StatusCode, readRawBody(t, response))
+	}
+	response = performJSON(handler, http.MethodGet, "/api/v1/catalog/index?namespace=demo&q=metadata-only-target", "preview", nil)
+	decodeResponse(t, response, &index)
+	if len(index.Items) != 1 || index.Items[0].Name != target.Name || index.Items[0].CatalogStatus != "published" || index.Items[0].AuthoritativeSource == nil {
+		t.Fatalf("governance-only search lost published counterpart: %#v", index)
+	}
+}

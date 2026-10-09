@@ -14,8 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/contractio"
 	"github.com/marmot1024/metricspire/internal/httpapi"
+	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/marmot1024/metricspire/internal/runtimeconfig"
 )
 
@@ -176,6 +178,23 @@ func TestConfiguredUIModelsKeepsRouteOrderAndRemovesDuplicates(t *testing.T) {
 		if got[index] != want[index] {
 			t.Fatalf("configuredUIModels()[%d] = %#v, want %#v", index, got[index], want[index])
 		}
+	}
+}
+
+func TestConfiguredUISourcePrefixesOnlyUsesUnambiguousBindings(t *testing.T) {
+	route := func(namespace, catalog, schema string) application.BindingConfiguration {
+		return application.BindingConfiguration{Namespace: namespace, Binding: model.SourceBinding{
+			Datasets: []model.DatasetBinding{{Resource: model.ResourceRef{
+				Kind: model.ResourceTable, Catalog: catalog, Schema: schema, Table: "events",
+			}}},
+		}}
+	}
+	got := configuredUISourcePrefixes([]application.BindingConfiguration{
+		route("matchingstory", "mm", "mm"), route("matchingstory", "mm", "mm"),
+		route("mixed", "mm", "mm"), route("mixed", "other", "db"),
+	})
+	if got["matchingstory"] != "mm.mm" || got["mixed"] != "" {
+		t.Fatalf("source prefixes = %#v", got)
 	}
 }
 
