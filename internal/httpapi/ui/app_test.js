@@ -128,6 +128,15 @@ test("common authorization and time-grouping failures explain the recovery actio
   assert.match(errorMessage({detail: "grouped time dimensions require explicit grouping semantics", request_id: "req_2"}), /选择按日、按周或按月.*req_2/);
 });
 
+test("identity dependency failure offers recovery without a login loop", () => {
+  for (const status of [503, 504]) {
+    const message = errorMessage({code: "authentication_unavailable", status, request_id: "req_identity"});
+    assert.match(message, /身份验证服务暂时不可用.*稍后重试.*req_identity/);
+    assert.doesNotMatch(message, /重新登录|权限组/);
+  }
+  assert.match(errorMessage({code: "unauthenticated", status: 401}), /重新登录/);
+});
+
 test("publication issues are grouped by actionable cause instead of rendering an error wall", () => {
   const groups = groupPublicationIssues([
     'metric "revenue" is not verified', 'metric "orders" is not verified',

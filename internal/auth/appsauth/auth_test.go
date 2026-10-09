@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -124,7 +125,7 @@ func TestAuthenticatorDoesNotCacheCurrentUserFailures(t *testing.T) {
 		return appsauth.CurrentUser{Active: true, ID: "123", Username: "analyst@example.com", Emails: []string{"analyst@example.com"}}, nil
 	})
 	authenticator := newAuthenticator(t, verifier)
-	if _, err := authenticator.Authenticate(context.Background(), appsRequest("retry-token")); !errors.Is(err, httpapi.ErrUnauthenticated) {
+	if _, err := authenticator.Authenticate(context.Background(), appsRequest("retry-token")); !errors.Is(err, httpapi.ErrAuthenticationUnavailable) {
 		t.Fatalf("first Authenticate() error = %v", err)
 	}
 	if _, err := authenticator.Authenticate(context.Background(), appsRequest("retry-token")); err != nil {
@@ -181,12 +182,59 @@ func TestCurrentUserFailureDoesNotLeakForwardedToken(t *testing.T) {
 	})
 	authenticator := newAuthenticator(t, verifier)
 	_, err := authenticator.Authenticate(context.Background(), appsRequest(token))
-	if !errors.Is(err, httpapi.ErrUnauthenticated) || strings.Contains(err.Error(), token) {
+	if !errors.Is(err, httpapi.ErrAuthenticationUnavailable) || errors.Is(err, httpapi.ErrUnauthenticated) || strings.Contains(err.Error(), token) {
 		t.Fatalf("Authenticate() error = %v", err)
 	}
 	var diagnostic interface{ SafeAuthenticationReason() string }
-	if !errors.As(err, &diagnostic) || diagnostic.SafeAuthenticationReason() != "current_user" {
+	if !errors.As(err, &diagnostic) || diagnostic.SafeAuthenticationReason() != "current_user_unavailable" {
 		t.Fatalf("safe authentication diagnostic = %T %v", err, err)
+	}
+}
+
+func TestCurrentUserHTTPFailuresDistinguishInvalidCredentialsFromDependencies(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		status int
+		body   string
+		cause  error
+		want   error
+		reason string
+	}{
+		{name: "invalid token", status: 401, want: httpapi.ErrUnauthenticated, reason: "current_user"},
+		{name: "forbidden dependency", status: 403, want: httpapi.ErrAuthenticationUnavailable, reason: "current_user_forbidden"},
+		{name: "rate limited", status: 429, want: httpapi.ErrAuthenticationUnavailable, reason: "current_user_unavailable"},
+		{name: "upstream unavailable", status: 503, want: httpapi.ErrAuthenticationUnavailable, reason: "current_user_unavailable"},
+		{name: "network", cause: errors.New("Bearer must-not-escape"), want: httpapi.ErrAuthenticationUnavailable, reason: "current_user_unavailable"},
+		{name: "timeout", cause: context.DeadlineExceeded, want: httpapi.ErrAuthenticationUnavailable, reason: "current_user_timeout"},
+		{name: "malformed success", status: 200, body: "Bearer must-not-escape", want: httpapi.ErrAuthenticationUnavailable, reason: "current_user_unavailable"},
+		{name: "inactive user", status: 200, body: `{"active":false,"id":"123","userName":"analyst@example.com"}`, want: httpapi.ErrAuthenticationDenied, reason: "current_user_inactive"},
+		{name: "missing account status", status: 200, body: `{"id":"123","userName":"analyst@example.com"}`, want: httpapi.ErrAuthenticationUnavailable, reason: "current_user_unavailable"},
+		{name: "missing user identity", status: 200, body: `{"active":true}`, want: httpapi.ErrAuthenticationUnavailable, reason: "current_user_incomplete"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := validConfig()
+			config.HTTPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				if test.cause != nil {
+					return nil, test.cause
+				}
+				return &http.Response{StatusCode: test.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(test.body))}, nil
+			})}
+			authenticator, err := appsauth.New(config, appsauth.Runtime{AppName: "metricspire", WorkspaceID: "314", Host: "https://workspace.example.com"}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			principal, err := authenticator.Authenticate(t.Context(), appsRequest("must-not-escape"))
+			if !errors.Is(err, test.want) || principal.Subject != "" || strings.Contains(err.Error(), "must-not-escape") {
+				t.Fatalf("unsafe or misclassified verification: principal=%#v err=%v", principal, err)
+			}
+			var diagnostic interface{ SafeAuthenticationReason() string }
+			if !errors.As(err, &diagnostic) || diagnostic.SafeAuthenticationReason() != test.reason {
+				t.Fatalf("wrong safe reason: %v", err)
+			}
+			if test.reason == "current_user_timeout" && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatal("timeout classification was lost")
+			}
+		})
 	}
 }
 
@@ -294,4 +342,33 @@ func appsRequest(token string) *http.Request {
 	request.Header.Set(appsauth.HeaderEmail, "analyst@example.com")
 	request.Header.Set(appsauth.HeaderAccessToken, token)
 	return request
+}
+
+func TestFailedIdentityResponsesReuseHTTPConnection(t *testing.T) {
+	var connections atomic.Int32
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(response, "temporary failure")
+	}))
+	upstream.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	upstream.StartTLS()
+	defer upstream.Close()
+	config := validConfig()
+	config.HTTPClient = upstream.Client()
+	authenticator, err := appsauth.New(config, appsauth.Runtime{AppName: "metricspire", WorkspaceID: "314", Host: upstream.URL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := authenticator.Authenticate(t.Context(), appsRequest("synthetic-test-token")); !errors.Is(err, httpapi.ErrAuthenticationUnavailable) {
+			t.Fatalf("identity outage classification: %v", err)
+		}
+	}
+	if count := connections.Load(); count != 1 {
+		t.Fatalf("failed response opened %d connections, want 1", count)
+	}
 }

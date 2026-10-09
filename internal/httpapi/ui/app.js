@@ -58,7 +58,9 @@ function errorMessage(error) {
   const detail = error?.detail || (error instanceof Error ? error.message : "");
   const code = error?.code || "";
   let message = detail || "请求失败，请稍后重试。";
-  if (code === "permission_denied" || error?.status === 403) {
+  if (code === "authentication_unavailable") {
+    message = "身份验证服务暂时不可用，请稍后重试。持续出现时，请提供请求编号联系平台支持。";
+  } else if (code === "permission_denied" || error?.status === 403) {
     message = "当前账号没有执行此操作的权限。请联系平台管理员确认所属权限组。";
   } else if (code === "unauthorized" || error?.status === 401) {
     message = "登录状态已失效，请重新登录后再试。";

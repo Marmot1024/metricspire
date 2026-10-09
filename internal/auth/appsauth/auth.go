@@ -89,13 +89,57 @@ type Authenticator struct {
 	currentUsers     CurrentUserVerifier
 }
 
-type authenticationError struct{ reason string }
+type authenticationError struct {
+	reason         string
+	cause          error
+	upstreamStatus int
+}
 
-func (err authenticationError) Error() string                    { return "Databricks Apps authentication rejected" }
-func (err authenticationError) Unwrap() error                    { return httpapi.ErrUnauthenticated }
-func (err authenticationError) SafeAuthenticationReason() string { return err.reason }
+func (err authenticationError) Error() string {
+	if errors.Is(err.cause, httpapi.ErrAuthenticationDenied) {
+		return "Databricks Apps identity denied"
+	}
+	if err.cause != nil {
+		return "Databricks Apps identity verification unavailable"
+	}
+	return "Databricks Apps authentication rejected"
+}
+func (err authenticationError) Unwrap() error {
+	if err.cause != nil {
+		return err.cause
+	}
+	return httpapi.ErrUnauthenticated
+}
+func (err authenticationError) SafeAuthenticationReason() string      { return err.reason }
+func (err authenticationError) SafeAuthenticationUpstreamStatus() int { return err.upstreamStatus }
 
 func rejected(reason string) error { return authenticationError{reason: reason} }
+
+// Dependency failures must fail closed without asking the client to replace
+// an otherwise valid credential. Only a verified upstream 401 is a login error.
+func currentUserFailure(err error) error {
+	var upstream currentUserHTTPError
+	if errors.Is(err, httpapi.ErrUnauthenticated) || (errors.As(err, &upstream) && upstream.status == http.StatusUnauthorized) {
+		return authenticationError{reason: "current_user", upstreamStatus: upstream.status}
+	}
+	reason := "current_user_unavailable"
+	cause := httpapi.ErrAuthenticationUnavailable
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &upstream) && (upstream.status == http.StatusRequestTimeout || upstream.status == http.StatusGatewayTimeout)) {
+		reason = "current_user_timeout"
+		cause = errors.Join(cause, context.DeadlineExceeded)
+	} else if errors.As(err, &upstream) && upstream.status == http.StatusForbidden {
+		// A forbidden identity dependency is not evidence that re-login or
+		// broader OAuth scopes will fix the connection.
+		reason = "current_user_forbidden"
+	}
+	return authenticationError{reason: reason, cause: cause, upstreamStatus: upstream.status}
+}
+
+type currentUserHTTPError struct{ status int }
+
+func (err currentUserHTTPError) Error() string {
+	return fmt.Sprintf("Databricks current-user verification returned HTTP %d", err.status)
+}
 
 // New verifies an explicit expected Apps identity against the runtime-provided
 // app name, workspace ID, and workspace host. Merely setting forwarded headers
@@ -152,8 +196,14 @@ func (authenticator *Authenticator) Authenticate(ctx context.Context, request *h
 		return httpapi.Principal{}, rejected("forwarded_token")
 	}
 	current, err := authenticator.currentUsers.CurrentUser(ctx, token)
-	if err != nil || !current.Active || strings.TrimSpace(current.ID) == "" || strings.TrimSpace(current.Username) == "" {
-		return httpapi.Principal{}, rejected("current_user")
+	if err != nil {
+		return httpapi.Principal{}, currentUserFailure(err)
+	}
+	if strings.TrimSpace(current.ID) == "" || strings.TrimSpace(current.Username) == "" {
+		return httpapi.Principal{}, authenticationError{reason: "current_user_incomplete", cause: httpapi.ErrAuthenticationUnavailable}
+	}
+	if !current.Active {
+		return httpapi.Principal{}, authenticationError{reason: "current_user_inactive", cause: httpapi.ErrAuthenticationDenied}
 	}
 	if err := validateForwardedIdentity(request, current); err != nil {
 		return httpapi.Principal{}, rejected("forwarded_identity")
@@ -299,18 +349,27 @@ func (client *currentUserClient) CurrentUser(ctx context.Context, token string) 
 	request.Header.Set("User-Agent", "metricspire/0.1")
 	response, err := client.http.Do(request)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return CurrentUser{}, context.DeadlineExceeded
+		}
 		return CurrentUser{}, errors.New("verify Databricks current user")
 	}
 	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		// Drain small error responses for HTTP/1.1 reuse, without retaining
+		// upstream content or allowing an unbounded error body.
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maximumCurrentUserBytes+1))
+		return CurrentUser{}, currentUserHTTPError{status: response.StatusCode}
+	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maximumCurrentUserBytes+1))
 	if err != nil || len(data) > maximumCurrentUserBytes {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return CurrentUser{}, context.DeadlineExceeded
+		}
 		return CurrentUser{}, errors.New("read Databricks current-user response")
 	}
-	if response.StatusCode != http.StatusOK {
-		return CurrentUser{}, fmt.Errorf("Databricks current-user verification returned HTTP %d", response.StatusCode)
-	}
 	var payload struct {
-		Active   bool   `json:"active"`
+		Active   *bool  `json:"active"`
 		ID       string `json:"id"`
 		Username string `json:"userName"`
 		Emails   []struct {
@@ -324,7 +383,10 @@ func (client *currentUserClient) CurrentUser(ctx context.Context, token string) 
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return CurrentUser{}, errors.New("decode Databricks current-user response")
 	}
-	current := CurrentUser{Active: payload.Active, ID: strings.TrimSpace(payload.ID), Username: strings.TrimSpace(payload.Username)}
+	if payload.Active == nil {
+		return CurrentUser{}, errors.New("Databricks current-user response omitted account status")
+	}
+	current := CurrentUser{Active: *payload.Active, ID: strings.TrimSpace(payload.ID), Username: strings.TrimSpace(payload.Username)}
 	for _, email := range payload.Emails {
 		if value := strings.TrimSpace(email.Value); value != "" {
 			current.Emails = append(current.Emails, value)
