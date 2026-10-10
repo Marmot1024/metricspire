@@ -194,7 +194,12 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		for _, resource := range config.Online.Resources {
 			qualified := pgx.Identifier{resource.Schema, resource.Table}.Sanitize()
 			var readOnly bool
-			if err := pool.QueryRow(initializationContext, `SELECT has_table_privilege(current_user,$1,'SELECT') AND NOT has_table_privilege(current_user,$1,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')`, qualified).Scan(&readOnly); err != nil || !readOnly {
+			// Table checks alone miss column grants. These inquiries also include
+			// privileges inherited by the current role.
+			if err := pool.QueryRow(initializationContext, `SELECT
+				has_table_privilege(current_user,$1,'SELECT')
+				AND NOT has_table_privilege(current_user,$1,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+				AND NOT has_any_column_privilege(current_user,$1,'INSERT,UPDATE,REFERENCES')`, qualified).Scan(&readOnly); err != nil || !readOnly {
 				return errors.New("online credential must have SELECT and no write privileges on each enabled source")
 			}
 		}

@@ -36,6 +36,21 @@ import (
 // Exercise runServe itself, not just a manually assembled service. All identity,
 // Warehouse and business data fixtures are synthetic and loopback-only.
 func TestServeOnlinePostgresWithOIDCAndSeparateAnalyticalRoute(t *testing.T) {
+	testServeOnlinePostgres(t, "", false)
+}
+
+func TestServeOnlinePostgresRejectsWriteCredential(t *testing.T) {
+	for _, privilege := range []string{"UPDATE", "INSERT(revenue)", "UPDATE(revenue)", "REFERENCES(revenue)"} {
+		for _, inherited := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/inherited=%t", privilege, inherited), func(t *testing.T) {
+				testServeOnlinePostgres(t, privilege, inherited)
+			})
+		}
+	}
+}
+
+func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited bool) {
+	t.Helper()
 	raw := os.Getenv("METRICSPIRE_ONLINE_TEST_DATABASE_URL")
 	if raw == "" {
 		t.Skip("requires a disposable loopback PostgreSQL administrator")
@@ -59,11 +74,21 @@ func TestServeOnlinePostgresWithOIDCAndSeparateAnalyticalRoute(t *testing.T) {
 		}
 	}
 	exec("CREATE SCHEMA " + qualified(control) + "; CREATE SCHEMA " + qualified(data) + "; CREATE ROLE " + qualified(role) + " LOGIN PASSWORD 'synthetic-local-only'")
+	writer := ""
+	if inherited {
+		writer = role + "_writer"
+		exec("CREATE ROLE " + qualified(writer) + "; GRANT " + qualified(writer) + " TO " + qualified(role))
+	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if _, err := admin.Exec(ctx, "DROP SCHEMA "+qualified(data)+" CASCADE; DROP SCHEMA "+qualified(control)+" CASCADE; DROP ROLE "+qualified(role)); err != nil {
 			t.Errorf("fixture cleanup: %v", err)
+		}
+		if writer != "" {
+			if _, err := admin.Exec(ctx, "DROP ROLE "+qualified(writer)); err != nil {
+				t.Errorf("writer fixture cleanup: %v", err)
+			}
 		}
 	})
 	controlURL := *u
@@ -109,6 +134,21 @@ func TestServeOnlinePostgresWithOIDCAndSeparateAnalyticalRoute(t *testing.T) {
 	exec("CREATE TABLE " + table + " (row_key text PRIMARY KEY, day date NOT NULL, region text NOT NULL, revenue numeric NOT NULL, orders bigint NOT NULL, _metricspire_tenant text NOT NULL, _metricspire_batch_id text NOT NULL, _metricspire_data_as_of timestamptz NOT NULL, _metricspire_data_contract text NOT NULL)")
 	exec("INSERT INTO "+table+" VALUES ('one','2026-09-01','east',100,2,'demo','batch-1',clock_timestamp(),$1)", contract)
 	exec("GRANT USAGE ON SCHEMA " + qualified(data) + " TO " + qualified(role) + "; GRANT SELECT ON " + table + " TO " + qualified(role))
+	if writePrivilege != "" {
+		grantee := role
+		if inherited {
+			grantee = writer
+		}
+		// Privileges are fixed test cases, never caller input.
+		exec("GRANT " + writePrivilege + " ON " + table + " TO " + qualified(grantee))
+		var tableWrite, columnWrite bool
+		if err := admin.QueryRow(t.Context(), "SELECT has_table_privilege($1,$2,'INSERT,UPDATE,REFERENCES'),has_any_column_privilege($1,$2,'INSERT,UPDATE,REFERENCES')", role, table).Scan(&tableWrite, &columnWrite); err != nil {
+			t.Fatal(err)
+		}
+		if !columnWrite || (strings.Contains(writePrivilege, "(") && tableWrite) {
+			t.Fatalf("invalid write fixture: table_write=%t column_write=%t", tableWrite, columnWrite)
+		}
+	}
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -163,6 +203,19 @@ func TestServeOnlinePostgresWithOIDCAndSeparateAnalyticalRoute(t *testing.T) {
 		"DATABRICKS_HOST": warehouse.URL, "DATABRICKS_SQL_WAREHOUSE_ID": "fixture", "DATABRICKS_TOKEN": "synthetic-local-token", "DATABRICKS_CLIENT_ID": "", "DATABRICKS_CLIENT_SECRET": "",
 	} {
 		t.Setenv(name, value)
+	}
+	if writePrivilege != "" {
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+		var stdout bytes.Buffer
+		err := runServe(ctx, []string{"--config", configPath}, &stdout, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "online credential must have SELECT and no write privileges") {
+			t.Fatalf("writable credential was not rejected at startup: error=%v", err)
+		}
+		if strings.Contains(stdout.String(), "listening") {
+			t.Fatal("writable credential reached listening state")
+		}
+		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	r, w := io.Pipe()
