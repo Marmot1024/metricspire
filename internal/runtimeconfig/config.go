@@ -132,8 +132,10 @@ func (config Config) Validate() error {
 		if online.Tenant == "" || len(online.Namespaces) == 0 || len(online.Resources) == 0 || len(online.Bindings) == 0 || online.DataAccess != "tenant_shared" || online.MaxDataAge == "" {
 			return errors.New("online serving requires a tenant, namespaces, sources, bindings, max_data_age and explicit tenant_shared access review")
 		}
-		if config.Authentication.Provider != AuthenticationOIDC {
-			return errors.New("the first PostgreSQL online slice supports portable OIDC only; Apps data-export authorization is not accepted")
+		if config.Authentication.Provider == AuthenticationDatabricksApps {
+			if len(online.Policies) == 0 || config.Authentication.DatabricksApps.Tenant != online.Tenant {
+				return errors.New("Apps online serving requires independent online policies and a matching authenticated tenant")
+			}
 		}
 		if online.MaxConcurrency < 0 || online.MaxConcurrency > 32 {
 			return errors.New("online.max_concurrency must be between 1 and 32 when set")

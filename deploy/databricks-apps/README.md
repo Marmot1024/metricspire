@@ -31,6 +31,14 @@ A Databricks account administrator registers a **public OAuth client**, without 
 
 The optional local CLI-profile header helper under `tools/` is a fallback for local trials, not a prerequisite for URL-only OAuth. Do not store tokens in a repository config or commit generated `dist/` content.
 
+## Optional online HTTP fixture
+
+The default package still has no PostgreSQL online endpoint. To include one, set `METRICSPIRE_APPS_ONLINE_CONFIG` to a reviewed private JSON file containing only an `OnlineConfig` object. Its tenant must match this neutral package's `acceptance` tenant, with explicit `tenant_shared` approval, namespaces, sources, freshness, `bindings` and independent `policies`. Each referenced artifact must be a regular JSON file in the same directory with a flat `online-*.json` filename. Only those files are copied; credentials, models, directories and unrelated assets are not automatically uploaded. This renderer is for the neutral dedicated fixture, not a replacement for a shared App's existing runtime configuration.
+
+Online allow rules must explicitly list verified principal IDs, metric names and dimension names; analytical `analyst` roles or wildcard grants are rejected. Readers share the approved aggregate scope, not arbitrary region/player-level restrictions. The package references an App secret resource named `metricspire-online-database-url` to supply `METRICSPIRE_ONLINE_DATABASE_URL`; provision and review that resource separately. Never put the connection URL into the JSON or command output. Business tables, source grants, model publication and data loading are not performed by the package. `METRICSPIRE_MIGRATE_ONCE` is not needed for online business-table setup and remains omitted by default.
+
+Run `python3 -m unittest discover -s deploy/databricks-apps -p test_render.py` before packaging. The Go runtime performs further route, source and read-role validation. Deploy only after independent review, the target resource and actual permitted/denied users are confirmed, and the exact integrated commit preserves already deployed behavior. A user token is used for existing Apps identity verification, never for PostgreSQL execution; analytical queries retain their separate per-user authorization path.
+
 ## Acceptance boundary
 
 Before declaring a new environment ready, verify managed identity, query-only and publisher separation, the intended warehouse, a bounded real query, a controlled Unity Catalog denial, cancellation, audit, credential non-persistence, and post-expiry client refresh. Real-environment tests are opt-in and must use the explicitly reviewed fixture and users. A build, health response, browser login, or successful `list_namespaces` call alone is not production acceptance.

@@ -143,6 +143,23 @@ func TestRuntimeConfigRequiresExplicitFailClosedDatabricksAppsProfile(t *testing
 	if err := valid.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	online := runtimeconfig.OnlineConfig{Tenant: "company", Namespaces: []string{"demo"}, DataAccess: "tenant_shared", Resources: []model.ResourceRef{{Kind: model.ResourceTable, Schema: "serving", Table: "daily_sales"}}, MaxDataAge: "5m", Bindings: []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: "commerce", Path: "online-binding.json"}}}
+	appsOnline := valid
+	appsOnline.Online = &online
+	if err := appsOnline.Validate(); err == nil {
+		t.Fatal("Apps online inherited broad analyst policies without explicit reader policies")
+	}
+	online.Policies = []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: "commerce", Tenant: "company", Path: "online-readers.json"}}
+	if err := appsOnline.Validate(); err != nil {
+		t.Fatalf("independently configured Apps online was rejected: %v", err)
+	}
+	mismatch := online
+	mismatch.Tenant = "different"
+	mismatch.Policies = []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: "commerce", Tenant: "different", Path: "online-readers.json"}}
+	appsOnline.Online = &mismatch
+	if err := appsOnline.Validate(); err == nil {
+		t.Fatal("Apps online accepted a tenant different from the authenticated tenant")
+	}
 	ambiguous := valid
 	ambiguous.Authentication.OIDC = &runtimeconfig.OIDCConfig{IssuerURL: "https://identity.example.com", ClientID: "client", BearerAudience: "api"}
 	if err := ambiguous.Validate(); err == nil {

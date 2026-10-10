@@ -22,6 +22,57 @@ def required(name: str) -> str:
     return value
 
 
+def add_online_config(runtime: dict, config_directory: Path, source: Path) -> None:
+    """Bundle only explicit neutral config artifacts, never a credential URL."""
+    online = json.loads(source.read_text(encoding="utf-8"))
+    allowed = {"tenant", "namespaces", "data_access", "resources", "max_data_age", "timeout", "max_concurrency", "bindings", "policies"}
+    if not isinstance(online, dict) or set(online) - allowed:
+        raise RuntimeError("online package must contain only an OnlineConfig object")
+    if online.get("tenant") != runtime["authentication"]["databricks_apps"]["tenant"] or online.get("data_access") != "tenant_shared":
+        raise RuntimeError("online package tenant and tenant_shared access must be explicitly reviewed")
+    if not online.get("namespaces") or not online.get("policies") or not online.get("bindings") or not online.get("resources") or not online.get("max_data_age"):
+        raise RuntimeError("online package requires independent policies, bindings, sources and freshness")
+    artifacts: dict[str, str] = {}
+    for kind in ("policies", "bindings"):
+        for route in online[kind]:
+            name = route.get("path", "")
+            # Flat, task-specific JSON files prevent traversal, collisions with
+            # analytical config and accidental directory-wide asset uploads.
+            if not re.fullmatch(r"online-[a-z0-9-]+\.json", name):
+                raise RuntimeError("online artifact paths must be flat online-*.json names")
+            artifact = source.parent / name
+            if artifact.is_symlink() or not artifact.is_file():
+                raise RuntimeError("online artifacts must be regular files")
+            content = artifact.read_text(encoding="utf-8")
+            payload = json.loads(content)
+            if kind == "policies":
+                if payload.get("kind") != "PolicySource" or payload.get("tenant") != online["tenant"]:
+                    raise RuntimeError("online reader policy contract or tenant is invalid")
+                for rule in payload.get("rules", []):
+                    if rule.get("effect") == "allow" and (
+                        rule.get("roles") or any(
+                            not explicit_values(rule.get(key))
+                            for key in ("principals", "metrics", "dimensions")
+                        )
+                    ):
+                        raise RuntimeError("online policies require explicit readers and data scopes")
+            elif payload.get("kind") != "SourceBinding" or payload.get("engine") != "postgres_online":
+                raise RuntimeError("online bindings must target postgres_online")
+            if name in artifacts and artifacts[name] != content:
+                raise RuntimeError("online artifact collision")
+            artifacts[name] = content
+    runtime["online"] = online
+    for name, content in artifacts.items():
+        (config_directory / name).write_text(content, encoding="utf-8")
+
+
+def explicit_values(values) -> bool:
+    return isinstance(values, list) and bool(values) and all(
+        isinstance(value, str) and value.strip() and value == value.strip() and value != "*"
+        for value in values
+    )
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         raise RuntimeError("usage: render.py OUTPUT_DIRECTORY")
@@ -45,7 +96,7 @@ def main() -> None:
         raise RuntimeError("METRICSPIRE_APPS_NAME must be a valid Databricks App name")
     if not workspace_id.isascii() or not workspace_id.isdigit():
         raise RuntimeError("METRICSPIRE_APPS_WORKSPACE_ID must contain only digits")
-    if parsed_url.scheme != "https" or not parsed_url.netloc or parsed_url.path not in ("", "/") or parsed_url.query or parsed_url.fragment:
+    if parsed_url.scheme != "https" or not parsed_url.netloc or parsed_url.username is not None or parsed_url.path not in ("", "/") or parsed_url.query or parsed_url.fragment:
         raise RuntimeError("METRICSPIRE_APPS_PUBLIC_URL must be an HTTPS origin")
     if any(character.isspace() for character in publisher_group_id) or len(publisher_group_id) > 256:
         raise RuntimeError("METRICSPIRE_APPS_PUBLISHER_GROUP_ID is invalid")
@@ -92,6 +143,9 @@ def main() -> None:
     }
     if trial_namespaces:
         runtime["release_policy"] = {"trial_namespaces": trial_namespaces}
+    online_config = os.environ.get("METRICSPIRE_APPS_ONLINE_CONFIG", "").strip()
+    if online_config:
+        add_online_config(runtime, config_directory, Path(online_config).resolve())
     (config_directory / "runtime.json").write_text(
         json.dumps(runtime, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
@@ -119,6 +173,11 @@ def main() -> None:
         app_yaml += (
             "  - name: METRICSPIRE_TRIAL_RELEASES\n"
             "    value: approved-trial\n"
+        )
+    if online_config:
+        app_yaml += (
+            "  - name: METRICSPIRE_ONLINE_DATABASE_URL\n"
+            "    valueFrom: metricspire-online-database-url\n"
         )
     (output / "app.yaml").write_text(app_yaml, encoding="utf-8")
 

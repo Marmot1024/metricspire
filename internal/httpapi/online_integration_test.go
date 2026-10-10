@@ -23,8 +23,10 @@ import (
 	"github.com/marmot1024/metricspire/internal/adapter/postgresquery"
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/audit"
+	"github.com/marmot1024/metricspire/internal/auth/appsauth"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
+	"github.com/marmot1024/metricspire/internal/executionauth"
 	"github.com/marmot1024/metricspire/internal/governance"
 	"github.com/marmot1024/metricspire/internal/httpapi"
 	"github.com/marmot1024/metricspire/internal/model"
@@ -49,6 +51,10 @@ type onlineIntegrationFixture struct {
 }
 
 func setupOnlinePostgres(t *testing.T) *onlineIntegrationFixture {
+	return setupOnlinePostgresWithApps(t, false)
+}
+
+func setupOnlinePostgresWithApps(t *testing.T, apps bool) *onlineIntegrationFixture {
 	t.Helper()
 	raw := os.Getenv("METRICSPIRE_ONLINE_TEST_DATABASE_URL")
 	if raw == "" {
@@ -101,6 +107,11 @@ func setupOnlinePostgres(t *testing.T) *onlineIntegrationFixture {
 			t.Fatal(err)
 		}
 	}
+	if apps {
+		if err := contractio.ReadFile(filepath.Join(root, "reader-policy.yaml"), &policy); err != nil {
+			t.Fatal(err)
+		}
+	}
 	binding.Datasets[0].Resource.Schema = data
 	draft, err := management.SaveDraft(t.Context(), catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "test"})
 	if err != nil {
@@ -147,7 +158,7 @@ func setupOnlinePostgres(t *testing.T) *onlineIntegrationFixture {
 	}
 	policies, _ := application.NewConfiguredPolicyResolver([]application.PolicyConfiguration{{Namespace: "demo", ModelName: source.Metadata.Name, Tenant: "demo", Policy: policy}})
 	bindings, _ := application.NewConfiguredBindingResolver([]application.BindingConfiguration{{Namespace: "demo", ModelName: source.Metadata.Name, Binding: binding}})
-	queries, _ := application.NewQueryService(store, policies, bindings, engine, store)
+	queries, _ := application.NewQueryService(store, policies, bindings, onlineTokenGuard{engine, t}, store)
 	online, err := application.NewOnlineService(store, queries, "demo", []string{"demo"}, 20, 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +166,7 @@ func setupOnlinePostgres(t *testing.T) *onlineIntegrationFixture {
 	search, _ := application.NewCatalogService(store, policies, bindings)
 	jobs, _ := application.NewJobManager(context.Background(), queries, time.Second, 10, nil)
 	t.Cleanup(jobs.Close)
-	auth := httpapi.AuthenticatorFunc(func(ctx context.Context, r *http.Request) (httpapi.Principal, error) {
+	var auth httpapi.Authenticator = httpapi.AuthenticatorFunc(func(ctx context.Context, r *http.Request) (httpapi.Principal, error) {
 		switch r.Header.Get("Authorization") {
 		case "Bearer analyst":
 			return httpapi.Principal{Tenant: "demo", Subject: "analyst", Roles: []string{"analyst"}, Permissions: []httpapi.Permission{httpapi.PermissionQuery}}, nil
@@ -167,6 +178,14 @@ func setupOnlinePostgres(t *testing.T) *onlineIntegrationFixture {
 			return httpapi.Principal{}, httpapi.ErrUnauthenticated
 		}
 	})
+	if apps {
+		// This is the real Apps authenticator and HTTP decoder. Only the platform
+		// current-user endpoint is synthetic; no real ingress/OAuth is claimed.
+		auth, err = appsauth.New(appsauth.Config{ExpectedAppName: "metricspire-online-fixture", ExpectedWorkspaceID: "314", ExpectedPublicURL: "https://online-fixture.example.com", Tenant: "demo", QueryRole: "analyst", PublisherGroupID: "publishers", HTTPClient: &http.Client{Transport: onlineAppsIdentityTransport{}}}, appsauth.Runtime{AppName: "metricspire-online-fixture", WorkspaceID: "314", Host: "https://workspace.example.com"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	handler, err := httpapi.NewServer(httpapi.Config{}, httpapi.Dependencies{Authenticator: auth, Readiness: store, Management: management, Catalog: store, CatalogSearch: search, Governance: governanceService, Bindings: bindings, Queries: queries, Jobs: jobs, Online: online, ExecutionCredential: httpapi.ExecutionCredentialFunc(func(context.Context, *http.Request, httpapi.Principal) (context.Context, error) {
 		t.Error("online request fetched a Databricks token")
 		return nil, fmt.Errorf("must not be called")
@@ -177,6 +196,85 @@ func setupOnlinePostgres(t *testing.T) *onlineIntegrationFixture {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	return &onlineIntegrationFixture{server: server, admin: admin, dataPool: dataPool, dataTable: table, fingerprint: dataContract, query: query, batch: "batch-1", controlSchema: control, asOf: asOf, management: management, source: source, release: release, revision: draft.Revision, binding: binding}
+}
+
+type onlineTokenGuard struct {
+	*postgresquery.QueryEngine
+	t *testing.T
+}
+
+func (e onlineTokenGuard) ExecuteBound(ctx context.Context, manifest model.SemanticManifest, binding model.SourceBinding, plan model.PhysicalPlan) (model.ExecutionSnapshot, error) {
+	if _, ok := executionauth.AccessToken(ctx); ok {
+		e.t.Error("online PostgreSQL received a user execution token")
+	}
+	return e.QueryEngine.ExecuteBound(ctx, manifest, binding, plan)
+}
+
+type onlineAppsIdentityTransport struct{}
+
+func (onlineAppsIdentityTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Host != "workspace.example.com" || r.URL.Path != "/api/2.0/preview/scim/v2/Me" || r.Method != http.MethodGet {
+		return nil, fmt.Errorf("unexpected Apps identity endpoint")
+	}
+	id, active, status := "synthetic-online-reader", true, http.StatusOK
+	switch r.Header.Get("Authorization") {
+	case "Bearer synthetic-allowed":
+	case "Bearer synthetic-denied":
+		id = "synthetic-nonreader"
+	case "Bearer synthetic-disabled":
+		active = false
+	default:
+		status = http.StatusUnauthorized
+	}
+	payload, _ := json.Marshal(map[string]any{"active": active, "id": id, "userName": id + "@example.com", "emails": []map[string]string{{"value": id + "@example.com"}}})
+	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(payload))}, nil
+}
+
+func TestOnlinePostgresAppsIdentityAndReaderBoundary(t *testing.T) {
+	f := setupOnlinePostgresWithApps(t, true)
+	for _, test := range []struct {
+		name, token, identity string
+		status                int
+	}{
+		{"allowed", "synthetic-allowed", "synthetic-online-reader", 200},
+		{"valid but not reader", "synthetic-denied", "synthetic-nonreader", 403},
+		{"disabled", "synthetic-disabled", "synthetic-online-reader", 401},
+		{"revoked or expired", "synthetic-invalid", "synthetic-online-reader", 401},
+		{"spoofed reader", "synthetic-denied", "synthetic-online-reader", 401},
+		{"missing token", "", "synthetic-online-reader", 401},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			encoded, _ := json.Marshal(f.query)
+			r, _ := http.NewRequest(http.MethodPost, f.server.URL+"/api/v1/namespaces/demo/online-query", bytes.NewReader(encoded))
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set(appsauth.HeaderHost, "online-fixture.example.com")
+			r.Header.Set(appsauth.HeaderUser, test.identity+"@example.com")
+			r.Header.Set(appsauth.HeaderEmail, test.identity+"@example.com")
+			r.Header.Set(appsauth.HeaderAccessToken, test.token)
+			response, err := f.server.Client().Do(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != test.status {
+				t.Fatalf("Apps boundary: status=%d want=%d", response.StatusCode, test.status)
+			}
+			if strings.Contains(string(body), "synthetic-allowed") || strings.Contains(string(body), "synthetic-denied") {
+				t.Fatal("response exposed a forwarded token")
+			}
+			if test.status == 200 {
+				var out application.OnlineResult
+				if err := json.Unmarshal(body, &out); err != nil || out.Snapshot == nil || out.Snapshot.BatchID != f.batch || out.Result == nil || len(out.Result.Rows) != 2 {
+					t.Fatal("Apps reader did not receive the expected online snapshot")
+				}
+			}
+		})
+	}
+	var count int
+	if err := f.admin.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{f.controlSchema, "metricspire_query_audit"}.Sanitize()+" WHERE principal='synthetic-online-reader' AND event_kind IN ('query_started','query_succeeded')").Scan(&count); err != nil || count != 2 {
+		t.Fatalf("verified Apps caller audit count=%d error=%v", count, err)
+	}
 }
 
 func (f *onlineIntegrationFixture) request(t *testing.T, token string, body any) (int, []byte) {
