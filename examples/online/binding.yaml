@@ -1,0 +1,13 @@
+api_version: metricspire.io/v1alpha1
+kind: SourceBinding
+metadata: {name: online_sales, version: 1.0.0}
+engine: postgres_online
+datasets:
+  - name: daily_sales
+    resource: {kind: table, schema: serving, table: daily_sales}
+    fields:
+      - {name: row_key, column: row_key}
+      - {name: day, column: day, calendar_timezone: UTC}
+      - {name: region, column: region}
+      - {name: revenue, column: revenue}
+      - {name: orders, column: orders}

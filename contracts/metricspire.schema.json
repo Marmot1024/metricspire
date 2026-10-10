@@ -616,13 +616,23 @@
         "truncated": {"type": "boolean"}
       }
     },
+    "DataSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["batch_id", "data_as_of"],
+      "properties": {
+        "batch_id": {"type": "string", "minLength": 1},
+        "data_as_of": {"type": "string", "format": "date-time"}
+      }
+    },
     "ExecutionSnapshot": {
       "type": "object",
       "additionalProperties": false,
       "required": ["job"],
       "properties": {
         "job": {"$ref": "#/$defs/ExecutionJob"},
-        "result": {"$ref": "#/$defs/TypedResult"}
+        "result": {"$ref": "#/$defs/TypedResult"},
+        "data_snapshot": {"$ref": "#/$defs/DataSnapshot"}
       }
     }
   }

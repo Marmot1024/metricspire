@@ -1,0 +1,61 @@
+api_version: metricspire.io/v1alpha1
+kind: SemanticModel
+metadata:
+  name: daily_sales
+  version: 1.0.0
+spec:
+  datasets:
+    - name: daily_sales
+      fields:
+        - {name: row_key, data_type: string}
+        - {name: day, data_type: date}
+        - {name: region, data_type: string}
+        - {name: revenue, data_type: decimal}
+        - {name: orders, data_type: integer}
+  entities:
+    - {name: sales, dataset: daily_sales, key: row_key}
+  dimensions:
+    - {name: date, entity: sales, field: day, type: time, time_granularities: [day]}
+    - {name: region, entity: sales, field: region, type: categorical}
+  metrics:
+    - name: revenue
+      external_code: "10001"
+      display_name: Revenue
+      description: Sum of precomputed revenue at the retained daily and region grain.
+      owner: example-owner
+      entity: sales
+      kind: aggregate
+      value_type: decimal
+      unit: currency
+      expression: {op: sum, field: sales.revenue}
+      allowed_dimensions: [date, region]
+      time_dimension: date
+      verification: {status: verified, evidence: [synthetic_fixture]}
+    - name: orders
+      external_code: "10002"
+      display_name: Orders
+      description: Sum of precomputed order counts at the retained daily and region grain.
+      owner: example-owner
+      entity: sales
+      kind: aggregate
+      value_type: integer
+      unit: orders
+      expression: {op: sum, field: sales.orders}
+      allowed_dimensions: [date, region]
+      time_dimension: date
+      verification: {status: verified, evidence: [synthetic_fixture]}
+    - name: average_order_value
+      external_code: "10003"
+      display_name: Average order value
+      description: Aggregated revenue divided by aggregated orders, not an average of row ratios.
+      owner: example-owner
+      entity: sales
+      kind: derived
+      value_type: decimal
+      unit: currency_per_order
+      expression:
+        op: divide
+        args: [{op: metric, metric: revenue}, {op: metric, metric: orders}]
+      allowed_dimensions: [date, region]
+      time_dimension: date
+      verification: {status: verified, evidence: [synthetic_fixture]}

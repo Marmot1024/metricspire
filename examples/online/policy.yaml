@@ -1,0 +1,10 @@
+api_version: metricspire.io/v1alpha1
+kind: PolicySource
+metadata: {name: online_sales, version: 1.0.0}
+tenant: demo
+rules:
+  - name: analysts
+    effect: allow
+    roles: [analyst]
+    metrics: [revenue, orders, average_order_value]
+    dimensions: [date, region]

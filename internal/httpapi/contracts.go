@@ -18,6 +18,7 @@ const (
 	DefaultMaxBodyBytes   int64 = 1 << 20
 	DefaultControlTimeout       = 15 * time.Second
 	DefaultQueryTimeout         = 2 * time.Minute
+	DefaultOnlineTimeout        = 2 * time.Second
 )
 
 type Permission string
@@ -133,12 +134,18 @@ type Dependencies struct {
 	Queries             QueryService
 	Jobs                JobService
 	ExecutionCredential ExecutionCredentialProvider
+	Online              OnlineQueryService // optional; absent by default, never falls back to SQL Warehouse
+}
+
+type OnlineQueryService interface {
+	Execute(context.Context, application.QueryScope, application.OnlineQuery) (application.OnlineResult, error)
 }
 
 type Config struct {
 	MaxBodyBytes           int64
 	ControlTimeout         time.Duration
 	QueryTimeout           time.Duration
+	OnlineTimeout          time.Duration
 	AllowedOrigin          string
 	MCPAuthorizationServer string
 	AuthenticationProfile  string

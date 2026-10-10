@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/marmot1024/metricspire/internal/contractio"
+	"github.com/marmot1024/metricspire/internal/model"
 )
 
 const (
@@ -28,6 +29,21 @@ type Config struct {
 	ReleasePolicy  ReleasePolicyConfig  `json:"release_policy,omitempty" yaml:"release_policy,omitempty"`
 	Policies       []PolicyRoute        `json:"policies" yaml:"policies"`
 	Bindings       []BindingRoute       `json:"bindings" yaml:"bindings"`
+	Online         *OnlineConfig        `json:"online,omitempty" yaml:"online,omitempty"`
+}
+
+// Online serving is opt-in and uses a dedicated read-only database credential.
+// tenant_shared explicitly describes data access; UC user policies are not copied.
+type OnlineConfig struct {
+	Tenant         string              `json:"tenant" yaml:"tenant"`
+	Namespaces     []string            `json:"namespaces" yaml:"namespaces"`
+	DataAccess     string              `json:"data_access" yaml:"data_access"`
+	Resources      []model.ResourceRef `json:"resources" yaml:"resources"`
+	MaxDataAge     string              `json:"max_data_age" yaml:"max_data_age"`
+	Timeout        string              `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	MaxConcurrency int                 `json:"max_concurrency,omitempty" yaml:"max_concurrency,omitempty"`
+	Bindings       []BindingRoute      `json:"bindings" yaml:"bindings"`
+	Policies       []PolicyRoute       `json:"policies,omitempty" yaml:"policies,omitempty"`
 }
 
 type ReleasePolicyConfig struct {
@@ -110,6 +126,74 @@ func (config Config) Validate() error {
 	}
 	if err := config.validateAuthentication(); err != nil {
 		return err
+	}
+	if config.Online != nil {
+		online := config.Online
+		if online.Tenant == "" || len(online.Namespaces) == 0 || len(online.Resources) == 0 || len(online.Bindings) == 0 || online.DataAccess != "tenant_shared" || online.MaxDataAge == "" {
+			return errors.New("online serving requires a tenant, namespaces, sources, bindings, max_data_age and explicit tenant_shared access review")
+		}
+		if config.Authentication.Provider == AuthenticationDatabricksApps {
+			if len(online.Policies) == 0 || config.Authentication.DatabricksApps.Tenant != online.Tenant {
+				return errors.New("Apps online serving requires independent online policies and a matching authenticated tenant")
+			}
+		}
+		if online.MaxConcurrency < 0 || online.MaxConcurrency > 32 {
+			return errors.New("online.max_concurrency must be between 1 and 32 when set")
+		}
+		if d, err := ParseDuration(online.Timeout, 2*time.Second); err != nil || d > 10*time.Second {
+			return errors.New("online.timeout must be positive and at most 10s")
+		}
+		if _, err := ParseDuration(online.MaxDataAge, time.Minute); err != nil {
+			return errors.New("online.max_data_age must be a positive duration")
+		}
+		policyRoutes := config.Policies
+		if len(online.Policies) > 0 {
+			policyRoutes = online.Policies
+			seenPolicies := map[string]bool{}
+			for _, route := range policyRoutes {
+				key := route.Namespace + "\x00" + route.ModelName
+				if empty(route.Namespace, route.ModelName, route.Tenant, route.Path) || route.Tenant != online.Tenant || seenPolicies[key] {
+					return errors.New("online policy routes must be complete, unique and match the reviewed tenant")
+				}
+				seenPolicies[key] = true
+				allowed := false
+				for _, namespace := range online.Namespaces {
+					allowed = allowed || route.Namespace == namespace
+				}
+				if !allowed {
+					return errors.New("online policy requires an enabled namespace")
+				}
+			}
+		}
+		for _, namespace := range online.Namespaces {
+			found := false
+			for _, route := range policyRoutes {
+				if route.Namespace == namespace && route.Tenant == online.Tenant {
+					found = true
+				}
+			}
+			if !found {
+				return errors.New("online namespace requires a policy route for the reviewed tenant")
+			}
+		}
+		seen := map[string]bool{}
+		for _, binding := range online.Bindings {
+			key := binding.Namespace + "\x00" + binding.ModelName
+			if empty(binding.Namespace, binding.ModelName, binding.Path) || seen[key] {
+				return errors.New("online binding routes must be complete and unique")
+			}
+			seen[key] = true
+			allowed, policy := false, false
+			for _, namespace := range online.Namespaces {
+				allowed = allowed || binding.Namespace == namespace
+			}
+			for _, route := range policyRoutes {
+				policy = policy || (route.Namespace == binding.Namespace && route.ModelName == binding.ModelName && route.Tenant == online.Tenant)
+			}
+			if !allowed || !policy {
+				return errors.New("online binding requires an enabled namespace and matching tenant/model policy")
+			}
+		}
 	}
 	if config.HTTP.MaxBodyBytes < 0 {
 		return errors.New("http.max_body_bytes cannot be negative")

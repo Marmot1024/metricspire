@@ -1,0 +1,10 @@
+api_version: metricspire.io/v1alpha1
+kind: PolicySource
+metadata: {name: online_readers, version: 1.0.0}
+tenant: demo
+rules:
+  - name: approved_online_reader
+    effect: allow
+    principals: [synthetic-online-reader]
+    metrics: [revenue, orders, average_order_value]
+    dimensions: [date, region]

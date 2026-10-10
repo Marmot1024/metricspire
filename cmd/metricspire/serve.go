@@ -19,7 +19,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/marmot1024/metricspire/internal/adapter/databricks"
+	"github.com/marmot1024/metricspire/internal/adapter/postgresquery"
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/auth/appsauth"
 	"github.com/marmot1024/metricspire/internal/auth/oidcauth"
@@ -149,6 +152,88 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		return err
 	}
 	defer jobs.Close()
+	var online httpapi.OnlineQueryService
+	onlineTimeout := httpapi.DefaultOnlineTimeout
+	var readiness httpapi.ReadinessChecker = store
+	if config.Online != nil {
+		onlinePolicyResolver := policyResolver
+		if len(config.Online.Policies) > 0 {
+			onlinePolicies, err := loadOnlinePolicies(filepath.Dir(*configPath), *config.Online)
+			if err != nil {
+				return err
+			}
+			onlinePolicyResolver, err = application.NewConfiguredPolicyResolver(onlinePolicies)
+			if err != nil {
+				return err
+			}
+		}
+		onlineBindings, err := loadOnlineBindings(filepath.Dir(*configPath), *config.Online)
+		if err != nil {
+			return err
+		}
+		onlineResolver, err := application.NewConfiguredBindingResolver(onlineBindings)
+		if err != nil {
+			return err
+		}
+		urlValue := strings.TrimSpace(os.Getenv("METRICSPIRE_ONLINE_DATABASE_URL"))
+		if urlValue == "" || urlValue == environment.databaseURL {
+			return errors.New("online serving requires a separate METRICSPIRE_ONLINE_DATABASE_URL read credential")
+		}
+		poolConfig, err := pgxpool.ParseConfig(urlValue)
+		if err != nil {
+			return errors.New("invalid online PostgreSQL connection configuration")
+		}
+		poolConfig.MaxConns = 4
+		poolConfig.ConnConfig.RuntimeParams["application_name"] = "metricspire-online"
+		poolConfig.ConnConfig.RuntimeParams["default_transaction_read_only"] = "on"
+		poolConfig.ConnConfig.RuntimeParams["timezone"] = "UTC"
+		poolConfig.ConnConfig.RuntimeParams["statement_timeout"] = "2000"
+		pool, err := pgxpool.NewWithConfig(initializationContext, poolConfig)
+		if err != nil {
+			return errors.New("could not open online PostgreSQL pool")
+		}
+		defer pool.Close()
+		var privileged bool
+		if err = pool.QueryRow(initializationContext, `SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user`).Scan(&privileged); err != nil || privileged {
+			return errors.New("online PostgreSQL requires a non-superuser, non-BYPASSRLS read role")
+		}
+		age, _ := runtimeconfig.ParseDuration(config.Online.MaxDataAge, time.Minute)
+		onlineEngine, err := postgresquery.NewQueryEngine(pool, postgresquery.Config{Tenant: config.Online.Tenant, Resources: config.Online.Resources, MaxDataAge: age, MaxBytes: 4 << 20})
+		if err != nil {
+			return err
+		}
+		for _, resource := range config.Online.Resources {
+			qualified := pgx.Identifier{resource.Schema, resource.Table}.Sanitize()
+			var readOnly bool
+			// Table checks alone miss column grants. These inquiries also include
+			// privileges inherited by the current role.
+			if err := pool.QueryRow(initializationContext, `SELECT
+				has_table_privilege(current_user,$1,'SELECT')
+				AND NOT has_table_privilege(current_user,$1,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+				AND NOT has_any_column_privilege(current_user,$1,'INSERT,UPDATE,REFERENCES')`, qualified).Scan(&readOnly); err != nil || !readOnly {
+				return errors.New("online credential must have SELECT and no write privileges on each enabled source")
+			}
+		}
+		readiness = httpapi.ReadinessFunc(func(ctx context.Context) error {
+			if err := store.Ready(ctx); err != nil {
+				return err
+			}
+			return pool.Ping(ctx)
+		})
+		onlineQueries, err := application.NewQueryService(store, onlinePolicyResolver, onlineResolver, onlineEngine, store)
+		if err != nil {
+			return err
+		}
+		onlineTimeout, _ = runtimeconfig.ParseDuration(config.Online.Timeout, httpapi.DefaultOnlineTimeout)
+		concurrency := config.Online.MaxConcurrency
+		if concurrency == 0 {
+			concurrency = 4
+		}
+		online, err = application.NewOnlineService(store, onlineQueries, config.Online.Tenant, config.Online.Namespaces, concurrency, onlineTimeout)
+		if err != nil {
+			return err
+		}
+	}
 
 	authenticator, authEndpoints, executionCredential, err := buildServeAuthentication(initializationContext, config, environment, os.Getenv)
 	if err != nil {
@@ -157,7 +242,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	logger := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	handler, err := httpapi.NewServer(httpapi.Config{
 		MaxBodyBytes: config.HTTP.MaxBodyBytes, ControlTimeout: controlTimeout,
-		QueryTimeout: queryTimeout, AllowedOrigin: config.HTTP.PublicURL,
+		QueryTimeout: queryTimeout, OnlineTimeout: onlineTimeout, AllowedOrigin: config.HTTP.PublicURL,
 		MCPAuthorizationServer: mcpAuthorizationServer(config, environment),
 		AuthenticationProfile:  config.Authentication.Provider, MCPVersion: version,
 		TrialReleaseNamespaces: trialNamespaces,
@@ -165,9 +250,10 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		UISourcePrefixes:       configuredUISourcePrefixes(bindings),
 	}, httpapi.Dependencies{
 		Authenticator: authenticator, AuthEndpoints: authEndpoints,
-		Readiness:  store,
+		Readiness:  readiness,
 		Management: management, Catalog: store, CatalogSearch: catalogSearch, Governance: governanceService,
 		Bindings: bindingResolver, Queries: queries, Jobs: jobs, ExecutionCredential: executionCredential,
+		Online: online,
 	}, logger)
 	if err != nil {
 		return err

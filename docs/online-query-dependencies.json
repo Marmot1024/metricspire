@@ -1,0 +1,193 @@
+{
+  "scope": "Online-query slice: direct Go package imports (not runtime calls)",
+  "extractor": "go list -f '{{.ImportPath}}:{{join .Imports \",\"}}' for five entry packages",
+  "nodes": [
+    "cmd/metricspire",
+    "internal/adapter/databricks",
+    "internal/adapter/lakebase",
+    "internal/adapter/postgresquery",
+    "internal/application",
+    "internal/audit",
+    "internal/auth/appsauth",
+    "internal/auth/oidcauth",
+    "internal/canonical",
+    "internal/catalog",
+    "internal/compiler",
+    "internal/contractio",
+    "internal/executionauth",
+    "internal/governance",
+    "internal/httpapi",
+    "internal/mcpbridge",
+    "internal/model",
+    "internal/planner",
+    "internal/policy",
+    "internal/repository/postgres",
+    "internal/runtimeconfig"
+  ],
+  "edges": [
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/adapter/databricks"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/adapter/lakebase"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/adapter/postgresquery"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/application"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/audit"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/auth/appsauth"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/auth/oidcauth"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/catalog"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/compiler"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/contractio"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/governance"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/httpapi"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/mcpbridge"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/model"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/planner"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/repository/postgres"
+    },
+    {
+      "from": "cmd/metricspire",
+      "to": "internal/runtimeconfig"
+    },
+    {
+      "from": "internal/httpapi",
+      "to": "internal/application"
+    },
+    {
+      "from": "internal/httpapi",
+      "to": "internal/audit"
+    },
+    {
+      "from": "internal/httpapi",
+      "to": "internal/catalog"
+    },
+    {
+      "from": "internal/httpapi",
+      "to": "internal/compiler"
+    },
+    {
+      "from": "internal/httpapi",
+      "to": "internal/contractio"
+    },
+    {
+      "from": "internal/httpapi",
+      "to": "internal/governance"
+    },
+    {
+      "from": "internal/httpapi",
+      "to": "internal/mcpbridge"
+    },
+    {
+      "from": "internal/httpapi",
+      "to": "internal/model"
+    },
+    {
+      "from": "internal/application",
+      "to": "internal/audit"
+    },
+    {
+      "from": "internal/application",
+      "to": "internal/catalog"
+    },
+    {
+      "from": "internal/application",
+      "to": "internal/compiler"
+    },
+    {
+      "from": "internal/application",
+      "to": "internal/executionauth"
+    },
+    {
+      "from": "internal/application",
+      "to": "internal/model"
+    },
+    {
+      "from": "internal/application",
+      "to": "internal/planner"
+    },
+    {
+      "from": "internal/application",
+      "to": "internal/policy"
+    },
+    {
+      "from": "internal/adapter/postgresquery",
+      "to": "internal/canonical"
+    },
+    {
+      "from": "internal/adapter/postgresquery",
+      "to": "internal/compiler"
+    },
+    {
+      "from": "internal/adapter/postgresquery",
+      "to": "internal/model"
+    },
+    {
+      "from": "internal/adapter/postgresquery",
+      "to": "internal/planner"
+    },
+    {
+      "from": "internal/repository/postgres",
+      "to": "internal/audit"
+    },
+    {
+      "from": "internal/repository/postgres",
+      "to": "internal/catalog"
+    },
+    {
+      "from": "internal/repository/postgres",
+      "to": "internal/compiler"
+    },
+    {
+      "from": "internal/repository/postgres",
+      "to": "internal/governance"
+    },
+    {
+      "from": "internal/repository/postgres",
+      "to": "internal/model"
+    }
+  ]
+}
