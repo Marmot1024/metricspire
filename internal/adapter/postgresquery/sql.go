@@ -15,6 +15,7 @@ import (
 const EngineName = "postgres_online"
 
 var identifier = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+var finiteDecimal = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
 
 func Capabilities() model.EngineCapabilities {
 	return model.EngineCapabilities{Engine: EngineName, ExpressionOps: []model.ExpressionOp{model.OpSum, model.OpMetric, model.OpLiteral, model.OpAdd, model.OpSubtract, model.OpMultiply, model.OpDivide}, TimeGranularities: []model.TimeGranularity{model.GrainDay}}
@@ -101,7 +102,7 @@ func compile(plan model.PhysicalPlan, tenant string) (Statement, error) {
 	}
 	// Metadata is aggregated with the results in the same PostgreSQL snapshot.
 	// The writer must atomically publish a complete batch, never incremental rows.
-	selects = append(selects, `count(*)::text`, `count(t0._metricspire_batch_id)::text`, `count(t0._metricspire_data_as_of)::text`, `count(t0._metricspire_manifest_fingerprint)::text`, `min(t0._metricspire_batch_id)::text`, `max(t0._metricspire_batch_id)::text`, `min(t0._metricspire_data_as_of)::text`, `max(t0._metricspire_data_as_of)::text`, `min(t0._metricspire_manifest_fingerprint)::text`, `max(t0._metricspire_manifest_fingerprint)::text`)
+	selects = append(selects, `count(*)::text`, `count(t0._metricspire_batch_id)::text`, `count(t0._metricspire_data_as_of)::text`, `count(t0._metricspire_data_contract)::text`, `min(t0._metricspire_batch_id)::text`, `max(t0._metricspire_batch_id)::text`, `min(t0._metricspire_data_as_of)::text`, `max(t0._metricspire_data_as_of)::text`, `min(t0._metricspire_data_contract)::text`, `max(t0._metricspire_data_contract)::text`)
 	d, ok := findDimension(plan, plan.TimeRange.Dimension)
 	if !ok || d.DataType != model.DataTypeDate {
 		return Statement{}, reject("unsupported_online_query", "a calendar DATE time range is required")

@@ -42,6 +42,7 @@ type OnlineConfig struct {
 	MaxDataAge     string              `json:"max_data_age" yaml:"max_data_age"`
 	Timeout        string              `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	MaxConcurrency int                 `json:"max_concurrency,omitempty" yaml:"max_concurrency,omitempty"`
+	Bindings       []BindingRoute      `json:"bindings" yaml:"bindings"`
 }
 
 type ReleasePolicyConfig struct {
@@ -127,8 +128,8 @@ func (config Config) Validate() error {
 	}
 	if config.Online != nil {
 		online := config.Online
-		if online.Tenant == "" || len(online.Namespaces) == 0 || len(online.Resources) == 0 || online.DataAccess != "tenant_shared" || online.MaxDataAge == "" {
-			return errors.New("online serving requires a tenant, namespaces, sources, max_data_age and explicit tenant_shared access review")
+		if online.Tenant == "" || len(online.Namespaces) == 0 || len(online.Resources) == 0 || len(online.Bindings) == 0 || online.DataAccess != "tenant_shared" || online.MaxDataAge == "" {
+			return errors.New("online serving requires a tenant, namespaces, sources, bindings, max_data_age and explicit tenant_shared access review")
 		}
 		if config.Authentication.Provider != AuthenticationOIDC {
 			return errors.New("the first PostgreSQL online slice supports portable OIDC only; Apps data-export authorization is not accepted")
@@ -151,6 +152,24 @@ func (config Config) Validate() error {
 			}
 			if !found {
 				return errors.New("online namespace requires a policy route for the reviewed tenant")
+			}
+		}
+		seen := map[string]bool{}
+		for _, binding := range online.Bindings {
+			key := binding.Namespace + "\x00" + binding.ModelName
+			if empty(binding.Namespace, binding.ModelName, binding.Path) || seen[key] {
+				return errors.New("online binding routes must be complete and unique")
+			}
+			seen[key] = true
+			allowed, policy := false, false
+			for _, namespace := range online.Namespaces {
+				allowed = allowed || binding.Namespace == namespace
+			}
+			for _, route := range config.Policies {
+				policy = policy || (route.Namespace == binding.Namespace && route.ModelName == binding.ModelName && route.Tenant == online.Tenant)
+			}
+			if !allowed || !policy {
+				return errors.New("online binding requires an enabled namespace and matching tenant/model policy")
 			}
 		}
 	}

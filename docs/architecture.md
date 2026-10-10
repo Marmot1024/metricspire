@@ -2,6 +2,8 @@
 
 MetricSpire is a modular monolith with a deliberately small trusted core. The semantic contract is `metricspire.io/v1alpha1`; its version is independent of the product release. PostgreSQL holds catalog and audit state, while an analytical-engine adapter executes bounded semantic queries. HTTP, UI, and MCP share the same application services.
 
+The opt-in [online HTTP path](online-query.md) uses a separate PostgreSQL read adapter for reviewed precomputed aggregates. Its source bindings, SELECT-only credential and short handling budget are separate from the Warehouse analytical route. It does not change the catalog repository into a fact store, add MCP tools, or silently fall back to Warehouse execution.
+
 ## Component boundaries
 
 ```text

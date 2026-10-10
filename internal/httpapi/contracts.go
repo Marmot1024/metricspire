@@ -18,6 +18,7 @@ const (
 	DefaultMaxBodyBytes   int64 = 1 << 20
 	DefaultControlTimeout       = 15 * time.Second
 	DefaultQueryTimeout         = 2 * time.Minute
+	DefaultOnlineTimeout        = 2 * time.Second
 )
 
 type Permission string
@@ -142,6 +143,7 @@ type Config struct {
 	MaxBodyBytes           int64
 	ControlTimeout         time.Duration
 	QueryTimeout           time.Duration
+	OnlineTimeout          time.Duration
 	AllowedOrigin          string
 	MCPAuthorizationServer string
 	AuthenticationProfile  string

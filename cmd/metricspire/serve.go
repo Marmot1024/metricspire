@@ -153,8 +153,17 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	}
 	defer jobs.Close()
 	var online httpapi.OnlineQueryService
+	onlineTimeout := httpapi.DefaultOnlineTimeout
 	var readiness httpapi.ReadinessChecker = store
 	if config.Online != nil {
+		onlineBindings, err := loadOnlineBindings(filepath.Dir(*configPath), *config.Online)
+		if err != nil {
+			return err
+		}
+		onlineResolver, err := application.NewConfiguredBindingResolver(onlineBindings)
+		if err != nil {
+			return err
+		}
 		urlValue := strings.TrimSpace(os.Getenv("METRICSPIRE_ONLINE_DATABASE_URL"))
 		if urlValue == "" || urlValue == environment.databaseURL {
 			return errors.New("online serving requires a separate METRICSPIRE_ONLINE_DATABASE_URL read credential")
@@ -195,16 +204,16 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 			}
 			return pool.Ping(ctx)
 		})
-		onlineQueries, err := application.NewQueryService(store, policyResolver, bindingResolver, onlineEngine, store)
+		onlineQueries, err := application.NewQueryService(store, policyResolver, onlineResolver, onlineEngine, store)
 		if err != nil {
 			return err
 		}
-		timeout, _ := runtimeconfig.ParseDuration(config.Online.Timeout, 2*time.Second)
+		onlineTimeout, _ = runtimeconfig.ParseDuration(config.Online.Timeout, httpapi.DefaultOnlineTimeout)
 		concurrency := config.Online.MaxConcurrency
 		if concurrency == 0 {
 			concurrency = 4
 		}
-		online, err = application.NewOnlineService(store, onlineQueries, config.Online.Tenant, config.Online.Namespaces, concurrency, timeout)
+		online, err = application.NewOnlineService(store, onlineQueries, config.Online.Tenant, config.Online.Namespaces, concurrency, onlineTimeout)
 		if err != nil {
 			return err
 		}
@@ -217,7 +226,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	logger := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	handler, err := httpapi.NewServer(httpapi.Config{
 		MaxBodyBytes: config.HTTP.MaxBodyBytes, ControlTimeout: controlTimeout,
-		QueryTimeout: queryTimeout, AllowedOrigin: config.HTTP.PublicURL,
+		QueryTimeout: queryTimeout, OnlineTimeout: onlineTimeout, AllowedOrigin: config.HTTP.PublicURL,
 		MCPAuthorizationServer: mcpAuthorizationServer(config, environment),
 		AuthenticationProfile:  config.Authentication.Provider, MCPVersion: version,
 		TrialReleaseNamespaces: trialNamespaces,

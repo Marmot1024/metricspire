@@ -15,7 +15,7 @@ func TestOnlineConfigurationRequiresExplicitReviewedScopeAndBudgets(t *testing.T
 		Policies:       []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: "commerce", Tenant: "demo", Path: "policy.yaml"}},
 		Bindings:       []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: "commerce", Path: "binding.yaml"}},
 	}
-	valid := runtimeconfig.OnlineConfig{Tenant: "demo", Namespaces: []string{"demo"}, DataAccess: "tenant_shared", Resources: []model.ResourceRef{{Kind: model.ResourceTable, Schema: "serving", Table: "daily_sales"}}, MaxDataAge: "5m"}
+	valid := runtimeconfig.OnlineConfig{Tenant: "demo", Namespaces: []string{"demo"}, DataAccess: "tenant_shared", Resources: []model.ResourceRef{{Kind: model.ResourceTable, Schema: "serving", Table: "daily_sales"}}, MaxDataAge: "5m", Bindings: []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: "commerce", Path: "online.yaml"}}}
 	base.Online = &valid
 	if err := base.Validate(); err != nil {
 		t.Fatal(err)
@@ -31,6 +31,11 @@ func TestOnlineConfigurationRequiresExplicitReviewedScopeAndBudgets(t *testing.T
 		{"invalid freshness", func(c *runtimeconfig.OnlineConfig) { c.MaxDataAge = "0s" }},
 		{"unbounded timeout", func(c *runtimeconfig.OnlineConfig) { c.Timeout = "11s" }},
 		{"unbounded concurrency", func(c *runtimeconfig.OnlineConfig) { c.MaxConcurrency = 33 }},
+		{"missing binding", func(c *runtimeconfig.OnlineConfig) { c.Bindings = nil }},
+		{"duplicate binding", func(c *runtimeconfig.OnlineConfig) { c.Bindings = append(c.Bindings, c.Bindings[0]) }},
+		{"unapproved model", func(c *runtimeconfig.OnlineConfig) {
+			c.Bindings = []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: "other", Path: "online.yaml"}}
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			candidate := valid

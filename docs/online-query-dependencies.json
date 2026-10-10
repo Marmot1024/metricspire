@@ -10,6 +10,7 @@
     "internal/audit",
     "internal/auth/appsauth",
     "internal/auth/oidcauth",
+    "internal/canonical",
     "internal/catalog",
     "internal/compiler",
     "internal/contractio",
@@ -151,6 +152,14 @@
     {
       "from": "internal/application",
       "to": "internal/policy"
+    },
+    {
+      "from": "internal/adapter/postgresquery",
+      "to": "internal/canonical"
+    },
+    {
+      "from": "internal/adapter/postgresquery",
+      "to": "internal/compiler"
     },
     {
       "from": "internal/adapter/postgresquery",

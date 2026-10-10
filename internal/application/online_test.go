@@ -181,3 +181,47 @@ func TestOnlineAuditFailurePreventsExecution(t *testing.T) {
 		t.Fatalf("audit failure: %v calls=%d", err, engine.calls)
 	}
 }
+
+type completionAudit struct {
+	run func(context.Context) error
+}
+
+func (r completionAudit) Record(ctx context.Context, event audit.QueryEvent) error {
+	if event.Kind == audit.EventQueryStarted {
+		return nil
+	}
+	return r.run(ctx)
+}
+
+func TestOnlineCompletionAuditUsesRemainingRequestBudget(t *testing.T) {
+	for _, ignoreCancellation := range []bool{false, true} {
+		t.Run(map[bool]string{false: "honors cancellation", true: "late success"}[ignoreCancellation], func(t *testing.T) {
+			service, _, engine, _, scope, q := onlineFixture(t, completionAudit{run: func(ctx context.Context) error {
+				if ignoreCancellation {
+					time.Sleep(100 * time.Millisecond)
+					return nil
+				}
+				<-ctx.Done()
+				return ctx.Err()
+			}})
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+			defer cancel()
+			started := time.Now()
+			out, err := service.Execute(ctx, scope, q)
+			if !errors.Is(err, context.DeadlineExceeded) || out.Result != nil || engine.calls != 1 {
+				t.Fatalf("result delivered after deadline: %v %#v calls=%d", err, out, engine.calls)
+			}
+			if !ignoreCancellation && time.Since(started) > 250*time.Millisecond {
+				t.Fatal("completion audit extended request budget")
+			}
+		})
+	}
+}
+
+func TestOnlineCompletionAuditFailureDoesNotDeliverResult(t *testing.T) {
+	service, _, engine, _, scope, q := onlineFixture(t, completionAudit{run: func(context.Context) error { return errors.New("failed") }})
+	out, err := service.Execute(t.Context(), scope, q)
+	if !errors.Is(err, audit.ErrUnavailable) || out.Result != nil || engine.calls != 1 {
+		t.Fatalf("result delivered without audit: %v %#v", err, out)
+	}
+}

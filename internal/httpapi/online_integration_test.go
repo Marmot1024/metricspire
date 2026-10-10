@@ -34,6 +34,7 @@ import (
 type onlineIntegrationFixture struct {
 	server        *httptest.Server
 	admin         *pgxpool.Pool
+	dataPool      *pgxpool.Pool
 	dataTable     string
 	fingerprint   string
 	query         application.OnlineQuery
@@ -44,6 +45,7 @@ type onlineIntegrationFixture struct {
 	source        model.SemanticSource
 	release       catalog.Release
 	revision      int64
+	binding       model.SourceBinding
 }
 
 func setupOnlinePostgres(t *testing.T) *onlineIntegrationFixture {
@@ -109,11 +111,15 @@ func setupOnlinePostgres(t *testing.T) *onlineIntegrationFixture {
 		t.Fatal(err)
 	}
 	table := pgx.Identifier{data, "daily_sales"}.Sanitize()
-	ddl := "CREATE TABLE " + table + ` (row_key text PRIMARY KEY,day date NOT NULL,region text NOT NULL,revenue numeric NOT NULL,orders bigint NOT NULL,_metricspire_tenant text NOT NULL,_metricspire_batch_id text NOT NULL,_metricspire_data_as_of timestamptz NOT NULL,_metricspire_manifest_fingerprint text NOT NULL); CREATE INDEX ON ` + table + ` (_metricspire_tenant,region,day)`
+	dataContract, err := postgresquery.DataContractFingerprint(release.Manifest, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ddl := "CREATE TABLE " + table + ` (row_key text PRIMARY KEY,day date NOT NULL,region text NOT NULL,revenue numeric NOT NULL,orders bigint NOT NULL,_metricspire_tenant text NOT NULL,_metricspire_batch_id text NOT NULL,_metricspire_data_as_of timestamptz NOT NULL,_metricspire_data_contract text NOT NULL); CREATE INDEX ON ` + table + ` (_metricspire_tenant,region,day)`
 	if _, err = admin.Exec(t.Context(), ddl); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = admin.Exec(t.Context(), "INSERT INTO "+table+` VALUES ('one','2026-09-01','east',100,2,'demo','batch-1',clock_timestamp(),$1),('two','2026-09-02','east',50,1,'demo','batch-1',clock_timestamp(),$1),('three','2026-09-01','west',60,3,'demo','batch-1',clock_timestamp(),$1),('other-tenant','2026-09-01','east',999999,1,'other','batch-1',clock_timestamp(),$1)`, release.ManifestFingerprint); err != nil {
+	if _, err = admin.Exec(t.Context(), "INSERT INTO "+table+` VALUES ('one','2026-09-01','east',100,2,'demo','batch-1',clock_timestamp(),$1),('two','2026-09-02','east',50,1,'demo','batch-1',clock_timestamp(),$1),('three','2026-09-01','west',60,3,'demo','batch-1',clock_timestamp(),$1),('other-tenant','2026-09-01','east',999999,1,'other','batch-1',clock_timestamp(),$1)`, dataContract); err != nil {
 		t.Fatal(err)
 	}
 	// All rows in a batch carry one coverage time, not per-row creation times.
@@ -170,7 +176,7 @@ func setupOnlinePostgres(t *testing.T) *onlineIntegrationFixture {
 	}
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	return &onlineIntegrationFixture{server: server, admin: admin, dataTable: table, fingerprint: release.ManifestFingerprint, query: query, batch: "batch-1", controlSchema: control, asOf: asOf, management: management, source: source, release: release, revision: draft.Revision}
+	return &onlineIntegrationFixture{server: server, admin: admin, dataPool: dataPool, dataTable: table, fingerprint: dataContract, query: query, batch: "batch-1", controlSchema: control, asOf: asOf, management: management, source: source, release: release, revision: draft.Revision, binding: binding}
 }
 
 func (f *onlineIntegrationFixture) request(t *testing.T, token string, body any) (int, []byte) {
@@ -252,7 +258,7 @@ func TestOnlinePostgresHTTPResultPermissionsAndFailureBoundaries(t *testing.T) {
 	for _, test := range []struct{ name, update, code string }{
 		{"stale", "_metricspire_data_as_of='2000-01-01'", "online_data_stale"},
 		{"future coverage", "_metricspire_data_as_of=clock_timestamp()+interval '1 hour'", "online_data_stale"},
-		{"incompatible", "_metricspire_manifest_fingerprint='sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'", "online_data_unavailable"},
+		{"incompatible", "_metricspire_data_contract='sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'", "online_data_unavailable"},
 		{"mixed batch", "_metricspire_batch_id=CASE WHEN row_key='one' THEN 'batch-2' ELSE 'batch-1' END", "online_data_unavailable"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -261,7 +267,7 @@ func TestOnlinePostgresHTTPResultPermissionsAndFailureBoundaries(t *testing.T) {
 			if status != 503 || !bytes.Contains(data, []byte(test.code)) {
 				t.Fatalf("%d %s", status, data)
 			}
-			f.exec(t, "UPDATE "+f.dataTable+" SET _metricspire_data_as_of=$2,_metricspire_batch_id='batch-1',_metricspire_manifest_fingerprint=$1", f.fingerprint, f.asOf)
+			f.exec(t, "UPDATE "+f.dataTable+" SET _metricspire_data_as_of=$2,_metricspire_batch_id='batch-1',_metricspire_data_contract=$1", f.fingerprint, f.asOf)
 		})
 	}
 	// The tenant predicate excludes another tenant's rows even with matching dimensions.
@@ -291,6 +297,13 @@ func TestOnlinePostgresHTTPResultPermissionsAndFailureBoundaries(t *testing.T) {
 	if status != 200 || !bytes.Contains(data, []byte("null")) {
 		t.Fatalf("zero denominator %d %s", status, data)
 	}
+	for _, value := range []string{"NaN", "Infinity", "-Infinity"} {
+		f.exec(t, "UPDATE "+f.dataTable+" SET revenue=$1::numeric WHERE row_key='one'", value)
+		if status, body := f.request(t, "analyst", f.query); status != 503 || !bytes.Contains(body, []byte("online_data_unavailable")) || bytes.Contains(body, []byte(`"rows"`)) {
+			t.Fatalf("nonfinite metric delivered (%s): %d %s", value, status, body)
+		}
+	}
+	f.exec(t, "UPDATE "+f.dataTable+" SET revenue=100 WHERE row_key='one'")
 	// Removing the data source produces a safe error, not SQL/table details or a warehouse retry.
 	f.exec(t, "ALTER TABLE "+f.dataTable+" RENAME TO disappeared")
 	status, data = f.request(t, "analyst", f.query)
@@ -302,20 +315,50 @@ func TestOnlinePostgresHTTPResultPermissionsAndFailureBoundaries(t *testing.T) {
 func TestOnlinePostgresReleaseSwitchAndRollback(t *testing.T) {
 	f := setupOnlinePostgres(t)
 	f.source.Metadata.Version = "1.0.1"
+	f.source.Spec.Metrics[0].Description = "updated description, same calculation"
 	draft, err := f.management.SaveDraft(t.Context(), catalog.SaveDraftInput{Namespace: "demo", Source: f.source, ExpectedRevision: f.revision, Actor: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	newRelease, err := f.management.Publish(t.Context(), "demo", f.source.Metadata.Name, draft.Revision, "test", "new definition without refreshed data")
+	newRelease, err := f.management.Publish(t.Context(), "demo", f.source.Metadata.Name, draft.Revision, "test", "description-only release")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if newRelease.ManifestFingerprint == f.fingerprint {
+	if newRelease.ManifestFingerprint == f.release.ManifestFingerprint {
 		t.Fatal("fixture must change definition fingerprint")
 	}
-	if status, data := f.request(t, "analyst", f.query); status != 503 || !bytes.Contains(data, []byte("online_data_unavailable")) {
-		t.Fatalf("old data served under new release: %d %s", status, data)
+	if status, data := f.request(t, "analyst", f.query); status != 200 || !bytes.Contains(data, []byte(newRelease.ID)) {
+		t.Fatalf("description-only release rejected compatible data: %d %s", status, data)
 	}
+	// A new metric is allowed by publication compatibility, but requires the
+	// producer to validate the new model-level calculation contract.
+	added := f.source.Spec.Metrics[0]
+	added.Name, added.ExternalCode = "revenue_copy", "10004"
+	f.source.Spec.Metrics = append(f.source.Spec.Metrics, added)
+	f.source.Metadata.Version = "1.0.2"
+	draft, err = f.management.SaveDraft(t.Context(), catalog.SaveDraftInput{Namespace: "demo", Source: f.source, ExpectedRevision: draft.Revision, Actor: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	incompatible, err := f.management.Publish(t.Context(), "demo", f.source.Metadata.Name, draft.Revision, "test", "expanded calculation contract")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, data := f.request(t, "analyst", f.query); status != 503 || !bytes.Contains(data, []byte("online_data_unavailable")) {
+		t.Fatalf("old data served under incompatible model: %d %s", status, data)
+	}
+	newContract, err := postgresquery.DataContractFingerprint(incompatible.Manifest, f.binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newContract == f.fingerprint {
+		t.Fatal("calculation change did not change data contract")
+	}
+	f.exec(t, "UPDATE "+f.dataTable+" SET _metricspire_data_contract=$1,_metricspire_batch_id='batch-2'", newContract)
+	if status, data := f.request(t, "analyst", f.query); status != 200 || !bytes.Contains(data, []byte(incompatible.ID)) {
+		t.Fatalf("validated new batch unavailable: %d %s", status, data)
+	}
+	f.exec(t, "UPDATE "+f.dataTable+" SET _metricspire_data_contract=$1,_metricspire_batch_id='batch-1'", f.fingerprint)
 	if _, err := f.management.Rollback(t.Context(), "demo", f.source.Metadata.Name, f.release.ID, "test", "restore matching snapshot"); err != nil {
 		t.Fatal(err)
 	}
@@ -368,3 +411,156 @@ func TestOnlinePostgresHTTPBoundedLoadSample(t *testing.T) {
 
 // Keep compile-time conformance explicit: audit is part of the online service.
 var _ audit.Recorder = (*postgres.Store)(nil)
+
+func TestOnlinePostgresHTTPDeadlineAndAuditFaults(t *testing.T) {
+	t.Run("pool exhausted", func(t *testing.T) {
+		f := setupOnlinePostgres(t)
+		for range 4 {
+			conn, err := f.dataPool.Acquire(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Release()
+		}
+		started := time.Now()
+		status, body := f.request(t, "analyst", f.query)
+		if status != 504 || !bytes.Contains(body, []byte(`"timeout"`)) || bytes.Contains(body, []byte(`"rows"`)) || time.Since(started) > 3*time.Second {
+			t.Fatalf("pool wait escaped deadline: %d %s elapsed=%s", status, body, time.Since(started))
+		}
+	})
+	t.Run("slow completion audit", func(t *testing.T) {
+		f := setupOnlinePostgres(t)
+		function := pgx.Identifier{f.controlSchema, "delay_completion"}.Sanitize()
+		auditTable := pgx.Identifier{f.controlSchema, "metricspire_query_audit"}.Sanitize()
+		f.exec(t, "CREATE FUNCTION "+function+` () RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event_kind='query_succeeded' THEN PERFORM pg_sleep(3); END IF; RETURN NEW; END $$`)
+		f.exec(t, "CREATE TRIGGER delay_completion BEFORE INSERT ON "+auditTable+" FOR EACH ROW EXECUTE FUNCTION "+function+"()")
+		started := time.Now()
+		status, body := f.request(t, "analyst", f.query)
+		if status != 504 || !bytes.Contains(body, []byte(`"timeout"`)) || bytes.Contains(body, []byte(`"rows"`)) || time.Since(started) > 3*time.Second {
+			t.Fatalf("completion audit escaped deadline: %d %s elapsed=%s", status, body, time.Since(started))
+		}
+		f.exec(t, "DROP TRIGGER delay_completion ON "+auditTable)
+		if status, body = f.request(t, "analyst", f.query); status != 200 {
+			t.Fatalf("did not recover after audit delay: %d %s", status, body)
+		}
+	})
+	t.Run("failed completion audit", func(t *testing.T) {
+		f := setupOnlinePostgres(t)
+		function := pgx.Identifier{f.controlSchema, "reject_completion"}.Sanitize()
+		auditTable := pgx.Identifier{f.controlSchema, "metricspire_query_audit"}.Sanitize()
+		f.exec(t, "CREATE FUNCTION "+function+` () RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event_kind='query_succeeded' THEN RAISE EXCEPTION 'synthetic audit failure'; END IF; RETURN NEW; END $$`)
+		f.exec(t, "CREATE TRIGGER reject_completion BEFORE INSERT ON "+auditTable+" FOR EACH ROW EXECUTE FUNCTION "+function+"()")
+		status, body := f.request(t, "analyst", f.query)
+		if status != 503 || !bytes.Contains(body, []byte(`"audit_unavailable"`)) || bytes.Contains(body, []byte(`"rows"`)) || bytes.Contains(body, []byte("synthetic audit failure")) {
+			t.Fatalf("unaudited result delivered or error leaked: %d %s", status, body)
+		}
+	})
+}
+
+func TestOnlinePostgresHTTPColdConnectionsAndRecovery(t *testing.T) {
+	f := setupOnlinePostgres(t)
+	check := func(label string) {
+		t.Helper()
+		started := time.Now()
+		status, body := f.request(t, "analyst", f.query)
+		if status != 200 {
+			t.Fatalf("%s: %d %s", label, status, body)
+		}
+		t.Logf("%s=%s (local connection establishment, not suspended database wake-up)", label, time.Since(started))
+	}
+	check("first query")
+	check("warm query")
+	f.dataPool.Reset()
+	check("after pool reset")
+	conn, err := f.dataPool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := conn.Conn().PgConn().PID()
+	// Terminate only this fixture's own SELECT connection, not other sessions.
+	var terminated bool
+	if err := f.admin.QueryRow(t.Context(), "SELECT pg_terminate_backend($1)", pid).Scan(&terminated); err != nil || !terminated {
+		conn.Release()
+		t.Fatalf("terminate fixture connection: %v", err)
+	}
+	conn.Release()
+	status, body := f.request(t, "analyst", f.query)
+	if status != 200 && (status != 503 || !bytes.Contains(body, []byte("online_engine_unavailable"))) {
+		t.Fatalf("connection loss not safely reported: %d %s", status, body)
+	}
+	check("recovered connection")
+}
+
+func TestOnlinePostgresHTTPSustainedLoad(t *testing.T) {
+	raw := os.Getenv("METRICSPIRE_ONLINE_SOAK_DURATION")
+	if raw == "" {
+		t.Skip("opt in with METRICSPIRE_ONLINE_SOAK_DURATION=30s for bounded local sustained load")
+	}
+	duration, err := time.ParseDuration(raw)
+	if err != nil || duration < time.Second || duration > time.Minute {
+		t.Fatal("local soak duration must be between 1s and 1m")
+	}
+	f := setupOnlinePostgres(t)
+	if os.Getenv("METRICSPIRE_ONLINE_LOAD_ROWS") == "1000000" {
+		f.exec(t, "INSERT INTO "+f.dataTable+` SELECT 'load-'||g,'2026-09-01'::date+(g%30)::int,'region-'||g,1,1,'demo','batch-1',$2,$1 FROM generate_series(1,1000000) g`, f.fingerprint, f.asOf)
+		f.exec(t, "ANALYZE "+f.dataTable)
+	}
+	started := time.Now()
+	deadline := started.Add(duration)
+	var wait sync.WaitGroup
+	var mu sync.Mutex
+	samples := []time.Duration{}
+	failures := 0
+	for range 10 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			// Cap sample memory even if the fixture runs much faster than expected.
+			for n := 0; n < 5000 && time.Now().Before(deadline); n++ {
+				begin := time.Now()
+				status, body := f.request(t, "analyst", f.query)
+				var result application.OnlineResult
+				valid := status == 200 && json.Unmarshal(body, &result) == nil && result.Snapshot != nil && result.Result != nil
+				if valid {
+					valid = result.ReleaseID == f.release.ID && result.Snapshot.BatchID == f.batch && len(result.Result.Rows) == 2 && len(result.Result.Columns) == 4
+				}
+				if valid {
+					for i, amount := range []int64{100, 50} {
+						row := result.Result.Rows[i]
+						if len(row) != 4 {
+							valid = false
+							break
+						}
+						value, ok := row[1].(string)
+						actual, parsed := new(big.Rat).SetString(value)
+						if !ok || !parsed || actual.Cmp(new(big.Rat).SetInt64(amount)) != 0 {
+							valid = false
+							break
+						}
+					}
+				}
+				mu.Lock()
+				samples = append(samples, time.Since(begin))
+				if !valid {
+					failures++
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wait.Wait()
+	elapsed := time.Since(started)
+	if len(samples) == 0 {
+		t.Fatal("no sustained samples")
+	}
+	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	p95, p99 := samples[(len(samples)*95-1)/100], samples[(len(samples)*99-1)/100]
+	var audits int
+	if err := f.admin.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{f.controlSchema, "metricspire_query_audit"}.Sanitize()+" WHERE event_kind IN ('query_started','query_succeeded')").Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("duration=%s concurrency=10 n=%d errors=%d p95=%s p99=%s QPS=%.1f audit_rows=%d (synthetic indexed selection, no cache, not deployment SLA)", elapsed, len(samples), failures, p95, p99, float64(len(samples))/elapsed.Seconds(), audits)
+	if failures != 0 || audits != 2*len(samples) || p95 > time.Second {
+		t.Fatalf("sustained fixture failed: errors=%d audit_rows=%d samples=%d p95=%s", failures, audits, len(samples), p95)
+	}
+}

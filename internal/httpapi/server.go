@@ -53,10 +53,13 @@ func NewServer(config Config, dependencies Dependencies, logger *slog.Logger) (*
 	if config.QueryTimeout == 0 {
 		config.QueryTimeout = DefaultQueryTimeout
 	}
+	if config.OnlineTimeout == 0 {
+		config.OnlineTimeout = DefaultOnlineTimeout
+	}
 	if config.RequestID == nil {
 		config.RequestID = newRequestID
 	}
-	if config.MaxBodyBytes < 1 || config.ControlTimeout <= 0 || config.QueryTimeout <= 0 {
+	if config.MaxBodyBytes < 1 || config.ControlTimeout <= 0 || config.QueryTimeout <= 0 || config.OnlineTimeout <= 0 {
 		return nil, errors.New("HTTP body limit and timeouts must be positive")
 	}
 	if strings.TrimSpace(config.MCPVersion) == "" {
@@ -820,6 +823,10 @@ func (server *Server) authorize(response http.ResponseWriter, request *http.Requ
 
 func (server *Server) authenticate(response http.ResponseWriter, request *http.Request) (Principal, bool) {
 	principal, err := server.deps.Authenticator.Authenticate(request.Context(), request)
+	if contextErr := requestContextError(request); contextErr != nil {
+		server.handleError(response, request, contextErr)
+		return Principal{}, false
+	}
 	if err != nil {
 		var diagnostic interface{ SafeAuthenticationReason() string }
 		if errors.As(err, &diagnostic) {
@@ -891,7 +898,16 @@ func (server *Server) decodeJSON(response http.ResponseWriter, request *http.Req
 	}
 	request.Body = http.MaxBytesReader(response, request.Body, server.config.MaxBodyBytes)
 	data, err := io.ReadAll(request.Body)
+	if contextErr := requestContextError(request); contextErr != nil {
+		server.handleError(response, request, contextErr)
+		return false
+	}
 	if err != nil {
+		var timedOut interface{ Timeout() bool }
+		if deadline, ok := request.Context().Deadline(); ok && !time.Now().Before(deadline) && errors.As(err, &timedOut) && timedOut.Timeout() {
+			server.handleError(response, request, context.DeadlineExceeded)
+			return false
+		}
 		var maximum *http.MaxBytesError
 		if errors.As(err, &maximum) {
 			server.writeProblem(response, request, http.StatusRequestEntityTooLarge, "request_too_large", "Request too large", fmt.Sprintf("request body exceeds %d bytes", maximum.Limit), "")
@@ -917,6 +933,16 @@ func (server *Server) withTimeout(response http.ResponseWriter, request *http.Re
 	if err := operation(ctx); err != nil {
 		server.handleError(response, request, err)
 	}
+}
+
+func requestContextError(request *http.Request) error {
+	// A net/http read deadline may cancel the parent request before the child
+	// context's timer fires. An elapsed server deadline is still a timeout,
+	// not a generic cancellation/internal error.
+	if deadline, ok := request.Context().Deadline(); ok && !time.Now().Before(deadline) {
+		return context.DeadlineExceeded
+	}
+	return request.Context().Err()
 }
 
 func (server *Server) handleError(response http.ResponseWriter, request *http.Request, err error) {

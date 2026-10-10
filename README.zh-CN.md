@@ -32,7 +32,7 @@ MetricSpire 是开源的语义指标服务。经评审的指标定义发布一�
 - **三个入口、一套服务：** 维护与查询界面、严格的 HTTP 管理/查询 API，以及七个远程 MCP 查询工具共用应用服务。
 - **清晰的身份边界：** 自托管可选通用 OIDC；Databricks Apps 使用平台托管身份。产品权限不能覆盖仓库原生的数据权限。
 
-Databricks SQL 是首个分析引擎适配器；目前不宣称已支持多引擎执行。PostgreSQL 是事务性**控制面**，不保存分析事实或查询结果。详细边界见[架构](docs/architecture.md)与 [HTTP 契约](docs/http-api.md)（英文）。
+Databricks SQL 是首个分析引擎适配器。PostgreSQL 仍承担事务性**控制面**；另外可显式启用[在线 HTTP 预览](docs/online-query.md)，通过数字指标 code 和独立只读凭据查询已审核的预计算汇总数据，不会自动回退到数仓。当前不承诺通用多引擎分析，也不宣称已达到生产环境的延迟或可用性指标。详细边界见[架构](docs/architecture.md)与 [HTTP 契约](docs/http-api.md)（英文）。
 
 ## 试用语义规划
 

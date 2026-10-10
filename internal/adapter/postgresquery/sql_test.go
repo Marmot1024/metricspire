@@ -72,7 +72,7 @@ func TestCompileOnlineSQLHasBoundParametersTenantAndSnapshotGuards(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fragment := range []string{`FROM "serving"."daily_sales"`, "_metricspire_tenant = $", "NULLIF(", "::numeric", "_metricspire_manifest_fingerprint", "LIMIT 11", `("orders")::numeric DESC`} {
+	for _, fragment := range []string{`FROM "serving"."daily_sales"`, "_metricspire_tenant = $", "NULLIF(", "::numeric", "_metricspire_data_contract", "LIMIT 11", `("orders")::numeric DESC`} {
 		if !strings.Contains(statement.SQL, fragment) {
 			t.Fatalf("SQL lacks %s: %s", fragment, statement.SQL)
 		}
@@ -82,6 +82,19 @@ func TestCompileOnlineSQLHasBoundParametersTenantAndSnapshotGuards(t *testing.T)
 	}
 	if len(statement.Columns) != 4 || len(statement.Args) != 4 {
 		t.Fatalf("statement %#v", statement)
+	}
+}
+
+func TestOnlineDecimalRejectsNonfiniteAndMalformedValues(t *testing.T) {
+	for _, value := range []string{"0", "-1", "150.00", "0.00000000000000000001", "123456789012345678901234567890.1"} {
+		if !finiteDecimal.MatchString(value) {
+			t.Fatalf("valid decimal rejected: %q", value)
+		}
+	}
+	for _, value := range []string{"NaN", "Infinity", "-Infinity", "", "1e3", " 1", "1.2.3"} {
+		if finiteDecimal.MatchString(value) {
+			t.Fatalf("invalid decimal accepted: %q", value)
+		}
 	}
 }
 

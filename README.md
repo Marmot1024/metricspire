@@ -32,7 +32,7 @@ This is a metric service, not a replacement for your data warehouse, BI system, 
 - **One service, three surfaces:** a maintainer/query UI, strict HTTP management and query APIs, and seven remote MCP query tools using the same application services.
 - **Explicit identity boundaries:** portable OIDC for self-hosting or managed identity in Databricks Apps. Product permissions never override warehouse-native data permissions.
 
-Databricks SQL is the first analytical adapter; the core does not claim multi-engine execution today. PostgreSQL is the transactional **control plane**, not a store for analytical facts or query results. See the [architecture](docs/architecture.md) and [HTTP contract](docs/http-api.md) for the trust boundaries.
+Databricks SQL is the first analytical adapter. PostgreSQL remains the transactional **control plane**. A separate, opt-in [online HTTP preview](docs/online-query.md) reads reviewed precomputed aggregates using numeric metric codes and dedicated SELECT-only credentials; it never falls back to Warehouse execution. General multi-engine analytics and production latency/availability guarantees are not claimed. See the [architecture](docs/architecture.md) and [HTTP contract](docs/http-api.md) for the trust boundaries.
 
 ## Try the semantic workflow
 

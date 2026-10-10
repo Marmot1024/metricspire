@@ -149,7 +149,7 @@ func (s *OnlineService) Execute(ctx context.Context, scope QueryScope, request O
 	if end.Sub(start) > 31*24*time.Hour {
 		return OnlineResult{}, &model.Problem{Code: "budget_exceeded", Path: "time_range", Message: "online time range must not exceed 31 days"}
 	}
-	output, err := s.queries.executePlanned(ctx, ctx, input, planned)
+	output, err := s.queries.executePlannedWithAudit(ctx, ctx, input, planned, false)
 	if err != nil {
 		return OnlineResult{}, err
 	}

@@ -27,6 +27,12 @@ type QueryEngine interface {
 	Execute(context.Context, model.PhysicalPlan) (model.ExecutionSnapshot, error)
 }
 
+// BoundQueryEngine needs the trusted semantic and source definitions to verify
+// precomputed data compatibility. Analytical engines keep the ordinary interface.
+type BoundQueryEngine interface {
+	ExecuteBound(context.Context, model.SemanticManifest, model.SourceBinding, model.PhysicalPlan) (model.ExecutionSnapshot, error)
+}
+
 // PolicyResolver and BindingResolver are trusted server-side dependencies.
 // Public transports must never accept either value from a query request.
 type PolicyResolver interface {
@@ -92,6 +98,7 @@ type PlanOutput struct {
 	Release  catalog.Release    `json:"release"`
 	Logical  model.LogicalPlan  `json:"logical_plan"`
 	Physical model.PhysicalPlan `json:"physical_plan"`
+	binding  model.SourceBinding
 }
 
 type QueryOutput struct {
@@ -209,7 +216,7 @@ func (s *QueryService) planExplained(ctx context.Context, input QueryInput, expl
 	if err != nil {
 		return PlanOutput{}, fmt.Errorf("build physical plan: %w", err)
 	}
-	return PlanOutput{Release: explained.Release, Logical: explained.Logical, Physical: physical}, nil
+	return PlanOutput{Release: explained.Release, Logical: explained.Logical, Physical: physical, binding: binding}, nil
 }
 
 // ExecuteActive resolves the active release and all trusted server-side inputs.
@@ -239,6 +246,10 @@ func (s *QueryService) ExecuteDraft(ctx context.Context, input QueryInput) (Quer
 }
 
 func (s *QueryService) executePlanned(ctx, controlContext context.Context, input QueryInput, planned PlanOutput) (QueryOutput, error) {
+	return s.executePlannedWithAudit(ctx, controlContext, input, planned, true)
+}
+
+func (s *QueryService) executePlannedWithAudit(ctx, controlContext context.Context, input QueryInput, planned PlanOutput, detachedAudit bool) (QueryOutput, error) {
 	baseEvent := audit.QueryEvent{
 		RequestID: input.Context.RequestID, Tenant: input.Context.Tenant, Principal: input.Context.Principal,
 		Namespace: input.Namespace, ModelName: input.ModelName, ReleaseID: planned.Release.ID,
@@ -249,9 +260,21 @@ func (s *QueryService) executePlanned(ctx, controlContext context.Context, input
 	started.Kind = audit.EventQueryStarted
 	started.OccurredAt = s.now().UTC()
 	if err := s.audit.Record(controlContext, started); err != nil {
+		if controlContext.Err() != nil {
+			return QueryOutput{}, controlContext.Err()
+		}
 		return QueryOutput{}, fmt.Errorf("%w: record query start: %v", audit.ErrUnavailable, err)
 	}
-	execution, err := s.engine.Execute(ctx, planned.Physical)
+	if !detachedAudit && ctx.Err() != nil {
+		return QueryOutput{}, ctx.Err()
+	}
+	var execution model.ExecutionSnapshot
+	var err error
+	if bound, ok := s.engine.(BoundQueryEngine); ok {
+		execution, err = bound.ExecuteBound(ctx, planned.Release.Manifest, planned.binding, planned.Physical)
+	} else {
+		execution, err = s.engine.Execute(ctx, planned.Physical)
+	}
 	finished := baseEvent
 	finished.OccurredAt = s.now().UTC()
 	if execution.Result != nil {
@@ -267,10 +290,20 @@ func (s *QueryService) executePlanned(ctx, controlContext context.Context, input
 		finished.Kind = audit.EventQueryFailed
 		finished.ErrorCode = errorCode(err)
 	}
-	auditContext, cancelAudit := context.WithTimeout(context.WithoutCancel(controlContext), auditCompletionTimeout)
-	defer cancelAudit()
+	auditContext := controlContext
+	if detachedAudit {
+		var cancelAudit context.CancelFunc
+		auditContext, cancelAudit = context.WithTimeout(context.WithoutCancel(controlContext), auditCompletionTimeout)
+		defer cancelAudit()
+	}
 	if auditErr := s.audit.Record(auditContext, finished); auditErr != nil {
+		if !detachedAudit && controlContext.Err() != nil {
+			return QueryOutput{}, controlContext.Err()
+		}
 		return QueryOutput{Release: planned.Release, Logical: planned.Logical, Physical: planned.Physical, Execution: execution}, fmt.Errorf("%w: record query completion: %v", audit.ErrUnavailable, auditErr)
+	}
+	if !detachedAudit && ctx.Err() != nil {
+		return QueryOutput{}, ctx.Err()
 	}
 	if err != nil {
 		return QueryOutput{Release: planned.Release, Logical: planned.Logical, Physical: planned.Physical, Execution: execution}, err

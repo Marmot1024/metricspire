@@ -47,6 +47,20 @@ func (e *QueryEngine) Execute(ctx context.Context, plan model.PhysicalPlan) (mod
 	if !e.resources[plan.Root.Resource] {
 		return model.ExecutionSnapshot{}, reject("permission_denied", "online source is not enabled")
 	}
+	return model.ExecutionSnapshot{}, reject("unsupported_online_query", "online execution requires trusted data definitions")
+}
+
+func (e *QueryEngine) ExecuteBound(ctx context.Context, manifest model.SemanticManifest, binding model.SourceBinding, plan model.PhysicalPlan) (model.ExecutionSnapshot, error) {
+	if !e.resources[plan.Root.Resource] {
+		return model.ExecutionSnapshot{}, reject("permission_denied", "online source is not enabled")
+	}
+	if manifest.Fingerprint != plan.ManifestFingerprint || len(binding.Datasets) != 1 || binding.Datasets[0].Resource != plan.Root.Resource {
+		return model.ExecutionSnapshot{}, reject("unsupported_online_query", "online plan and data definitions do not match")
+	}
+	contract, err := DataContractFingerprint(manifest, binding)
+	if err != nil {
+		return model.ExecutionSnapshot{}, err
+	}
 	stmt, err := compile(plan, e.config.Tenant)
 	if err != nil {
 		return model.ExecutionSnapshot{}, err
@@ -85,7 +99,7 @@ func (e *QueryEngine) Execute(ctx context.Context, plan model.PhysicalPlan) (mod
 		meta := values[len(stmt.Columns):]
 		text := func(i int) string { s, _ := meta[i].(string); return s }
 		count, err := strconv.ParseInt(text(0), 10, 64)
-		if err != nil || count == 0 || text(1) != text(0) || text(2) != text(0) || text(3) != text(0) || text(4) == "" || text(4) != text(5) || text(6) != text(7) || text(8) != text(9) || text(8) != plan.ManifestFingerprint {
+		if err != nil || count == 0 || text(1) != text(0) || text(2) != text(0) || text(3) != text(0) || text(4) == "" || text(4) != text(5) || text(6) != text(7) || text(8) != text(9) || text(8) != contract {
 			return model.ExecutionSnapshot{}, reject("online_data_unavailable", "online snapshot is empty, incomplete or incompatible with this release")
 		}
 		asOf, err := time.Parse("2006-01-02 15:04:05.999999999Z07:00", text(6))
@@ -117,6 +131,13 @@ func (e *QueryEngine) Execute(ctx context.Context, plan model.PhysicalPlan) (mod
 				row[i], err = strconv.ParseInt(v, 10, 64)
 			case model.DataTypeBoolean:
 				row[i], err = strconv.ParseBool(v)
+			case model.DataTypeDecimal:
+				// PostgreSQL numeric permits NaN/Infinity. They are not metric
+				// values and must not be delivered as successful decimal results.
+				if !finiteDecimal.MatchString(v) {
+					return model.ExecutionSnapshot{}, reject("online_data_unavailable", "invalid online decimal")
+				}
+				row[i] = v
 			default:
 				row[i] = v
 			}
