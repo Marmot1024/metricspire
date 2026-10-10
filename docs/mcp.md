@@ -6,6 +6,8 @@ MetricSpire serves stateless Streamable HTTP MCP at `/api/v1/mcp` on Databricks 
 
 For Databricks Apps, an administrator registers a public OAuth client with the exact callback URI required by the MCP client. Users sign in with their own identity; App access and warehouse permissions still apply. See [operator setup](../deploy/databricks-apps/README.md#oauth-client-onboarding).
 
+For colleague onboarding, a maintainer can distribute the [single-file installer](mcp-installer.md), which presets the public connection parameters and installs a short usage skill. Manual setup remains available:
+
 ```bash
 codex mcp add metricspire --url 'https://<your-app-origin>/api/v1/mcp' --oauth-client-id '<public-client-id>'
 codex mcp login metricspire
