@@ -594,3 +594,34 @@ test("catalog reload discards cached and in-flight details from an old release",
   assert.equal(run("state.metricDetailCache.size"), 0);
   assert.equal(run("state.catalogView[0].release_id"), "rel_new");
 });
+
+test("catalog failure after a domain switch clears the old detail and recovers on explicit search", async () => {
+  const {context, run} = editorContext();
+  context.window = {confirm: () => true};
+  context.updateQueryBuilder = () => {};
+  context.initializeGovernanceRoutes = () => {};
+  context.document.getElementById("governance-workspace").hidden = true;
+  context.document.getElementById("metric-detail-empty").textContent = "正在加载旧业务域指标…";
+  run("state.namespace = 'old'; state.context = {permissions: ['query:execute'], models: []}");
+  let rejectPage;
+  context.requestJSON = () => new Promise((_, reject) => { rejectPage = reject; });
+  const switching = run("switchNamespace('acceptance')");
+  assert.match(context.document.getElementById("metric-detail-empty").textContent, /正在加载指标目录/);
+  rejectPage({code: "timeout", status: 504, request_id: "req_catalog_timeout"});
+  await switching;
+  const list = context.document.getElementById("catalog-list");
+  assert.match(list.children[0].textContent, /目录加载失败.*请求超时.*req_catalog_timeout.*点击搜索/);
+  assert.doesNotMatch(list.children[0].textContent, /没有找到/);
+  assert.match(context.document.getElementById("metric-detail-empty").textContent, /加载失败.*搜索重试/);
+  assert.equal(context.document.getElementById("metric-detail-content").hidden, true);
+  assert.doesNotMatch(context.document.getElementById("notice").textContent, /登录/);
+  let resolvePage;
+  context.requestJSON = () => new Promise((resolve) => { resolvePage = resolve; });
+  const retry = run("loadCatalog()");
+  assert.match(list.children[0].textContent, /正在搜索/);
+  assert.match(context.document.getElementById("metric-detail-empty").textContent, /正在加载指标目录/);
+  resolvePage({items: [], counts: {published: 0, draft: 0, governance: 0, total: 0}});
+  await retry;
+  assert.match(list.children[0].textContent, /没有找到/);
+  assert.match(context.document.getElementById("metric-detail-empty").textContent, /请选择/);
+});
