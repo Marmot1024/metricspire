@@ -12,6 +12,7 @@ const state = {
   catalogCounts: null,
   catalogIncomplete: false,
   catalogLoading: false,
+  catalogError: "",
   queryCatalog: new Map(),
   metricDetailSequence: 0,
   metricPlanCache: new Map(),
@@ -60,6 +61,8 @@ function errorMessage(error) {
   let message = detail || "请求失败，请稍后重试。";
   if (code === "authentication_unavailable") {
     message = "身份验证服务暂时不可用，请稍后重试。持续出现时，请提供请求编号联系平台支持。";
+  } else if (code === "timeout") {
+    message = "请求超时，请稍后重试当前操作。";
   } else if (code === "permission_denied" || error?.status === 403) {
     message = "当前账号没有执行此操作的权限。请联系平台管理员确认所属权限组。";
   } else if (code === "unauthorized" || error?.status === 401) {
@@ -381,6 +384,7 @@ async function switchNamespace(namespace) {
   state.catalogIncomplete = false;
   state.catalogCursor = "";
   state.catalogLoading = true;
+  state.catalogError = "";
   state.selectedCatalogIndex = -1;
   state.metricPlanCache.clear();
   state.metricDetailCache.clear();
@@ -422,6 +426,7 @@ async function loadCatalog(more = false) {
     state.metricDetailRequests.clear();
     state.metricPlanCache.clear();
     state.catalogLoading = true;
+    state.catalogError = "";
     state.catalogCursor = "";
     state.catalogCounts = null;
     state.catalogIncomplete = false;
@@ -452,6 +457,7 @@ async function loadCatalog(more = false) {
   } catch (error) {
     if (loadSequence !== state.catalogLoadSequence || namespace !== state.namespace) return;
     state.catalogLoading = false;
+    if (!more && error?.name !== "AbortError") state.catalogError = errorMessage(error);
     if (!more) renderCatalog();
     if (error?.name !== "AbortError") setNotice(errorMessage(error), "error");
   } finally {
@@ -474,7 +480,8 @@ function renderCatalog() {
   if (!visibleEntries.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = state.catalogLoading ? "正在搜索指标目录…" : state.catalogView.length
+    empty.textContent = state.catalogLoading ? "正在搜索指标目录…" : state.catalogError
+      ? `目录加载失败：${state.catalogError}。点击搜索可重试。` : state.catalogView.length
       ? "当前状态筛选下没有匹配指标。请切换显示状态或调整搜索词。"
       : hasPermission("model:manage")
         ? "没有找到匹配的已发布指标或草稿。请确认业务域、搜索词和草稿录入情况。"
@@ -536,7 +543,11 @@ function renderMetricDetail(metric) {
     loadMetricDetail(metric, sequence);
     return;
   }
-  if (!metric) return;
+  if (!metric) {
+    byID("metric-detail-empty").textContent = state.catalogLoading ? "正在加载指标目录…"
+      : state.catalogError ? "目录加载失败，请点击搜索重试。" : "请选择一条指标查看完整定义。";
+    return;
+  }
   const draft = metric.catalog_status === "draft";
   const pending = metric.catalog_status === "governance";
   const businessUnverified = isBusinessUnverified(metric);
