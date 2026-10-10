@@ -32,6 +32,8 @@ Model-scoped explain, plan, and query routes exist for existing clients; new cli
 
 Catalog search returns the semantic model name, entity, typed metric expression, dimensions, time contract, ownership, and verification metadata that an authorized user needs to understand a metric. It deliberately omits the trusted source binding and physical resource. A client that needs table and column lineage should send a bounded semantic query to `POST /namespaces/{namespace}/plan`; planning resolves the authorized binding and returns the physical plan without executing SQL or contacting the analytical engine.
 
+Catalog search returns the semantic model name, entity, typed metric expression, dimensions, time contract, ownership, and verification metadata that an authorized user needs to understand a metric. It deliberately omits the trusted source binding and physical resource. A client that needs table and column lineage should send a bounded semantic query to `POST /namespaces/{namespace}/plan`; planning resolves the authorized binding and returns the physical plan without executing SQL or contacting the analytical engine.
+
 ## Request, result, and audit limits
 
 - JSON bodies reject unknown and duplicate fields and default to a 1 MiB request limit. Catalog search returns at most 100 metrics.

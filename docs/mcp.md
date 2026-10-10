@@ -1,55 +1,50 @@
 # MCP integration
 
-MetricSpire exposes the same governed query workflow as its HTTP API through stateless Streamable HTTP MCP. The hosted endpoint is `/api/v1/mcp` for Databricks Apps and also `/mcp` for direct/self-hosted deployments. Clients connect to a deployed URL; they do **not** clone or run this repository.
+MetricSpire serves stateless Streamable HTTP MCP at `/api/v1/mcp` on Databricks Apps, and also `/mcp` on self-hosted deployments. Users connect to a deployed service; no repository checkout is needed.
 
-## What a client can do
+## Connect
 
-| Tool | Behavior |
-| --- | --- |
-| `list_namespaces`, `search_metrics` | Discover permitted namespaces, metric codes, descriptions, dimensions, and time semantics. |
-| `explain_query` | Check a structured `SemanticQuery` and its meaning without running analytical SQL. |
-| `plan_query` | Resolve the reviewed physical plan without executing it. |
-| `submit_query` | Submit a bounded query job; this may incur warehouse cost. |
-| `get_query`, `cancel_query` | Read or cancel a job owned by the same tenant and principal. |
-
-The typical path is **discover → explain/plan → confirm → submit → poll**. MetricSpire does not host an LLM, guarantee that a natural-language request was interpreted correctly, or expose raw SQL, model publication, and identity-override tools. If a metric code or dimension is absent, the client should report that rather than invent one.
-
-Every MCP request authenticates independently. Product policy, active release, and query budgets are applied before execution; the analytical engine's catalog, row, and column permissions remain authoritative. Only query submission forwards the current user's short-lived execution credential to the engine job. Job reads and cancellation remain principal-scoped.
-
-## Connect a client
-
-The operator supplies an HTTPS origin, a user-accessible App/service, and an authentication method supported by that deployment. For Databricks Apps, use the API path so anonymous MCP discovery is not redirected to an interactive browser page:
-
-```text
-https://<your-app-origin>/api/v1/mcp
-```
-
-Databricks does not offer dynamic client registration at the staging OIDC endpoint. A Databricks account administrator must register a **public** OAuth client with the exact callback URI required by each MCP client; each user then signs in with their own Databricks identity. This is not an app-wide shared token or a way around App `CAN USE` and Unity Catalog permissions. The [Databricks Apps deployment guide](../deploy/databricks-apps/README.md#oauth-client-onboarding) documents the registration and the optional local CLI-helper fallback.
-
-For Codex, register the exact redirect URI shown for the fixed MCP URL, then add and log into the connection:
+For Databricks Apps, an administrator registers a public OAuth client with the exact callback URI required by the MCP client. Users sign in with their own identity; App access and warehouse permissions still apply. See [operator setup](../deploy/databricks-apps/README.md#oauth-client-onboarding).
 
 ```bash
 codex mcp add metricspire --url 'https://<your-app-origin>/api/v1/mcp' --oauth-client-id '<public-client-id>'
 codex mcp login metricspire
 ```
 
-### First connection and re-authentication
+Use the client's authentication action when it reports authentication required. After first login, reload the connection or open a fresh session and call `list_namespaces` to verify it. A successful browser callback alone does not verify tool access. Valid refresh credentials should allow silent renewal; [maintainer acceptance](mcp-native-acceptance.md) checks this separately.
 
-The first connection has two separate steps: the MCP client must start OAuth, and the user must complete the browser consent. Typing `metricspire` or `use metricspire` selects a server; it does not start OAuth by itself. In Codex, use the server's **Authenticate** action in `/mcp`, or run `codex mcp login metricspire` immediately when `/mcp` reports `authentication required (0 tools)`. Do not wait for an MCP tool call to time out.
+Keep the connection name and approved scopes stable. Do not combine native OAuth with a helper or static bearer header on the same connection, and never put credentials in prompts, command arguments, Git or issue reports.
 
-After the command reports that login completed, start a fresh Codex session (or reload the MCP configuration if the client exposes that action) and call `metricspire.list_namespaces`. A successful browser callback alone is not a tool-call acceptance test. With a valid refresh credential, later access-token renewal should be silent; a browser should be required only after the refresh credential is no longer valid or has been revoked.
+## Query workflow
 
-For Databricks Apps, the platform ingress authenticates the initial request before it reaches MetricSpire. An anonymous `401` may therefore contain no application-generated `WWW-Authenticate` header even though the platform publishes the protected-resource metadata and the OAuth flow is configured correctly. This is expected for the Apps deployment profile and is not a reason to add a static token or a broader scope.
+| Tool | Behavior |
+| --- | --- |
+| `list_namespaces`, `search_metrics` | Discover permitted metric codes, definitions, dimensions and time semantics. |
+| `explain_query` | Validate a structured `SemanticQuery` and explain its meaning without analytical SQL. |
+| `plan_query` | Resolve a reviewed execution plan without running it. |
+| `submit_query` | Submit a bounded query job; warehouse costs may apply. |
+| `get_query`, `cancel_query` | Read or cancel a job owned by the same tenant and principal. |
 
-The observed Databricks staging scope is `sql`, but client scope and redirect settings depend on the deployment and client version. The redirect must match its host, port, and callback path exactly; changing the MCP URL may change the callback path. Do not put a `client_secret`, access token, or static Authorization header in a checked-in file. Keep the server name stable because stored OAuth credentials are keyed to that connection. See [Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+Follow **discover → explain/plan → submit → poll**. An explicit query request authorizes submission within its scope; ask about missing business definitions or an expansion of scope. Report absent metrics or capabilities rather than inventing them. MCP exposes no arbitrary SQL, publication or identity-override tool.
 
-For a deployment that intentionally uses bearer-token trials, `bearer_token_env_var` is supported, but it is a separate path from native OAuth. Do not combine a helper, static bearer header, and OAuth on one connection. Never paste a token into prompts, command arguments, checked-in files, or issue reports.
+Each request authenticates independently. Product policy, active releases and query budgets apply before execution; engine permissions remain authoritative. Only submission forwards the user's short-lived execution credential to the job.
 
-## Operational limits
+## Failure handling
 
-- Requests and responses are capped at 1 MiB and 8 MiB respectively; analytical results are bounded, typed JSON rather than large exports.
-- A cancelled MCP network request does not necessarily cancel an accepted query job; call `cancel_query` using its `job_id`.
-- After an uncertain submission response, inspect the job state before retrying to avoid duplicate warehouse work.
-- The local `metricspire mcp --api-url <origin>` stdio bridge is for development compatibility, not the normal external delivery path.
+| Evidence | Next action |
+| --- | --- |
+| Connection absent from the current tool inventory | Check the loaded connection once. This does not prove the service is down. |
+| Client reports authentication required, or application returns `unauthenticated` | Use the existing connection's normal authentication action. |
+| `authentication_unavailable` (503/504) | Identity verification could not complete; access remains denied. Retry later or report the request ID. Repeated login is not the remedy. |
+| `permission_denied` | Report the denied operation and request ID; do not infer a missing OAuth scope. |
+| `unknown_reference`, `metric_route_not_found`, `invalid_time`, `capability_missing` | Use the public field/capability detail and catalog to identify the unsupported query. |
+| Empty search | No authorized match was found; this does not prove that warehouse data is absent. |
+| Submission accepted | Retain `job_id` and poll to a final status. A queued job is not a completed analysis. |
 
-See [current verification status](development-status.md) before treating a client, credential refresh, or deployment as production-accepted.
+Limit user-facing recovery to one connection check, then report the failing stage and unresolved cause. Advertised scopes alone do not justify expanding authorization. Databricks Apps ingress may return an anonymous 401 without the application's authentication challenge; that response alone cannot identify the cause or certify OAuth onboarding.
+
+## Limits
+
+Requests and responses are capped at 1 MiB and 8 MiB; query results are bounded, typed JSON. Cancelling a network request may leave an accepted job running: use `cancel_query` with its ID. After an uncertain submission response, check any known job before retrying; without an ID, report the uncertainty instead of blindly resubmitting.
+
+The local `metricspire mcp --api-url <origin>` bridge is for development compatibility. See [verification status](development-status.md) for acceptance gaps.

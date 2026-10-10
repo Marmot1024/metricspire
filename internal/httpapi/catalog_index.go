@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/marmot1024/metricspire/internal/application"
+	"github.com/marmot1024/metricspire/internal/catalog"
+	"github.com/marmot1024/metricspire/internal/compiler"
 	"github.com/marmot1024/metricspire/internal/governance"
 	"github.com/marmot1024/metricspire/internal/model"
 )
@@ -169,7 +171,7 @@ func (server *Server) handleCatalogIndex(response http.ResponseWriter, request *
 				items, searchErr := server.deps.CatalogSearch.SearchActive(ctx, application.QueryScope{
 					Namespace: namespace,
 					Context:   model.RequestContext{Tenant: principal.Tenant, Principal: principal.Subject, Roles: principal.Roles, RequestID: requestID(request)},
-				}, "", application.MaxCatalogSearchResults)
+				}, request.URL.Query().Get("q"), application.MaxCatalogSearchResults)
 				publishedChannel <- catalogPublishedResult{items: items, duration: time.Since(queryStarted), err: searchErr}
 			}()
 		} else {
@@ -178,7 +180,7 @@ func (server *Server) handleCatalogIndex(response http.ResponseWriter, request *
 		if principal.Has(PermissionManage) {
 			go func() {
 				queryStarted := time.Now()
-				items, listErr := server.deps.Governance.List(ctx, namespace, "", governance.MaxImportRecords)
+				items, listErr := server.deps.Governance.List(ctx, namespace, request.URL.Query().Get("q"), governance.MaxImportRecords)
 				governanceChannel <- catalogGovernanceResult{items: items, duration: time.Since(queryStarted), err: listErr}
 			}()
 		} else {
@@ -193,7 +195,11 @@ func (server *Server) handleCatalogIndex(response http.ResponseWriter, request *
 			return governed.err
 		}
 
-		index := searchCatalogIndex(buildCatalogIndex(published.items, governed.items), request.URL.Query().Get("q"))
+		entries, err := server.composeCatalogIndex(ctx, request, principal, namespace, published.items, governed.items)
+		if err != nil {
+			return err
+		}
+		index := searchCatalogIndex(entries, request.URL.Query().Get("q"))
 		counts := countCatalogIndex(index)
 		filtered := filterCatalogIndex(index, status, after)
 		page := filtered
@@ -249,22 +255,26 @@ func (server *Server) handleCatalogDetail(response http.ResponseWriter, request 
 		var records []governance.MetricRecord
 		if principal.Has(PermissionQuery) {
 			var err error
-			published, err = server.deps.CatalogSearch.SearchActive(ctx, application.QueryScope{
+			published, err = server.deps.CatalogSearch.SearchActiveCodes(ctx, application.QueryScope{
 				Namespace: namespace,
 				Context:   model.RequestContext{Tenant: principal.Tenant, Principal: principal.Subject, Roles: principal.Roles, RequestID: requestID(request)},
-			}, name, application.MaxCatalogSearchResults)
+			}, []string{name})
 			if err != nil {
 				return err
 			}
 		}
 		if principal.Has(PermissionManage) {
 			var err error
-			records, err = server.deps.Governance.List(ctx, namespace, name, governance.MaxImportRecords)
+			records, err = server.deps.Governance.ListByCodes(ctx, namespace, []string{name})
 			if err != nil {
 				return err
 			}
 		}
-		for _, entry := range buildCatalogIndex(published, records) {
+		entries, err := server.composeCatalogIndex(ctx, request, principal, namespace, published, records)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
 			if entry.Name == name && (modelName == "" || entry.ModelName == modelName) {
 				return writeJSON(response, http.StatusOK, entry)
 			}
@@ -272,6 +282,122 @@ func (server *Server) handleCatalogDetail(response http.ResponseWriter, request 
 		server.writeProblem(response, request, http.StatusNotFound, "not_found", "Not found", "metric is not visible in this namespace", "name")
 		return nil
 	})
+}
+
+// Fetch counterparts by exact code after bounded source searches. A match in
+// governance must not turn an authorized published metric into a draft.
+func (server *Server) composeCatalogIndex(ctx context.Context, request *http.Request, principal Principal, namespace string, published []application.MetricCatalogEntry, records []governance.MetricRecord) ([]CatalogIndexEntry, error) {
+	scope := application.QueryScope{Namespace: namespace, Context: model.RequestContext{
+		Tenant: principal.Tenant, Principal: principal.Subject, Roles: principal.Roles, RequestID: requestID(request),
+	}}
+	publishedCodes := make(map[string]bool, len(published))
+	for _, metric := range published {
+		publishedCodes[metric.Name] = true
+	}
+	if principal.Has(PermissionQuery) {
+		var missing []string
+		for _, record := range records {
+			if !publishedCodes[record.Definition.Code] {
+				missing = append(missing, record.Definition.Code)
+			}
+		}
+		counterparts, err := server.deps.CatalogSearch.SearchActiveCodes(ctx, scope, missing)
+		if err != nil {
+			return nil, err
+		}
+		published = append(published, counterparts...)
+		for _, metric := range counterparts {
+			publishedCodes[metric.Name] = true
+		}
+	}
+	if principal.Has(PermissionManage) {
+		known := make(map[string]bool, len(records))
+		for _, record := range records {
+			known[record.Definition.Code] = true
+		}
+		var missing []string
+		for code := range publishedCodes {
+			if !known[code] {
+				missing = append(missing, code)
+			}
+		}
+		counterparts, err := server.deps.Governance.ListByCodes(ctx, namespace, missing)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, counterparts...)
+	}
+	entries := buildCatalogIndex(published, records)
+	if !principal.Has(PermissionManage) {
+		return entries, nil
+	}
+
+	// Draft execution fields come from the compiled semantic source, never
+	// from the governance record's possibly stale validation metadata.
+	wantedModels := make(map[string]bool)
+	for _, entry := range entries {
+		if entry.CatalogStatus == "draft" {
+			wantedModels[entry.ModelName] = true
+		}
+	}
+	drafts := make(map[string]application.MetricCatalogEntry)
+	for _, route := range server.config.UIModels {
+		if route.Namespace != namespace || !wantedModels[route.ModelName] {
+			continue
+		}
+		draft, err := server.deps.Catalog.GetDraft(ctx, namespace, route.ModelName)
+		if errors.Is(err, catalog.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		manifest, err := compiler.Compile(draft.Source)
+		if err != nil {
+			return nil, err
+		}
+		modelScope := scope
+		modelScope.ModelName = draft.Name
+		binding, err := server.deps.Bindings.ResolveBinding(ctx, modelScope, catalog.Release{
+			Namespace: namespace, Name: draft.Name, SourceRevision: draft.Revision,
+			Manifest: manifest, ManifestFingerprint: manifest.Fingerprint,
+		})
+		if err != nil && !errors.Is(err, application.ErrResolutionNotFound) {
+			return nil, err
+		}
+		for _, metric := range manifest.Definitions.Metrics {
+			details := application.CatalogDimensionDetails(manifest, binding, metric.AllowedDimensions)
+			var grains []model.TimeGranularity
+			for _, dimension := range details {
+				if dimension.Name == metric.TimeDimension {
+					grains = dimension.TimeGranularities
+				}
+			}
+			entry := application.MetricCatalogEntry{
+				Namespace: namespace, ModelName: draft.Name, Name: metric.Name, ExternalCode: metric.ExternalCode,
+				DisplayName: metric.DisplayName, Description: metric.Description, Owner: metric.Owner,
+				VerificationStatus: metric.Verification.Status, Tags: metric.Tags, UsageExamples: metric.UsageExamples,
+				Deprecated: metric.Deprecated, Entity: metric.Entity, Kind: metric.Kind, ValueType: metric.ValueType,
+				Unit: metric.Unit, Expression: metric.Expression, AllowedDimensions: metric.AllowedDimensions,
+				DimensionDetails: details, TimeDimension: metric.TimeDimension, TimeGranularities: grains,
+			}
+			drafts[metric.Name+"\x00"+draft.Name] = entry
+		}
+	}
+	for i := range entries {
+		entry := &entries[i]
+		if entry.CatalogStatus != "draft" {
+			continue
+		}
+		if draft, ok := drafts[catalogIndexKey(*entry)]; ok {
+			entry.MetricCatalogEntry = draft
+			delete(drafts, catalogIndexKey(*entry))
+		} else {
+			entry.CatalogStatus = "governance"
+		}
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return catalogIndexKey(entries[i]) < catalogIndexKey(entries[j]) })
+	return entries, nil
 }
 
 func buildCatalogIndex(published []application.MetricCatalogEntry, records []governance.MetricRecord) []CatalogIndexEntry {
@@ -329,7 +455,7 @@ func searchCatalogIndex(entries []CatalogIndexEntry, search string) []CatalogInd
 		fields := []string{entry.ExternalCode, entry.Name, entry.DisplayName, entry.Description, entry.Owner,
 			strings.Join(entry.Tags, " "), entry.FormulaSummary, entry.Origin, entry.CalculationKind, entry.GovernanceSearchText}
 		if entry.AuthoritativeSource != nil {
-			fields = append(fields, entry.AuthoritativeSource.Resource, entry.AuthoritativeSource.Field)
+			fields = append(fields, entry.AuthoritativeSource.Resource, entry.AuthoritativeSource.Field, entry.AuthoritativeSource.Reference)
 		}
 		for _, field := range fields {
 			if strings.Contains(strings.ToLower(field), query) {

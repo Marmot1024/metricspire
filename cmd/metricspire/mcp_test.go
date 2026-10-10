@@ -105,7 +105,11 @@ func mcpHTTP(t *testing.T, endpoint, token string) *mcp.ClientSession {
 	return session
 }
 
-func mcpCall(t *testing.T, session *mcp.ClientSession, name string, in, out any) {
+type mcpToolCaller interface {
+	CallTool(context.Context, *mcp.CallToolParams) (*mcp.CallToolResult, error)
+}
+
+func mcpCall(t *testing.T, session mcpToolCaller, name string, in, out any) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 35*time.Second)
 	defer cancel()
@@ -130,7 +134,7 @@ func mcpCall(t *testing.T, session *mcp.ClientSession, name string, in, out any)
 	t.Fatalf("%s returned no JSON content", name)
 }
 
-func mcpCallError(t *testing.T, session *mcp.ClientSession, name string, in any) string {
+func mcpCallError(t *testing.T, session mcpToolCaller, name string, in any) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 35*time.Second)
 	defer cancel()
@@ -210,6 +214,10 @@ func TestMCPRemoteStagingOAuthDiscovery(t *testing.T) {
 	if origin == "" {
 		t.Fatal("staging origin is required")
 	}
+	profile := os.Getenv("METRICSPIRE_MCP_TEST_AUTH_PROFILE")
+	if profile != "" && profile != "databricks_apps" && profile != "self_hosted" {
+		t.Fatal("auth profile must be databricks_apps or self_hosted")
+	}
 	client := &http.Client{
 		Timeout:       15 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
@@ -232,7 +240,10 @@ func TestMCPRemoteStagingOAuthDiscovery(t *testing.T) {
 		if response.StatusCode != http.StatusUnauthorized {
 			t.Errorf("anonymous MCP status=%d, want 401 without a login redirect", response.StatusCode)
 		}
-		if challenge := response.Header.Get("WWW-Authenticate"); !strings.HasPrefix(challenge, "Bearer ") || !strings.Contains(challenge, `resource_metadata="`+metadataURL+`"`) {
+		challenge := response.Header.Get("WWW-Authenticate")
+		if challenge == "" && profile == "databricks_apps" {
+			t.Log("Apps ingress omitted the authentication challenge: native OAuth/query acceptance remains required; discovery alone is not a pass for onboarding")
+		} else if !strings.HasPrefix(challenge, "Bearer ") || !strings.Contains(challenge, `resource_metadata="`+metadataURL+`"`) {
 			t.Errorf("anonymous MCP response has no matching Bearer resource_metadata challenge")
 		}
 	})
@@ -321,7 +332,7 @@ func TestMCPRemoteStagingTimeContractAcceptance(t *testing.T) {
 	}
 }
 
-func verifyMCPStagingAcceptance(t *testing.T, session *mcp.ClientSession, transport string) {
+func verifyMCPStagingAcceptance(t *testing.T, session mcpToolCaller, transport string) {
 	t.Helper()
 	var namespaces struct {
 		Namespaces []string `json:"namespaces"`
@@ -334,7 +345,7 @@ func verifyMCPStagingAcceptance(t *testing.T, session *mcp.ClientSession, transp
 		Metrics []application.MetricCatalogEntry `json:"metrics"`
 	}
 	mcpCall(t, session, "search_metrics", mcpbridge.SearchInput{Namespace: "acceptance", Search: "gross_revenue"}, &entries)
-	if len(entries.Metrics) != 1 || entries.Metrics[0].Name != "gross_revenue" || entries.Metrics[0].ModelName != "" {
+	if len(entries.Metrics) != 1 || entries.Metrics[0].Name != "gross_revenue" {
 		t.Fatal("unexpected metric discovery")
 	}
 	fixture := filepath.Join("..", "..", "testdata", "acceptance", "databricks-tpch")

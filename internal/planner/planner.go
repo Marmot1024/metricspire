@@ -513,7 +513,7 @@ func validateTimeGrouping(index manifestIndex, query *model.SemanticQuery) error
 	}
 	dimension := index.dimensions[grouping.Dimension]
 	if !slices.Contains(dimension.TimeGranularities, grouping.Granularity) {
-		return problem("invalid_time", "time_grouping.granularity", "dimension %q does not support %q", dimension.Name, grouping.Granularity)
+		return problem("invalid_time", "time_grouping.granularity", "dimension %q does not support %q; allowed granularities: %v", dimension.Name, grouping.Granularity, dimension.TimeGranularities)
 	}
 	if grouping.Granularity == model.GrainWeek {
 		if grouping.WeekStart != model.WeekStartMonday && grouping.WeekStart != model.WeekStartSunday {

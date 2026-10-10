@@ -83,6 +83,25 @@ func (repository *MemoryRepository) List(_ context.Context, namespace, search st
 	return result, nil
 }
 
+func (repository *MemoryRepository) ListByCodes(_ context.Context, namespace string, codes []string) ([]MetricRecord, error) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+	wanted := make(map[string]struct{}, len(codes))
+	for _, code := range codes {
+		wanted[code] = struct{}{}
+	}
+	result := make([]MetricRecord, 0)
+	for _, record := range repository.records {
+		if record.Namespace == namespace {
+			if _, ok := wanted[record.Definition.Code]; ok {
+				result = append(result, clone(record))
+			}
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Definition.Code < result[j].Definition.Code })
+	return result, nil
+}
+
 func (repository *MemoryRepository) GetImport(_ context.Context, namespace, id string) (ImportBatch, error) {
 	repository.mu.RLock()
 	defer repository.mu.RUnlock()
@@ -131,9 +150,8 @@ func (repository *MemoryRepository) RollbackImport(_ context.Context, namespace,
 }
 
 func recordMatches(record MetricRecord, search string) bool {
-	definition := record.Definition
-	text := strings.ToLower(strings.Join([]string{definition.Code, definition.DisplayName, definition.Description, definition.Owner, string(definition.BusinessType), string(definition.SemanticReadiness), strings.Join(definition.Issues, " ")}, " "))
-	return strings.Contains(text, search)
+	payload, err := json.Marshal(record.Definition)
+	return err == nil && strings.Contains(strings.ToLower(string(payload)), search)
 }
 
 func recordKey(namespace, code string) string { return namespace + "\x00" + code }

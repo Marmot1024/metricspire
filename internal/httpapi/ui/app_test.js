@@ -128,6 +128,15 @@ test("common authorization and time-grouping failures explain the recovery actio
   assert.match(errorMessage({detail: "grouped time dimensions require explicit grouping semantics", request_id: "req_2"}), /选择按日、按周或按月.*req_2/);
 });
 
+test("identity dependency failure offers recovery without a login loop", () => {
+  for (const status of [503, 504]) {
+    const message = errorMessage({code: "authentication_unavailable", status, request_id: "req_identity"});
+    assert.match(message, /身份验证服务暂时不可用.*稍后重试.*req_identity/);
+    assert.doesNotMatch(message, /重新登录|权限组/);
+  }
+  assert.match(errorMessage({code: "unauthenticated", status: 401}), /重新登录/);
+});
+
 test("publication issues are grouped by actionable cause instead of rendering an error wall", () => {
   const groups = groupPublicationIssues([
     'metric "revenue" is not verified', 'metric "orders" is not verified',
@@ -547,4 +556,72 @@ test("relative presets become explicit half-open absolute ranges", () => {
     start: "2026-07-31T16:00:00.000Z",
     end: "2026-08-31T16:00:00.000Z",
   });
+});
+
+
+test("a copied published aggregate gets an editable new identity", () => {
+  const {context, run} = editorContext();
+  context.window = {confirm: () => true};
+  run(`state.creatingMetric = false; state.metricIndex = 0;
+    state.review = {active_release: {id: 'rel_1'}, metric_changes: []};
+    state.draft.source.spec.metrics = [{name: 'revenue', display_name: 'Revenue', description: 'Order amount', owner: 'data-team', entity: 'orders', kind: 'aggregate',
+      expression: {op: 'sum', field: 'orders.amount'}, value_type: 'decimal',
+      allowed_dimensions: ['status'], verification: {status: 'verified'}}];
+    duplicateMetric()`);
+  assert.equal(context.document.getElementById("metric-code").value, "");
+  assert.equal(context.document.getElementById("metric-code").disabled, false);
+  assert.equal(run("metricIsPublished(state.draft.source.spec.metrics[0])"), true);
+  assert.equal(run("metricRegistryStatus(state.draft.source.spec.metrics[0])"), "线上");
+  context.document.getElementById("metric-code").value = "new_revenue";
+  assert.equal(run("metricFromEditor().name"), "new_revenue");
+});
+
+test("catalog reload discards cached and in-flight details from an old release", async () => {
+  const {context, run} = editorContext();
+  const summary = {namespace: 'demo', name: 'orders', semantic_model_name: 'commerce', summary: true};
+  context.metric = summary;
+  run("state.namespace = 'demo'; state.context = {permissions: ['query:execute']}; state.catalogView = [metric]");
+  let resolveOld;
+  context.requestJSON = (path) => path.includes('/detail?')
+    ? new Promise((resolve) => { resolveOld = resolve; })
+    : Promise.resolve({items: [{...summary, release_id: 'rel_new'}], counts: {published: 1}});
+  const oldDetail = run("loadMetricDetail(metric, state.metricDetailSequence)");
+  context.renderCatalog = () => {};
+  context.updateQueryBuilder = () => {};
+  await run("loadCatalog()");
+  resolveOld({...summary, summary: false, release_id: 'rel_old'});
+  await oldDetail;
+  assert.equal(run("state.metricDetailCache.size"), 0);
+  assert.equal(run("state.catalogView[0].release_id"), "rel_new");
+});
+
+test("catalog failure after a domain switch clears the old detail and recovers on explicit search", async () => {
+  const {context, run} = editorContext();
+  context.window = {confirm: () => true};
+  context.updateQueryBuilder = () => {};
+  context.initializeGovernanceRoutes = () => {};
+  context.document.getElementById("governance-workspace").hidden = true;
+  context.document.getElementById("metric-detail-empty").textContent = "正在加载旧业务域指标…";
+  run("state.namespace = 'old'; state.context = {permissions: ['query:execute'], models: []}");
+  let rejectPage;
+  context.requestJSON = () => new Promise((_, reject) => { rejectPage = reject; });
+  const switching = run("switchNamespace('acceptance')");
+  assert.match(context.document.getElementById("metric-detail-empty").textContent, /正在加载指标目录/);
+  rejectPage({code: "timeout", status: 504, request_id: "req_catalog_timeout"});
+  await switching;
+  const list = context.document.getElementById("catalog-list");
+  assert.match(list.children[0].textContent, /目录加载失败.*请求超时.*req_catalog_timeout.*点击搜索/);
+  assert.doesNotMatch(list.children[0].textContent, /没有找到/);
+  assert.match(context.document.getElementById("metric-detail-empty").textContent, /加载失败.*搜索重试/);
+  assert.equal(context.document.getElementById("metric-detail-content").hidden, true);
+  assert.doesNotMatch(context.document.getElementById("notice").textContent, /登录/);
+  let resolvePage;
+  context.requestJSON = () => new Promise((resolve) => { resolvePage = resolve; });
+  const retry = run("loadCatalog()");
+  assert.match(list.children[0].textContent, /正在搜索/);
+  assert.match(context.document.getElementById("metric-detail-empty").textContent, /正在加载指标目录/);
+  resolvePage({items: [], counts: {published: 0, draft: 0, governance: 0, total: 0}});
+  await retry;
+  assert.match(list.children[0].textContent, /没有找到/);
+  assert.match(context.document.getElementById("metric-detail-empty").textContent, /请选择/);
 });
