@@ -20,6 +20,33 @@ func TestOnlineConfigurationRequiresExplicitReviewedScopeAndBudgets(t *testing.T
 	if err := base.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	independent := valid
+	independent.Policies = []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: "commerce", Tenant: "demo", Path: "online-readers.yaml"}}
+	independentConfig := base
+	independentConfig.Online = &independent
+	if err := independentConfig.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		routes []runtimeconfig.PolicyRoute
+	}{
+		{"missing file", []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: "commerce", Tenant: "demo"}}},
+		{"different tenant", []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: "commerce", Tenant: "other", Path: "readers.yaml"}}},
+		{"different namespace", []runtimeconfig.PolicyRoute{{Namespace: "other", ModelName: "commerce", Tenant: "demo", Path: "readers.yaml"}}},
+		{"missing model policy", []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: "other", Tenant: "demo", Path: "readers.yaml"}}},
+		{"duplicate", []runtimeconfig.PolicyRoute{independent.Policies[0], independent.Policies[0]}},
+	} {
+		t.Run("online policy/"+test.name, func(t *testing.T) {
+			candidate := independent
+			candidate.Policies = test.routes
+			config := base
+			config.Online = &candidate
+			if err := config.Validate(); err == nil {
+				t.Fatal("invalid explicit online policy fell back to the analytical policy")
+			}
+		})
+	}
 	for _, test := range []struct {
 		name   string
 		change func(*runtimeconfig.OnlineConfig)

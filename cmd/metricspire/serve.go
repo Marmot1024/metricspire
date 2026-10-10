@@ -156,6 +156,17 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	onlineTimeout := httpapi.DefaultOnlineTimeout
 	var readiness httpapi.ReadinessChecker = store
 	if config.Online != nil {
+		onlinePolicyResolver := policyResolver
+		if len(config.Online.Policies) > 0 {
+			onlinePolicies, err := loadOnlinePolicies(filepath.Dir(*configPath), *config.Online)
+			if err != nil {
+				return err
+			}
+			onlinePolicyResolver, err = application.NewConfiguredPolicyResolver(onlinePolicies)
+			if err != nil {
+				return err
+			}
+		}
 		onlineBindings, err := loadOnlineBindings(filepath.Dir(*configPath), *config.Online)
 		if err != nil {
 			return err
@@ -209,7 +220,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 			}
 			return pool.Ping(ctx)
 		})
-		onlineQueries, err := application.NewQueryService(store, policyResolver, onlineResolver, onlineEngine, store)
+		onlineQueries, err := application.NewQueryService(store, onlinePolicyResolver, onlineResolver, onlineEngine, store)
 		if err != nil {
 			return err
 		}

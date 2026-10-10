@@ -43,6 +43,7 @@ type OnlineConfig struct {
 	Timeout        string              `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	MaxConcurrency int                 `json:"max_concurrency,omitempty" yaml:"max_concurrency,omitempty"`
 	Bindings       []BindingRoute      `json:"bindings" yaml:"bindings"`
+	Policies       []PolicyRoute       `json:"policies,omitempty" yaml:"policies,omitempty"`
 }
 
 type ReleasePolicyConfig struct {
@@ -143,9 +144,28 @@ func (config Config) Validate() error {
 		if _, err := ParseDuration(online.MaxDataAge, time.Minute); err != nil {
 			return errors.New("online.max_data_age must be a positive duration")
 		}
+		policyRoutes := config.Policies
+		if len(online.Policies) > 0 {
+			policyRoutes = online.Policies
+			seenPolicies := map[string]bool{}
+			for _, route := range policyRoutes {
+				key := route.Namespace + "\x00" + route.ModelName
+				if empty(route.Namespace, route.ModelName, route.Tenant, route.Path) || route.Tenant != online.Tenant || seenPolicies[key] {
+					return errors.New("online policy routes must be complete, unique and match the reviewed tenant")
+				}
+				seenPolicies[key] = true
+				allowed := false
+				for _, namespace := range online.Namespaces {
+					allowed = allowed || route.Namespace == namespace
+				}
+				if !allowed {
+					return errors.New("online policy requires an enabled namespace")
+				}
+			}
+		}
 		for _, namespace := range online.Namespaces {
 			found := false
-			for _, route := range config.Policies {
+			for _, route := range policyRoutes {
 				if route.Namespace == namespace && route.Tenant == online.Tenant {
 					found = true
 				}
@@ -165,7 +185,7 @@ func (config Config) Validate() error {
 			for _, namespace := range online.Namespaces {
 				allowed = allowed || binding.Namespace == namespace
 			}
-			for _, route := range config.Policies {
+			for _, route := range policyRoutes {
 				policy = policy || (route.Namespace == binding.Namespace && route.ModelName == binding.ModelName && route.Tenant == online.Tenant)
 			}
 			if !allowed || !policy {

@@ -181,6 +181,13 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited bool
 	if err := contractio.WriteJSON(filepath.Join(dir, "warehouse.json"), binding); err != nil {
 		t.Fatal(err)
 	}
+	var readerPolicy model.PolicySource
+	if err := contractio.ReadFile(filepath.Join(base, "reader-policy.yaml"), &readerPolicy); err != nil {
+		t.Fatal(err)
+	}
+	if err := contractio.WriteJSON(filepath.Join(dir, "reader-policy.json"), readerPolicy); err != nil {
+		t.Fatal(err)
+	}
 	config := runtimeconfig.Config{
 		APIVersion: runtimeconfig.APIVersion, Kind: runtimeconfig.Kind,
 		HTTP:           runtimeconfig.HTTPConfig{Address: "127.0.0.1:0", PublicURL: "http://127.0.0.1:3000"},
@@ -189,6 +196,7 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited bool
 		Bindings:       []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: source.Metadata.Name, Path: "warehouse.json"}},
 		Online:         &runtimeconfig.OnlineConfig{Tenant: "demo", Namespaces: []string{"demo"}, DataAccess: "tenant_shared", Resources: []model.ResourceRef{{Kind: model.ResourceTable, Schema: data, Table: "daily_sales"}}, MaxDataAge: "5m", Timeout: "1s", Bindings: []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: source.Metadata.Name, Path: "online.json"}}},
 	}
+	config.Online.Policies = []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: source.Metadata.Name, Tenant: "demo", Path: "reader-policy.json"}}
 	configPath := filepath.Join(dir, "runtime.json")
 	if err := contractio.WriteJSON(configPath, config); err != nil {
 		t.Fatal(err)
@@ -258,7 +266,7 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited bool
 		t.Fatalf("startup status: %#v", started)
 	}
 	baseURL := "http://" + started["address"]
-	token := onlineFixtureToken(t, key, map[string]any{"iss": issuer.URL, "aud": "fixture-api", "sub": "analyst", "tenant": "demo", "roles": []string{"analyst"}, "permissions": []string{"query:execute"}, "exp": time.Now().Add(time.Minute).Unix()})
+	token := onlineFixtureToken(t, key, map[string]any{"iss": issuer.URL, "aud": "fixture-api", "sub": "synthetic-online-reader", "tenant": "demo", "roles": []string{"analyst"}, "permissions": []string{"query:execute"}, "exp": time.Now().Add(time.Minute).Unix()})
 	call := func(path string, body any, bearer string) (int, []byte) {
 		t.Helper()
 		encoded, _ := json.Marshal(body)
@@ -285,10 +293,17 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited bool
 	if err := json.Unmarshal(body, &result); err != nil || len(result.Result.Rows) != 1 || result.Result.Columns[1].Name != "10001" || result.Snapshot.BatchID != "batch-1" {
 		t.Fatalf("invalid startup result: %s", body)
 	}
+	nonReader := onlineFixtureToken(t, key, map[string]any{"iss": issuer.URL, "aud": "fixture-api", "sub": "another-analyst", "tenant": "demo", "roles": []string{"analyst"}, "permissions": []string{"query:execute"}, "exp": time.Now().Add(time.Minute).Unix()})
+	if status, body := call("/api/v1/namespaces/demo/online-query", query, nonReader); status != 403 {
+		t.Fatalf("analyst role bypassed the online reader policy: %d %s", status, body)
+	}
 	analytical := model.SemanticQuery{APIVersion: model.APIVersion, Kind: model.KindSemanticQuery, Metrics: []string{"revenue"}, GroupBy: query.Dimensions, TimeRange: query.TimeRange, TimeGrouping: query.TimeGrouping, Limit: 10}
 	status, body = call("/api/v1/namespaces/demo/models/daily_sales/plan", analytical, token)
 	if status != 200 || !strings.Contains(string(body), `"engine":"`+databricks.EngineName+`"`) {
 		t.Fatalf("analytical route lost its binding: %d %s", status, body)
+	}
+	if status, body := call("/api/v1/namespaces/demo/models/daily_sales/plan", analytical, nonReader); status != 200 {
+		t.Fatalf("online reader restriction changed analytical permissions: %d %s", status, body)
 	}
 	if status, _ := call("/api/v1/namespaces/demo/online-query", query, "invalid"); status != 401 {
 		t.Fatalf("invalid OIDC token: %d", status)

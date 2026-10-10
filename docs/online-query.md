@@ -67,9 +67,18 @@ online:
     - namespace: demo
       model_name: daily_sales
       path: examples/online/binding.yaml
+  policies:
+    - namespace: demo
+      model_name: daily_sales
+      tenant: demo
+      path: examples/online/reader-policy.yaml
 ```
 
 Paths are relative to the runtime configuration file; adjust the example to its location. Online binding routes must match enabled namespaces and tenant policy routes and reference one allowlisted PostgreSQL table. Do not pin an online binding's optional `manifest_fingerprint` when description-only releases should remain usable without editing configuration.
+
+`online.policies` uses the existing `PolicySource` contract and evaluator, but is resolved independently from analytical policies. Explicit online allow rules must list authenticated principal IDs, metric names and dimension names; roles, wildcards and empty allowlists are rejected at startup. A missing explicit model route is never filled from the analytical policy. No new user directory, permission database or management UI is introduced. Update the reviewed configuration and restart to change grants; this is not a live permission-management API. For backward compatibility, portable OIDC configurations without `online.policies` retain their previously reviewed top-level policies. Those legacy role-based policies do **not** establish a restricted online reader list.
+
+The project enforces API access, not the company's entire entitlement system. Authentication supplies trusted caller identity; administrators approve the permitted snapshot, models, metrics and dimensions; PostgreSQL bounds the service account's physical reads. All approved readers of a `tenant_shared` snapshot must be entitled to the whole retained data scope. Metric/dimension allowlists are **not row-level authorization**: allowing `region` does not restrict its values, and a caller's filter is not a security boundary. If readers require different regions/player populations, do not enable that dataset through this shared path until mandatory row restrictions or separately isolated snapshots are reviewed. The service does not reproduce or synchronize Unity Catalog policies.
 
 `5m` is an example, not an agreed freshness requirement. `tenant_shared` explicitly acknowledges that authorized users query a tenant-level PostgreSQL snapshot; original Warehouse user-level row/column policies are **not automatically transferred**. This first slice only accepts portable OIDC, not Databricks Apps export authorization. Review the export and data access boundary before enabling any real dataset.
 
@@ -88,7 +97,7 @@ METRICSPIRE_ONLINE_TEST_DATABASE_URL='postgres://USER:PASSWORD@127.0.0.1:PORT/DI
   go test ./internal/httpapi -run TestOnlinePostgres -count=1 -timeout=120s
 ```
 
-To test the actual startup assembly, separate analytical/online routes and signed bearer-token verification against a synthetic local OIDC issuer, use the same disposable database with `go test ./cmd/metricspire -run TestServeOnlinePostgres -count=1 -timeout=60s`. Startup regression cases also require rejection of table UPDATE and column INSERT/UPDATE/REFERENCES, both directly granted and inherited. This fixture does not log in to Databricks or alter authorization profiles/caches. It is not acceptance of a real organization's OIDC configuration.
+To test the actual startup assembly, separate analytical/online routes and signed bearer-token verification against a synthetic local OIDC issuer, use the same disposable database with `go test ./cmd/metricspire -run TestServeOnlinePostgres -count=1 -timeout=60s`. Approved online readers succeed; an unlisted user with the same analytical role is denied online while retaining analytical planning access. Startup regression cases also require rejection of table UPDATE and column INSERT/UPDATE/REFERENCES, both directly granted and inherited. This fixture does not log in to Databricks or alter authorization profiles/caches. It is not acceptance of a real organization's OIDC configuration. Apps + online remains disabled until separately reviewed identity integration; adding an online policy does not remove that guard.
 
 The connection must be loopback and disposable: these tests create and drop their own schemas/roles and require a fixture administrator. To add one million synthetic rows, set `METRICSPIRE_ONLINE_LOAD_ROWS=1000000`. The load sample remains a selective indexed query, not a million-row aggregation benchmark. It reports 1/5/10/20 concurrent callers and includes HTTP, policy/planning and durable audit; it is not a production throughput or cost claim.
 
