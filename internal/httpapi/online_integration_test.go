@@ -235,13 +235,14 @@ func TestOnlinePostgresAppsIdentityAndReaderBoundary(t *testing.T) {
 	for _, test := range []struct {
 		name, token, identity string
 		status                int
+		code                  string
 	}{
-		{"allowed", "synthetic-allowed", "synthetic-online-reader", 200},
-		{"valid but not reader", "synthetic-denied", "synthetic-nonreader", 403},
-		{"disabled", "synthetic-disabled", "synthetic-online-reader", 401},
-		{"revoked or expired", "synthetic-invalid", "synthetic-online-reader", 401},
-		{"spoofed reader", "synthetic-denied", "synthetic-online-reader", 401},
-		{"missing token", "", "synthetic-online-reader", 401},
+		{"allowed", "synthetic-allowed", "synthetic-online-reader", 200, ""},
+		{"valid but not reader", "synthetic-denied", "synthetic-nonreader", 403, "permission_denied"},
+		{"disabled", "synthetic-disabled", "synthetic-online-reader", 403, "permission_denied"},
+		{"revoked or expired", "synthetic-invalid", "synthetic-online-reader", 401, "unauthenticated"},
+		{"spoofed reader", "synthetic-denied", "synthetic-online-reader", 401, "unauthenticated"},
+		{"missing token", "", "synthetic-online-reader", 401, "unauthenticated"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			encoded, _ := json.Marshal(f.query)
@@ -259,6 +260,14 @@ func TestOnlinePostgresAppsIdentityAndReaderBoundary(t *testing.T) {
 			body, _ := io.ReadAll(response.Body)
 			if response.StatusCode != test.status {
 				t.Fatalf("Apps boundary: status=%d want=%d", response.StatusCode, test.status)
+			}
+			if test.code != "" {
+				var problem struct {
+					Code string `json:"code"`
+				}
+				if err := json.Unmarshal(body, &problem); err != nil || problem.Code != test.code {
+					t.Fatalf("Apps boundary: problem code=%q want=%q", problem.Code, test.code)
+				}
 			}
 			if strings.Contains(string(body), "synthetic-allowed") || strings.Contains(string(body), "synthetic-denied") {
 				t.Fatal("response exposed a forwarded token")
