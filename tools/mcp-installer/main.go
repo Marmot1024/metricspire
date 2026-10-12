@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marmot1024/metricspire/internal/codexmcp"
+
 	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/term"
 )
@@ -159,8 +161,21 @@ func run(args []string, out io.Writer) error {
 	} else {
 		return errors.New("Codex 无法确认原生 OAuth 状态；已停止，未登录或更改权限")
 	}
-	fmt.Fprintln(out, "请打开新的 Codex 会话，发送：使用 MetricSpire，调用 list_namespaces 验证连接。")
-	fmt.Fprintln(out, "工具接入以该调用成功为准。")
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	client, err := codexmcp.Start(ctx, codex, home, codexEnvironment(codexHome))
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if _, err := client.Verify(codexmcp.RequiredTools); err != nil {
+		return err
+	}
+	if _, err := client.Namespaces(); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "原生 MCP 初始化、7 个基础工具和 list_namespaces 实际调用验证通过。")
+	fmt.Fprintln(out, "此检查使用新的验证连接；已打开的 Codex 会话需重连后确认工具状态。")
 	return nil
 }
 

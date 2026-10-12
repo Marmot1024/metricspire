@@ -31,6 +31,26 @@ elif args == ['mcp', 'login', 'metricspire']:
     if os.environ.get('FAKE_DENY'):
         print('OAuth denied', file=sys.stderr); sys.exit(1)
     (root / 'logged-in').write_text('fixture; no token')
+elif args == ['app-server', '--listen', 'stdio://']:
+    tools = ['list_namespaces','search_metrics','explain_query','plan_query','submit_query','get_query','cancel_query']
+    if os.environ.get('FAKE_MISSING_TOOL'): tools.remove('get_query')
+    for line in sys.stdin:
+        request = json.loads(line)
+        if 'id' not in request: continue
+        method = request['method']
+        if method == 'initialize': result = {}
+        elif method == 'mcpServerStatus/list':
+            result = dict(data=[dict(name='metricspire', authStatus='oAuth',
+                toolsError='HTTP 401 secret-marker' if os.environ.get('FAKE_HANDSHAKE_FAIL') else None,
+                serverInfo=dict(name='metricspire',version='fixture'),tools={x:{} for x in tools})])
+        elif method == 'thread/start': result = dict(thread=dict(id='ephemeral-test'))
+        elif method == 'mcpServer/tool/call':
+            assert request['params']['tool'] == 'list_namespaces'
+            with (root / 'verified-tools').open('a') as calls: calls.write('list_namespaces\n')
+            result = dict(isError=bool(os.environ.get('FAKE_TOOL_FAIL')),
+                          structuredContent=dict(namespaces=[] if os.environ.get('FAKE_EMPTY') else ['acceptance']))
+        else: sys.exit(3)
+        print(json.dumps(dict(id=request['id'],result=result)), flush=True)
 else:
     sys.exit(2)
 '''
@@ -114,6 +134,7 @@ class InstallerTest(unittest.TestCase):
             self.assertEqual(self.config.read_bytes(), original)
             self.assertEqual(self.config.stat().st_mtime_ns, stat.st_mtime_ns)
         self.assertEqual(self.calls().count(["mcp", "login", "metricspire"]), 1)
+        self.assertEqual((self.home / 'verified-tools').read_text().splitlines(), ['list_namespaces'] * 3)
         self.assertEqual(list(self.home.glob("metricspire-install.*")), [])
 
     def test_no_login_then_repeat_does_not_reauthorize(self):
@@ -128,6 +149,21 @@ class InstallerTest(unittest.TestCase):
                                 stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue(self.config.exists())
+        self.assert_no_login()
+
+    def test_saved_oauth_is_not_a_connection_success(self):
+        self.run_file('--no-login')
+        (self.home / 'logged-in').write_text('fixture; no token')
+        original = self.config.read_bytes()
+        for flag in ('FAKE_HANDSHAKE_FAIL','FAKE_MISSING_TOOL','FAKE_TOOL_FAIL','FAKE_EMPTY'):
+            with self.subTest(flag=flag):
+                self.env[flag] = '1'
+                result = self.run_file('--check')
+                del self.env[flag]
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn(b'secret-marker', result.stdout + result.stderr)
+                self.assertNotIn('实际调用验证通过'.encode(), result.stdout)
+                self.assertEqual(self.config.read_bytes(), original)
         self.assert_no_login()
 
     def test_denied_login_stops_and_repeat_does_not_retry(self):

@@ -14,7 +14,10 @@ import (
 	"github.com/marmot1024/metricspire/internal/planner"
 )
 
-const version = "0.1.0-dev"
+// Release packaging sets this to 0.1.0-dev+<full commit> using -X.
+// MCP initialize reports the same value, allowing the native client to attest
+// the executable actually receiving traffic.
+var version = "0.1.0-dev"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {

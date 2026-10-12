@@ -1,0 +1,25 @@
+{
+  "api_version": "metricspire.io/v1alpha1",
+  "kind": "AnalysisCatalog",
+  "metadata": {"name": "public_calendar_acceptance", "version": "1"},
+  "namespace": "acceptance",
+  "tenant": "acceptance",
+  "datasets": [{
+    "name": "calendar",
+    "resource": {"kind": "table", "catalog": "samples", "schema": "tpcds_sf1", "table": "date_dim"},
+    "fields": [{"name": "day", "column": "d_date", "type": "date", "calendar_timezone": "UTC"}]
+  }],
+  "attributes": [{"name": "day", "dataset": "calendar", "field": "day"}],
+  "sources": [{
+    "name": "calendar_acceptance",
+    "description": "Public TPC-DS calendar acceptance; not a business data source",
+    "dataset": "calendar", "dimensions": ["day"], "roles": ["analyst"],
+    "max_window_days": 28, "max_rows": 20, "timeout": 60000000000
+  }],
+  "policy": {
+    "api_version": "metricspire.io/v1alpha1", "kind": "PolicySource",
+    "metadata": {"name": "calendar_acceptance_read", "version": "1"},
+    "tenant": "acceptance",
+    "rules": [{"name": "calendar_read", "effect": "allow", "roles": ["analyst"], "dimensions": ["day"]}]
+  }
+}
