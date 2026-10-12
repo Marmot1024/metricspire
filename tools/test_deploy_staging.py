@@ -5,10 +5,31 @@ import tempfile
 import tarfile
 import unittest
 
-from tools.deploy_staging import preserve_config, extract_source
+from tools.deploy_staging import preserve_config, extract_source, configure_exploration
 
 
 class PreserveConfigTest(unittest.TestCase):
+    def test_repeat_release_preserves_catalog_and_cannot_skip_analysis_acceptance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); (root/'config').mkdir()
+            runtime=root/'config/runtime.json'
+            runtime.write_text(json.dumps({'authentication':{'databricks_apps':{'tenant':'acceptance'}}}))
+            catalog=root/'catalog.json'
+            catalog.write_text(json.dumps({'namespace':'acceptance','tenant':'acceptance'}))
+            configure_exploration(root,'acceptance',catalog,'warehouse',True)
+            original=runtime.read_bytes()
+            for path in (catalog,None):
+                configure_exploration(root,'acceptance',path,'warehouse',True)
+                self.assertEqual(runtime.read_bytes(),original)
+                with self.assertRaises(RuntimeError):
+                    configure_exploration(root,'acceptance',path,'warehouse',False)
+            with self.assertRaises(RuntimeError):
+                configure_exploration(root,'acceptance',catalog,'different',True)
+            catalog.write_text(json.dumps({'namespace':'acceptance','tenant':'other'}))
+            with self.assertRaises(RuntimeError):
+                configure_exploration(root,'acceptance',catalog,'warehouse',True)
+            self.assertEqual(runtime.read_bytes(),original)
+
     def test_source_archive_cannot_escape_or_link(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
