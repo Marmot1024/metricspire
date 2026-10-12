@@ -17,6 +17,14 @@ The test checks the origin, OAuth status and seven tools on the same connection,
 
 Optional inputs: `METRICSPIRE_MCP_TEST_SERVER` (default `metricspire`) and `METRICSPIRE_MCP_TEST_CODEX_BIN` (default `codex`). The runner uses the [Codex app-server protocol](https://learn.chatgpt.com/docs/app-server) as verified with version 0.162.0; missing `httpOrigin` fails before submission. Other clients need their own acceptance. A test process does not establish the state of another open user window.
 
+## Deployment gate
+
+`tools/deploy_staging.py` packages an explicit reviewed commit, preserves the active deployment's frozen configuration and runs `tools/release-gate` before and after deployment. Management uses the existing Databricks CLI profile; data queries use the configured native Codex MCP connection. Run `python3 tools/deploy_staging.py --help` for required target and identity parameters.
+
+The post-deployment gate checks App scopes against OAuth resource/issuer metadata, requires the MCP server version to match the full target commit, verifies tools, then plans/submits/polls a fixture and compares the complete typed result. Configured exploration additionally requires its own query and expected-result fixture. Failed preflight stops before deployment. Failed post-deployment acceptance attempts to restore the previous frozen package only if this release is still active, then checks the restored query path. The rollback path still needs a real failure-injection acceptance.
+
+These gates verify current access, not token renewal. A deferred refresh issue must remain explicitly open even if a temporary login lets all functional checks pass.
+
 ## Lifecycle checks
 
 | Case | Required evidence |

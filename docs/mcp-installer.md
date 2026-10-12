@@ -10,9 +10,11 @@ Requires Codex CLI 0.162.0+ on PATH and macOS/Linux (arm64 or amd64). No reposit
 
 A new connection run from an interactive terminal opens Codex's native OAuth login once, using the provider's default scopes. Non-interactive input (including `/dev/null`) never starts login. Existing matching connections and skills stay unchanged. Conflicting parameters, disabled connections and custom skills stop with a specific message. Rerunning the installer never automatically reauthorizes an existing connection. If Codex explicitly requires login, use `codex mcp login metricspire`; the installer does not logout, clear caches or expand scopes.
 
+Before reporting success, the installer starts a native Codex MCP verification connection, checks initialization and all seven core tools, then actually calls `list_namespaces`. A handshake, tool-loading or namespace-call failure returns a nonzero status even when OAuth authorization is saved. This check does not execute a metric query or prove post-expiry renewal.
+
 After setup, open a fresh Codex session and ask: **使用 MetricSpire，调用 list_namespaces 验证连接。** The installed skill guides discovery and query execution. A saved OAuth record or browser callback does not prove tool access, query results or silent token renewal; validate those separately. A sandboxed diagnostic process may not share the normal client's credential access.
 
-`--no-login` installs only configuration and skill. `--check` checks without writing files or logging in. Both return a nonzero status when login is not confirmed. The skill is installed at `~/.agents/skills/metricspire/SKILL.md`; connection settings use `${CODEX_HOME:-~/.codex}/config.toml`. No global memory or AGENTS file is changed.
+`--no-login` installs configuration and skill without initiating login. `--check` checks without writing files or logging in. Both perform the native connection check when saved OAuth authorization is available and return a nonzero status if authorization or that check fails. The skill is installed at `~/.agents/skills/metricspire/SKILL.md`; connection settings use `${CODEX_HOME:-~/.codex}/config.toml`. No global memory or AGENTS file is changed.
 
 ## Build and distribute
 
