@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -175,5 +176,33 @@ func TestAnalysisRetainsLargeIntegerExactly(t *testing.T) {
 	}
 	if !bytes.Contains(encoded, []byte("9007199254740993")) || bytes.Contains(encoded, []byte("9007199254740992")) {
 		t.Fatal("integer result rounded during storage or public projection")
+	}
+}
+
+func TestAnalysisNonFiniteResultsFailBeforeSuccessAudit(t *testing.T) {
+	for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		recorder := audit.NewMemoryRecorder()
+		service, in := analysisServiceFixture(t, analysisEngineFunc(func(_ context.Context, p exploration.Plan) (model.ExecutionSnapshot, error) {
+			out := analysisSuccess(p)
+			out.Result.Rows = [][]any{make([]any, len(p.Columns))}
+			for i, c := range p.Columns {
+				if c.Type == model.DataTypeDecimal {
+					out.Result.Rows[0][i] = value
+				}
+			}
+			return out, nil
+		}), recorder, false, time.Minute)
+		jobs, _ := application.NewAnalysisJobs(service, 1, 2, time.Minute)
+		job, err := jobs.Submit(context.Background(), in)
+		if err != nil {
+			jobs.Close()
+			t.Fatal(err)
+		}
+		snapshot := awaitAnalysis(t, jobs, in, job.ID)
+		jobs.Close()
+		events := recorder.Events()
+		if snapshot.Status != model.JobFailed || snapshot.Output != nil || len(events) != 2 || events[1].Kind != audit.EventQueryFailed || events[1].ErrorCode != snapshot.ErrorCode {
+			t.Fatal("unserializable result disagrees with terminal audit")
+		}
 	}
 }

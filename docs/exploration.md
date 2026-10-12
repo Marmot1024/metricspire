@@ -52,7 +52,7 @@ Warehouse permissions remain authoritative.
 `AnalysisQuery` selects a logical `source` and registered attributes. Required
 `time_range` uses a root DATE field, local-midnight RFC3339 bounds and its
 business timezone, with inclusive start and exclusive end. Week grouping
-starts on Monday. The [schema](../internal/exploration/query.schema.json) and
+starts on Monday; its dimension must be in the first-stage `group_by`. The [schema](../internal/exploration/query.schema.json) and
 [request](../testdata/exploration/direct-query.json) describe the operators:
 
 - Row `where` and conditional measures; `count`, `count_distinct`, `sum`,
@@ -74,7 +74,9 @@ analysis. Common business workflows belong in external semantics.
 The planner follows explicit directed paths, at most eight joins, with complete
 composite keys. Targets must match at most one row. Target aggregation prevents
 fanout; duplicate matches reject the query. Missing matches preserve NULL or
-reject according to configuration. Source and request row filters define the population before match checks.
+reject according to configuration. Root-row conditions define the population before match checks. Conditions on
+joined attributes run after cardinality checks, so ambiguous labels cannot be
+hidden by filtering an arbitrarily selected value.
 No arbitrary caller-provided JOIN.
 
 Exact DATE snapshots support `same_day`, `week_start`, and `week_end`, anchored

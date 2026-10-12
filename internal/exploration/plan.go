@@ -103,6 +103,9 @@ func ValidateRequest(q Query, s Source, rc model.RequestContext) error {
 	if ae != nil || be != nil || ze != nil || q.TimeRange.Timezone == "" || !a.Before(b) || b.After(a.In(loc).AddDate(0, 0, s.MaxWindowDays)) {
 		return invalid("time_range", "invalid range or source window budget exceeded")
 	}
+	if q.TimeGrouping != nil && !slices.Contains(q.GroupBy, q.TimeGrouping.Dimension) {
+		return invalid("time_grouping", "time grouping dimension must be a first-stage group")
+	}
 	if q.TimeGrouping != nil && q.TimeGrouping.WeekStart == model.WeekStartSunday {
 		return invalid("time_grouping", "initial analysis contract uses Monday weeks")
 	}

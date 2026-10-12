@@ -55,7 +55,7 @@ func TestAnalysisRealMCPDatabricks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"staged", "temporary_condition", "missing_null", "missing_error", "duplicate_error", "excluded_missing"} {
+	for _, mode := range []string{"staged", "temporary_condition", "missing_null", "missing_error", "duplicate_error", "excluded_missing", "duplicate_filtered"} {
 		t.Run(mode, func(t *testing.T) {
 			f := realCalendarFixture(t)
 			switch mode {
@@ -72,6 +72,9 @@ func TestAnalysisRealMCPDatabricks(t *testing.T) {
 				f.catalog.Relationships[0].Keys = []exploration.JoinKey{{From: "key", To: "key"}}
 				f.catalog.Relationships[0].Missing = "error"
 				f.query.Where = &exploration.Expression{Op: "eq", Args: []exploration.Expression{{Op: "weekday", Args: []exploration.Expression{{Op: "ref", Ref: "day"}}}, {Op: "literal", Type: model.DataTypeInteger, Value: "6"}}}
+			case "duplicate_filtered":
+				f.catalog.Relationships[0].Snapshot = nil
+				f.query.Where = &exploration.Expression{Op: "eq", Args: []exploration.Expression{{Op: "ref", Ref: "snapshot_date"}, {Op: "literal", Type: model.DataTypeDate, Value: "1999-08-08"}}}
 			case "duplicate_error":
 				f.catalog.Relationships[0].Snapshot = nil
 			}
@@ -97,7 +100,7 @@ func TestAnalysisRealMCPDatabricks(t *testing.T) {
 					t.Fatal("result decoding failed")
 				}
 			}
-			if mode == "missing_error" || mode == "duplicate_error" {
+			if mode == "missing_error" || mode == "duplicate_error" || mode == "duplicate_filtered" {
 				wantCode := "analysis_duplicate_match"
 				if mode == "missing_error" {
 					wantCode = "analysis_missing_match"

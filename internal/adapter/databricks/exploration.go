@@ -123,6 +123,7 @@ func CompileAnalysis(p exploration.Plan) (Statement, error) {
 	if err != nil {
 		return Statement{}, err
 	}
+	joinedPredicates := []string{}
 	for _, f := range p.Base.Filters {
 		d := dimensions[f.Dimension]
 		col, err := ec.dimensionColumn(d)
@@ -133,7 +134,11 @@ func CompileAnalysis(p exploration.Plan) (Statement, error) {
 		if err != nil {
 			return Statement{}, err
 		}
-		predicates = append(predicates, predicate)
+		if d.Entity == p.Base.Root.Entity {
+			predicates = append(predicates, predicate)
+		} else {
+			joinedPredicates = append(joinedPredicates, predicate)
+		}
 	}
 	builder := analysisSQL{parameters: ec, rawRefs: map[string]string{}}
 	for name, dimension := range dimensions {
@@ -143,19 +148,57 @@ func CompileAnalysis(p exploration.Plan) (Statement, error) {
 		}
 		builder.rawRefs[name] = col
 	}
+	var joined func(exploration.Expression) bool
+	joined = func(e exploration.Expression) bool {
+		if e.Op == "ref" && dimensions[e.Ref].Entity != p.Base.Root.Entity {
+			return true
+		}
+		for _, a := range e.Args {
+			if joined(a) {
+				return true
+			}
+		}
+		return false
+	}
+	var addCondition func(exploration.Expression) error
+	addCondition = func(e exploration.Expression) error {
+		// Only AND can be split without changing meaning. A mixed OR/CASE
+		// must wait for verified associations before inspecting joined values.
+		if e.Op == "and" {
+			for _, a := range e.Args {
+				if err := addCondition(a); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		sql, err := builder.expression(e)
+		if err != nil {
+			return err
+		}
+		if joined(e) {
+			joinedPredicates = append(joinedPredicates, "("+sql+")")
+		} else {
+			predicates = append(predicates, "("+sql+")")
+		}
+		return nil
+	}
 	for _, condition := range []*exploration.Expression{p.Source.FixedFilter, p.Query.Where} {
 		if condition != nil {
-			sql, err := builder.expression(*condition)
-			if err != nil {
+			if err := addCondition(*condition); err != nil {
 				return Statement{}, err
 			}
-			predicates = append(predicates, "("+sql+")")
 		}
 	}
 	population := strings.Join(predicates, " AND ")
 	if len(guards) > 0 {
-		// CASE enforces short-circuiting: excluded rows cannot trigger match errors.
-		population = "CASE WHEN " + population + " THEN " + strings.Join(guards, " AND ") + " ELSE FALSE END"
+		afterMatch := "TRUE"
+		if len(joinedPredicates) > 0 {
+			afterMatch = strings.Join(joinedPredicates, " AND ")
+		}
+		// Root filters exclude rows first. Joined predicates must not inspect
+		// MAX-collapsed values until every cardinality guard has succeeded.
+		population = "CASE WHEN " + population + " THEN CASE WHEN " + strings.Join(guards, " AND ") + " THEN " + afterMatch + " ELSE FALSE END ELSE FALSE END"
 	}
 	builder.rawRefs = nil
 	builder.current = "SELECT " + strings.Join(selects, ", ") + " FROM " + root + " AS t0 " + strings.Join(joins, " ") + " WHERE " + population

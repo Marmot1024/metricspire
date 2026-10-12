@@ -30,10 +30,14 @@ func TestAnalysisDirectSourceMultiTableOracle(t *testing.T) {
 	if err != nil {
 		t.Skip("Python numerical oracle unavailable")
 	}
-	for _, mode := range []string{"normal", "same_day", "week_start", "duplicate", "missing_error", "composite", "temporary_condition", "staged_customers", "excluded_fixed", "excluded_where"} {
+	for _, mode := range []string{"normal", "same_day", "week_start", "duplicate", "missing_error", "composite", "temporary_condition", "staged_customers", "excluded_fixed", "excluded_where", "duplicate_filter", "duplicate_where"} {
 		t.Run(mode, func(t *testing.T) {
 			c, q, rc := directFixture(t)
 			switch mode {
+			case "duplicate_filter":
+				q.Filters = []model.Filter{{Dimension: "tier", Operator: model.FilterEqual, Values: []string{"end1"}}}
+			case "duplicate_where":
+				q.Where = &exploration.Expression{Op: "eq", Args: []exploration.Expression{{Op: "ref", Ref: "tier"}, {Op: "literal", Type: model.DataTypeString, Value: "end1"}}}
 			case "same_day", "week_start":
 				c.Relationships[0].Snapshot.Anchor = mode
 			case "excluded_fixed", "excluded_where":
@@ -150,6 +154,7 @@ func TestAnalysisInternalAttributesStayOutOfResults(t *testing.T) {
 				}}}}
 				q.Summarize.GroupBy = []string{"derived"}
 			case "numeric_extreme":
+				q.TimeGrouping = nil
 				q.GroupBy = nil
 				q.Measures = []exploration.Measure{{Name: "sensitive", Op: "max", Field: "amount"}}
 				q.Summarize = nil
@@ -234,5 +239,14 @@ func TestAnalysisPlansCombinedParameterBudget(t *testing.T) {
 	q.Filters[9].Values = append(q.Filters[9].Values, "books")
 	if _, err := exploration.PlanCatalog(c, q, rc); err == nil {
 		t.Fatal("over-budget query was accepted before execution")
+	}
+}
+
+func TestAnalysisRejectsUnusedTimeGrouping(t *testing.T) {
+	c, q, rc := directFixture(t)
+	q.GroupBy = []string{"tier"}
+	q.OrderBy = nil
+	if _, err := exploration.PlanCatalog(c, q, rc); err == nil {
+		t.Fatal("unused time grouping silently accepted")
 	}
 }

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -245,6 +246,11 @@ func validateAnalysisResult(p exploration.Plan, result model.ExecutionSnapshot) 
 		if len(row) != len(p.Columns) {
 			return errors.New("analysis result row width mismatch")
 		}
+	}
+	// Warehouse DOUBLE values can include NaN/Infinity. Detect every JSON
+	// serialization failure before sealing the outcome and recording success.
+	if _, err := json.Marshal(result); err != nil {
+		return errors.New("analysis result is not JSON serializable")
 	}
 	return nil
 }

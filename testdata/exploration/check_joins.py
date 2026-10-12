@@ -26,8 +26,8 @@ INSERT INTO labels VALUES ('p','2026-08-03','start1','east'),('p','2026-08-06','
 INSERT INTO items VALUES ('i','x'),('j','y');
 INSERT INTO categories VALUES ('x','books'),('y','games');
 ''')
-if mode == 'duplicate':
-    db.execute("INSERT INTO labels VALUES ('p','2026-08-09','conflicting','east')")
+if mode in ('duplicate', 'duplicate_filter', 'duplicate_where'):
+    db.execute("INSERT INTO labels VALUES ('p','2026-08-09','zz_conflicting','east')")
 if mode == 'composite':
     db.execute("INSERT INTO labels VALUES ('p','2026-08-09','other_region','west')")
 if mode == 'excluded_fixed':
@@ -42,7 +42,7 @@ for p in payload['statement']['parameters']:
     elif p['type'] == 'BIGINT': v = int(v)
     elif p['type'].startswith('DECIMAL'): v = float(v)
     params[p['name']] = v
-if mode in ('duplicate','missing_error'):
+if mode in ('duplicate','missing_error','duplicate_filter','duplicate_where'):
     try: list(db.execute(payload['statement']['statement'],params))
     except sqlite3.OperationalError: print('rejected ambiguous or missing match'); sys.exit(0)
     raise AssertionError('bad relation returned data')
