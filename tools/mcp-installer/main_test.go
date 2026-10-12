@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"fmt"
+	"github.com/marmot1024/metricspire/internal/cliauth"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,9 +13,13 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-var testConnection = connection{
-	URL: "https://metrics.example.invalid/api/v1/mcp", ClientID: "public-test-client",
-	CallbackURL: "http://127.0.0.1/callback/test", CallbackPort: 43127,
+var testConnection = connection{URL: "https://metrics.example.invalid/api/v1/mcp", WorkspaceHost: "https://workspace.example.invalid", Helper: "installed --headers"}
+
+func localConnection(t *testing.T) connection {
+	c := testConnection
+	c.HelperPath = filepath.Join(t.TempDir(), "helper")
+	c.HelperData = []byte("fixture executable")
+	return c
 }
 
 func TestConfigurePreservesAndRejectsConflicts(t *testing.T) {
@@ -32,29 +39,19 @@ func TestConfigurePreservesAndRejectsConflicts(t *testing.T) {
 	if err != nil || created || !bytes.Equal(repeated, next) {
 		t.Fatal("repeat changed matching configuration")
 	}
-	for name, change := range map[string]string{
-		"url": "https://other.example.invalid/api/v1/mcp", "client": "other-client",
-		"callback": "http://127.0.0.1/callback/other", "port": "different",
-	} {
-		t.Run(name, func(t *testing.T) {
-			c := testConnection
-			switch name {
-			case "url":
-				c.URL = change
-			case "client":
-				c.ClientID = change
-			case "callback":
-				c.CallbackURL = change
-			case "port":
-				c.CallbackPort++
-			}
-			if _, _, err := configure(next, c); err == nil {
-				t.Fatal("conflict accepted")
-			}
-		})
+	for _, change := range []string{"url", "helper"} {
+		c := testConnection
+		if change == "url" {
+			c.URL = "https://other.example.invalid/api/v1/mcp"
+		} else {
+			c.Helper = "other"
+		}
+		if _, _, err := configure(next, c); err == nil {
+			t.Fatal("conflict accepted")
+		}
 	}
-	for _, extra := range []string{"enabled = false\n", "bearer_token_env_var = 'TOKEN'\n", "http_headers = {}\n", "http_headers_helper = 'custom'\n", "command = 'custom'\n"} {
-		dangerous := bytes.Replace(next, []byte("[mcp_servers.metricspire]\n"), []byte("[mcp_servers.metricspire]\n"+extra), 1)
+	for _, extra := range []string{"enabled = false\n", "bearer_token_env_var = 'TOKEN'\n", "http_headers = {}\n", "oauth = {}\n", "command = 'custom'\n"} {
+		dangerous := bytes.Replace(next, []byte("[mcp_servers.metricspire-cli]\n"), []byte("[mcp_servers.metricspire-cli]\n"+extra), 1)
 		if _, _, err := configure(dangerous, testConnection); err == nil {
 			t.Fatalf("accepted incompatible option %s", extra)
 		}
@@ -67,6 +64,7 @@ func TestConfigurePreservesAndRejectsConflicts(t *testing.T) {
 }
 
 func TestInstallPreflightRepeatAndCheck(t *testing.T) {
+	testConnection := localConnection(t)
 	dir := t.TempDir()
 	config := filepath.Join(dir, "codex", "config.toml")
 	skillFile := filepath.Join(dir, "skills", "metricspire", "SKILL.md")
@@ -159,11 +157,11 @@ func TestConnectionValidation(t *testing.T) {
 			t.Fatal("accepted unsafe URL")
 		}
 	}
-	for _, raw := range []string{"https://remote.example.invalid/callback", "http://127.0.0.1:12/callback", "http://127.0.0.1/callback?code=x"} {
+	for _, raw := range []string{"http://workspace.example.invalid", "https://workspace.example.invalid/path", "https://user:pass@workspace.example.invalid"} {
 		c := testConnection
-		c.CallbackURL = raw
+		c.WorkspaceHost = raw
 		if c.validate() == nil {
-			t.Fatal("accepted unsafe callback")
+			t.Fatal("accepted unsafe workspace")
 		}
 	}
 	for _, version := range []string{"codex-cli 0.162.0", "codex-cli 1.0.0\n"} {
@@ -181,5 +179,76 @@ func TestConnectionValidation(t *testing.T) {
 	c.URL = "https://secret-marker@example.invalid/mcp"
 	if err := c.validate(); err == nil || strings.Contains(err.Error(), "secret-marker") {
 		t.Fatal("unsafe error reporting")
+	}
+}
+
+func TestMigrateOAuthPreservesOtherSettings(t *testing.T) {
+	original := []byte("# personal\nmodel='example'\n[mcp_servers.metricspire]\nurl='https://metrics.example.invalid/api/v1/mcp'\n[mcp_servers.metricspire.oauth]\nclient_id='public'\n[mcp_servers.other]\ncommand='other'\n")
+	if _, _, err := configure(original, testConnection); err == nil {
+		t.Fatal("implicit migration")
+	}
+	c := testConnection
+	c.Migrate = true
+	next, changed, err := configure(original, c)
+	if err != nil || !changed {
+		t.Fatalf("migration: %v", err)
+	}
+	var config map[string]any
+	_ = toml.Unmarshal(next, &config)
+	servers := config["mcp_servers"].(map[string]any)
+	if servers["metricspire"].(map[string]any)["enabled"] != false || config["model"] != "example" {
+		t.Fatal("migration lost configuration")
+	}
+	if again, changed, err := configure(next, c); err != nil || changed || !bytes.Equal(again, next) {
+		t.Fatal("migration not idempotent")
+	}
+	c = localConnection(t)
+	c.Migrate = true
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	_ = os.WriteFile(path, original, 0600)
+	if _, err := install(path, filepath.Join(dir, "SKILL.md"), c, false); err != nil {
+		t.Fatal(err)
+	}
+	backups, _ := filepath.Glob(path + ".metricspire-backup-*")
+	if len(backups) != 1 {
+		t.Fatal("backup missing")
+	}
+	saved, _ := os.ReadFile(backups[0])
+	if !bytes.Equal(saved, original) {
+		t.Fatal("backup altered")
+	}
+}
+
+func TestExplicitManagedUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	data := []byte("previous managed binary")
+	oldPath := filepath.Join(dir, fmt.Sprintf("%x", sha256.Sum256(data)))
+	_ = os.WriteFile(oldPath, data, 0700)
+	c := testConnection
+	c.Profile = "team"
+	c.HelperPath = filepath.Join(dir, "new-version")
+	c.Helper = cliauth.Command(oldPath, c.Profile, c.WorkspaceHost)
+	original, _, err := configure(nil, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Helper = cliauth.Command(c.HelperPath, c.Profile, c.WorkspaceHost)
+	if _, _, err := configure(original, c); err == nil {
+		t.Fatal("implicit upgrade")
+	}
+	c.Upgrade = true
+	upgraded, changed, err := configure(original, c)
+	if err != nil || !changed || bytes.Equal(original, upgraded) {
+		t.Fatalf("managed upgrade failed: %v", err)
+	}
+	c.Profile = "another-user"
+	if _, _, err := configure(original, c); err == nil {
+		t.Fatal("changed profile accepted")
+	}
+	c.Profile = "team"
+	_ = os.WriteFile(oldPath, []byte("tampered"), 0700)
+	if _, _, err := configure(original, c); err == nil {
+		t.Fatal("tampered helper accepted")
 	}
 }

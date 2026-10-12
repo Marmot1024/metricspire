@@ -1,5 +1,5 @@
 // release-gate verifies a deployed App using management metadata and the user's
-// existing native MCP connection. Analytical calls never use CLI credentials.
+// existing Codex MCP connection. CLI supplies authentication; data calls stay MCP.
 package main
 
 import (
@@ -14,12 +14,14 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/marmot1024/metricspire/internal/cliauth"
 	"github.com/marmot1024/metricspire/internal/codexmcp"
 )
 
@@ -77,7 +79,8 @@ func main() {
 
 func run() error {
 	app := flag.String("app", "", "Databricks App name")
-	profile := flag.String("profile", "", "existing CLI profile (management only)")
+	profile := flag.String("profile", "", "existing CLI management profile")
+	authProfile := flag.String("auth-profile", "", "installed CLI U2M profile for MCP")
 	endpoint := flag.String("mcp-url", "", "expected native MCP endpoint")
 	issuer := flag.String("issuer", "", "expected OAuth issuer")
 	commit := flag.String("commit", "", "full deployed Git commit")
@@ -86,8 +89,8 @@ func run() error {
 	expectedFile := flag.String("expected", "", "exact TypedResult fixture including schema")
 	preflight := flag.Bool("preflight", false, "verify the old deployment before release; do not attest target revision")
 	flag.Parse()
-	if *app == "" || *profile == "" || *issuer == "" || *queryFile == "" || *expectedFile == "" || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(*commit) {
-		return errors.New("explicit App, profile, issuer, full commit and query/result fixtures required")
+	if *authProfile == "" || *app == "" || *profile == "" || *issuer == "" || *queryFile == "" || *expectedFile == "" || !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(*commit) {
+		return errors.New("explicit App, management/auth profiles, issuer, full commit and query/result fixtures required")
 	}
 	u, err := url.Parse(*endpoint)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "/api/v1/mcp" {
@@ -124,7 +127,7 @@ func run() error {
 	if err != nil {
 		return errors.New("cannot resolve user directory")
 	}
-	config := exec.CommandContext(ctx, "codex", "mcp", "get", "metricspire", "--json")
+	config := exec.CommandContext(ctx, "codex", "mcp", "get", cliauth.Server, "--json")
 	config.Dir = home
 	data, err = config.Output()
 	if err != nil {
@@ -141,8 +144,16 @@ func run() error {
 			Helper     any            `json:"http_headers_helper"`
 		} `json:"transport"`
 	}
-	if json.Unmarshal(data, &configured) != nil || !configured.Enabled || configured.Transport.Type != "streamable_http" || configured.Transport.URL != *endpoint || configured.Transport.Bearer != nil || len(configured.Transport.Headers) > 0 || len(configured.Transport.EnvHeaders) > 0 || configured.Transport.Helper != nil {
-		return errors.New("native MCP configuration is not the expected OAuth target")
+	if json.Unmarshal(data, &configured) != nil || !configured.Enabled || configured.Transport.Type != "streamable_http" || configured.Transport.URL != *endpoint || configured.Transport.Bearer != nil || len(configured.Transport.Headers) > 0 || len(configured.Transport.EnvHeaders) > 0 || configured.Transport.Helper == nil {
+		return errors.New("native MCP configuration is not the expected CLI helper target")
+	}
+	codexHome := os.Getenv("CODEX_HOME")
+	if codexHome == "" {
+		codexHome = filepath.Join(home, ".codex")
+	}
+	helper, err := cliauth.VerifyConfig(codexHome, *endpoint, *authProfile, strings.TrimSuffix(*issuer, "/oidc"))
+	if err != nil {
+		return err
 	}
 	query, err := os.ReadFile(*queryFile)
 	if err != nil {
@@ -158,11 +169,14 @@ func run() error {
 	if json.Unmarshal(query, &q) != nil || (q.Kind != "SemanticQuery" && q.Kind != "AnalysisQuery") {
 		return errors.New("unsupported acceptance query")
 	}
-	client, err := codexmcp.Start(ctx, "codex", home, os.Environ())
+	client, err := codexmcp.StartServer(ctx, "codex", home, os.Environ(), cliauth.Server, "unknown")
 	if err != nil {
 		return err
 	}
 	defer client.Close()
+	if err := client.VerifyConnection(*endpoint, helper); err != nil {
+		return err
+	}
 	required := slices.Clone(codexmcp.RequiredTools)
 	if q.Kind == "AnalysisQuery" {
 		required = append(required, "discover_analysis", "plan_analysis", "submit_analysis", "get_analysis", "cancel_analysis")

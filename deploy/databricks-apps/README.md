@@ -27,9 +27,9 @@ Serving does not migrate PostgreSQL. Run the separate, explicitly approved one-s
 
 The hosted Streamable HTTP MCP endpoint is `<app-origin>/api/v1/mcp`. Databricks Apps ingress authenticates the user; MetricSpire binds the managed identity to a current Databricks user and forwards that user's short-lived token **only** for SQL execution. The App service principal is not a substitute for end-user data permissions. Users need App `CAN USE` and appropriate Unity Catalog access; publication additionally requires the configured publisher group.
 
-A Databricks account administrator registers a **public OAuth client**, without a client secret, for each client's exact loopback redirect URI. Codex or Claude Code performs its own PKCE browser login and token management. The observed staging scope is `sql`; review the current platform metadata and requested scopes before deployment rather than copying a broad `all-apis` grant. A successful browser callback does not prove tool calls, user isolation, query execution, or refresh. See [MCP integration](../../docs/mcp.md) and [development status](../../docs/development-status.md).
+Local Codex CLI users should use the [single-file installer](../../docs/mcp-installer.md) with their existing Databricks CLI U2M profile. The CLI handles token refresh; a local header helper supplies authentication to native Codex MCP. This route needs no custom OAuth client. App and data permissions remain necessary.
 
-The optional local CLI-profile header helper under `tools/` is a fallback for local trials, not a prerequisite for URL-only OAuth. Do not store tokens in a repository config or commit generated `dist/` content.
+For URL-only OAuth clients, an administrator must register a public client with the exact redirect URI and validate renewal separately. Preserve existing registrations while migrating. The former implementation is available on `backup/native-oauth-20261012`; it is not the default local Codex route. Never mix OAuth and helper headers on one connection or commit credentials/generated packages.
 
 ## Optional online HTTP fixture
 

@@ -1,33 +1,32 @@
-# Single-file Codex installer
+# Codex CLI installer
 
-Send the environment-specific `metricspire-install.sh` file to colleagues. They run:
+Use local **Codex CLI 0.162.0+** and an existing **Databricks CLI U2M profile** for the App workspace. The user still needs App, warehouse and data permissions. No repository checkout, Go, Python, PAT or custom OAuth client is needed on the user's machine.
 
 ```sh
-sh ~/Downloads/metricspire-install.sh
+sh ~/Downloads/metricspire-install.sh --profile '<existing-profile>'
 ```
 
-Requires Codex CLI 0.162.0+ on PATH and macOS/Linux (arm64 or amd64). No repository, Go, Python, Databricks CLI or PAT is needed on the user's machine. The file contains a temporary setup helper, the public connection parameters and a short usage skill; it installs no query CLI or credential helper.
+The installer verifies the profile's workspace and user-authentication type, installs a content-addressed header helper and a short usage skill, configures `metricspire-cli`, then verifies native MCP initialization, seven core tools and an actual `list_namespaces` call. Saved authorization alone is not success. Codex may label helper authentication `unknown`; actual tool loading and calls determine connectivity. Open a fresh Codex session after installation.
 
-A new connection run from an interactive terminal opens Codex's native OAuth login once, using the provider's default scopes. Non-interactive input (including `/dev/null`) never starts login. Existing matching connections and skills stay unchanged. Conflicting parameters, disabled connections and custom skills stop with a specific message. Rerunning the installer never automatically reauthorizes an existing connection. If Codex explicitly requires login, use `codex mcp login metricspire`; the installer does not logout, clear caches or expand scopes.
+Databricks CLI owns OAuth storage, token acquisition and refresh. The helper only returns an in-memory Authorization header to Codex. It never logs in, stores tokens or queries data. Codex caches headers per connection and can refresh them after a same-origin POST receives 401/403; this does not make expired or revoked refresh grants permanent. See [Codex HTTP helpers](https://learn.chatgpt.com/docs/extend/mcp?surface=cli) and [Databricks U2M](https://docs.databricks.com/aws/en/dev-tools/auth/oauth-u2m).
 
-After setup, open a fresh Codex session and ask: **使用 MetricSpire，调用 list_namespaces 验证连接。** The installed skill guides discovery and query execution. A saved OAuth record or browser callback does not prove tool access, query results or silent token renewal; validate those separately. A sandboxed diagnostic process may not share the normal client's credential access.
+- `--check`: verify without changing installation files; normal CLI token refresh may still occur.
+- `--migrate-oauth`: back up and disable a matching old `metricspire` OAuth connection; preserve its configuration and credential cache. Upgrade only the recognized previous distributed skill. A separate connection name prevents old OAuth credentials from shadowing helper headers.
+- `--upgrade`: back up and replace an intact managed helper for the same workspace/profile; other settings stay unchanged.
+- Conflicting URLs, custom skills, mixed authentication or changed helper binaries stop without replacement. No automatic login, cache deletion or scope changes occur. If CLI authorization has actually expired, the user logs in to the same workspace/profile with `databricks auth login`.
 
-`--no-login` installs only configuration and skill. `--check` checks without writing files or logging in. Both return a nonzero status when login is not confirmed. The skill is installed at `~/.agents/skills/metricspire/SKILL.md`; connection settings use `${CODEX_HOME:-~/.codex}/config.toml`. No global memory or AGENTS file is changed.
+Configuration and helpers live under `${CODEX_HOME:-~/.codex}`; the skill is `~/.agents/skills/metricspire/SKILL.md`. Config backups are private adjacent files. Existing comments and unrelated settings are preserved. These helpers require a local Codex process, not a remote execution environment.
 
-## Build and distribute
+## Build
 
-Maintainers need Go and Python 3.9+. Use the exact callback base and port already registered for this MCP URL; registration is not performed by the installer. Follow the [Codex OAuth configuration](https://learn.chatgpt.com/docs/extend/mcp) and [skill discovery](https://learn.chatgpt.com/docs/build-skills) contracts.
+Maintainers need Go and Python 3.9+:
 
 ```sh
 python3 tools/build_mcp_installer.py \
   --url 'https://<app-origin>/api/v1/mcp' \
-  --client-id '<public-client-id>' \
-  --callback-url 'http://127.0.0.1/callback/<registered-callback-id>' \
-  --callback-port 43127
+  --workspace-host 'https://<workspace-host>'
 ```
 
-The builder packages four platforms and prints the whole-file SHA-256. Send that checksum alongside the file through a trusted channel; embedded payload checksums detect corruption, not a forged distributor. Generated files must stay in ignored `dist/`. Never package tokens, secrets, company semantic definitions, table mappings or business samples. The only accepted connection fields are the four public fields shown above.
+The file supports macOS/Linux arm64/amd64. Distribute its printed SHA-256 through a trusted channel. Only the two public addresses are packaged; keep generated `dist/`, credentials and company semantic assets out of Git. Cross-builds and fixture tests do not establish second-user or cross-platform runtime acceptance.
 
-The shell verifies and extracts its payload into a private temporary directory, runs the helper, then removes it. Configuration parsing preserves existing bytes and comments; new files are written through private temporary files. An installer lock and a pre-write comparison reject detected concurrent changes. Interrupted runs can leave the lock file: check that no installer is running before removing only `config.toml.metricspire-install.lock`. Do not remove OAuth caches.
-
-Local regression tests use disposable homes and a fake Codex, including a PTY for first login. Cross-platform builds are not cross-platform runtime acceptance. First login by a second real user and expiry/renewal remain [maintainer acceptance](mcp-native-acceptance.md) cases, never implied by fixture tests.
+The shell checks payload integrity and removes extraction files. Installation uses a lock and compares files before replacement. If interrupted, confirm no installer is running before removing only `config.toml.metricspire-install.lock`. Restore an adjacent config backup to return to the preserved OAuth setup; do not delete credential caches. Native OAuth code is retained on `backup/native-oauth-20261012`.

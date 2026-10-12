@@ -71,14 +71,14 @@ list_namespaces → search_metrics → explain_query → plan_query
                → submit_query → get_query / cancel_query
 ```
 
-各リクエストは個別に認証されます。Databricks Apps では事前登録済みの公開 OAuth クライアントに加え、利用者自身の App とデータへの権限が必要です。ブラウザーでのログイン成功だけではクエリの検証にはなりません。[MCP 接続](docs/mcp.md)に設定と安全上の制約、[開発状況](docs/development-status.md)に検証済みの範囲を記載しています（英語）。
+各リクエストは個別に認証されます。ローカル Codex はインストーラー経由で Databricks CLI のユーザー認証を利用します。利用者自身の App とデータへの権限が必要で、ログイン成功だけではクエリの検証にはなりません。[MCP 接続](docs/mcp.md)に設定と安全上の制約、[開発状況](docs/development-status.md)に検証済みの範囲を記載しています（英語）。
 
 ## ドキュメント
 
 | 文書（英語） | 内容 |
 | --- | --- |
 | [はじめに](docs/getting-started.md) | オフライン計画、ローカルカタログ、サービス設定と検証。 |
-| [MCP 接続](docs/mcp.md) | リモートツール、OAuth クライアント設定、ジョブの境界。 |
+| [MCP 接続](docs/mcp.md) | リモートツール、CLI 認証設定、ジョブの境界。 |
 | [アーキテクチャ](docs/architecture.md) | 意味論、ID、制御プレーン、エンジンアダプター。 |
 | [HTTP 契約](docs/http-api.md) | エンドポイント、権限、エラー、上限、監査。 |
 | [開発状況](docs/development-status.md) | プレビュー段階の検証範囲、未完了項目、リリース条件。 |

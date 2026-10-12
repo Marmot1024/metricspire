@@ -4,18 +4,11 @@ MetricSpire serves stateless Streamable HTTP MCP at `/api/v1/mcp` on Databricks 
 
 ## Connect
 
-For Databricks Apps, an administrator registers a public OAuth client with the exact callback URI required by the MCP client. Users sign in with their own identity; App access and warehouse permissions still apply. See [operator setup](../deploy/databricks-apps/README.md#oauth-client-onboarding).
+For teams using local Codex CLI, use the [single-file installer](mcp-installer.md) with an existing Databricks CLI user profile. Databricks CLI handles OAuth token acquisition and refresh; Codex calls the remote MCP through a local HTTP-header helper. The connection is named `metricspire-cli`. Users retain their own App and data permissions. No custom OAuth client registration is required for this route.
 
-For colleague onboarding, a maintainer can distribute the [single-file installer](mcp-installer.md), which presets the public connection parameters and installs a short usage skill. Manual setup remains available:
+After installation, reopen or reconnect Codex and call `list_namespaces`. An authenticated CLI profile does not itself prove MCP access. Never mix stored native OAuth or static bearer headers into this connection. Keep the profile and workspace stable, and do not place credentials in prompts, configuration, Git or issue reports.
 
-```bash
-codex mcp add metricspire --url 'https://<your-app-origin>/api/v1/mcp' --oauth-client-id '<public-client-id>'
-codex mcp login metricspire
-```
-
-Use the client's authentication action when it reports authentication required. After first login, reload the connection or open a fresh session and call `list_namespaces` to verify it. A successful browser callback alone does not verify tool access. Valid refresh credentials should allow silent renewal; [maintainer acceptance](mcp-native-acceptance.md) checks this separately.
-
-Keep the connection name and approved scopes stable. Do not combine native OAuth with a helper or static bearer header on the same connection, and never put credentials in prompts, command arguments, Git or issue reports.
+URL-only native OAuth remains an alternative for other clients, requiring a registered public client and validated refresh behavior; its implementation is preserved on `backup/native-oauth-20261012`. It is not the default local Codex onboarding route. See [operator setup](../deploy/databricks-apps/README.md#oauth-client-onboarding) and [release acceptance](mcp-native-acceptance.md).
 
 ## Query workflow
 
@@ -36,7 +29,7 @@ Each request authenticates independently. Product policy, active releases and qu
 | Evidence | Next action |
 | --- | --- |
 | Connection absent from the current tool inventory | Check the loaded connection once. This does not prove the service is down. |
-| Client reports authentication required, or application returns `unauthenticated` | Use the existing connection's normal authentication action. |
+| Client reports authentication required, or application returns `unauthenticated` | Check the failing stage once. For `metricspire-cli`, inspect the existing CLI profile; only a confirmed expired grant calls for `databricks auth login` on that same workspace/profile. Do not run `codex mcp login` for this route. |
 | `authentication_unavailable` (503/504) | Identity verification could not complete; access remains denied. Retry later or report the request ID. Repeated login is not the remedy. |
 | `permission_denied` | Report the denied operation and request ID; do not infer a missing OAuth scope. |
 | `unknown_reference`, `metric_route_not_found`, `invalid_time`, `capability_missing` | Use the public field/capability detail and catalog to identify the unsupported query. |

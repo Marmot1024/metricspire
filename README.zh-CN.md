@@ -71,14 +71,14 @@ list_namespaces → search_metrics → explain_query → plan_query
                → submit_query → get_query / cancel_query
 ```
 
-每次请求都会独立鉴权。Databricks Apps 部署需要预注册公共 OAuth 客户端，用户还需具备自己的 App 与数据权限；浏览器登录成功本身不等于查询验收。客户端配置、工具行为与安全边界见 [MCP 接入](docs/mcp.md)，当前验收范围见[开发状态](docs/development-status.md)（英文）。
+每次请求都会独立鉴权。本地 Codex 用户通过安装器复用 Databricks CLI 用户授权，仍需具备自己的 App 与数据权限；登录成功本身不等于查询验收。客户端配置、工具行为与安全边界见 [MCP 接入](docs/mcp.md)，当前验收范围见[开发状态](docs/development-status.md)（英文）。
 
 ## 文档导航
 
 | 文档（英文） | 内容 |
 | --- | --- |
 | [快速上手](docs/getting-started.md) | 离线规划、本地目录流程、服务配置与验证。 |
-| [MCP 接入](docs/mcp.md) | 远程工具、OAuth 客户端配置及作业边界。 |
+| [MCP 接入](docs/mcp.md) | 远程工具、CLI 授权配置及作业边界。 |
 | [架构](docs/architecture.md) | 语义、身份、控制面与引擎适配器边界。 |
 | [HTTP 契约](docs/http-api.md) | 端点、权限、错误、限额及审计行为。 |
 | [开发状态](docs/development-status.md) | 预览版验收边界、未完成项与发布门槛。 |
