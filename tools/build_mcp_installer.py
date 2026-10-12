@@ -50,23 +50,21 @@ __METRICSPIRE_PAYLOAD__
 
 
 def validate_connection(c):
-    if set(c) != {"url", "client_id", "callback_url", "callback_port"}:
-        raise ValueError("Only public URL, client_id, callback_url and callback_port are accepted")
-    for key in ("url", "client_id", "callback_url"):
-        if not isinstance(c[key], str) or not c[key] or any(ord(ch) < 32 for ch in c[key]):
+    if set(c) != {"url", "workspace_host"}:
+        raise ValueError("Only public MCP URL and workspace_host are accepted")
+    for key in ("url", "workspace_host"):
+        raw = c[key]
+        if not isinstance(raw, str) or not raw or any(ord(ch) < 32 for ch in raw):
             raise ValueError("Invalid public connection field")
-    u = urlsplit(c["url"])
-    # urlsplit defers port syntax/range validation until this property is read.
-    _ = u.port
-    if u.scheme != "https" or not u.hostname or u.username or u.password or u.query or u.fragment:
-        raise ValueError("MCP URL must use HTTPS without credentials, query or fragment")
-    u = urlsplit(c["callback_url"])
-    port = c["callback_port"]
-    if (u.scheme != "http" or u.hostname not in ("localhost", "127.0.0.1", "::1")
-            or u.username or u.password or not u.path or u.query or u.fragment
-            or type(port) is not int or not 1 <= port <= 65535
-            or u.port is not None and u.port != port):
-        raise ValueError("Use the registered loopback callback URL and matching port")
+        u = urlsplit(raw)
+        _ = u.port
+        if (u.scheme != "https" or not u.hostname or u.username or u.password
+                or u.query or u.fragment):
+            raise ValueError("Use HTTPS addresses without credentials, query or fragment")
+        if key == "workspace_host" and (u.path or u.port):
+            raise ValueError("workspace_host must be an HTTPS origin")
+        if key == "url" and u.path != "/api/v1/mcp":
+            raise ValueError("MCP URL must end in /api/v1/mcp")
 
 
 def build(c, platforms, output):
@@ -113,15 +111,12 @@ def build(c, platforms, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True)
-    parser.add_argument("--client-id", required=True, help="Public client ID; never a client secret")
-    parser.add_argument("--callback-url", required=True, help="Exact Codex callback base registered with provider")
-    parser.add_argument("--callback-port", type=int, required=True)
+    parser.add_argument("--workspace-host", required=True, help="Databricks workspace HTTPS origin")
     parser.add_argument("--platform", action="append", choices=PLATFORMS,
                         help="Default: all four platforms; restrict only for local testing")
     parser.add_argument("--output", type=Path, default=ROOT / "dist/metricspire-install.sh")
     args = parser.parse_args()
-    c = dict(url=args.url, client_id=args.client_id, callback_url=args.callback_url,
-             callback_port=args.callback_port)
+    c = dict(url=args.url, workspace_host=args.workspace_host)
     try:
         digest = build(c, args.platform or PLATFORMS, args.output)
     except (ValueError, OSError, subprocess.CalledProcessError) as error:

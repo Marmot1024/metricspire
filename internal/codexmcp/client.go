@@ -33,16 +33,22 @@ type message struct {
 }
 
 type Client struct {
-	ctx    context.Context
-	stop   context.CancelFunc
-	cmd    *exec.Cmd
-	in     *json.Encoder
-	out    chan message
-	id     int
-	thread string
+	ctx        context.Context
+	stop       context.CancelFunc
+	cmd        *exec.Cmd
+	in         *json.Encoder
+	out        chan message
+	id         int
+	thread     string
+	server     string
+	authStatus string
 }
 
 func Start(ctx context.Context, binary, directory string, env []string) (*Client, error) {
+	return StartServer(ctx, binary, directory, env, "metricspire", "oAuth")
+}
+
+func StartServer(ctx context.Context, binary, directory string, env []string, server, authStatus string) (*Client, error) {
 	ctx, stop := context.WithCancel(ctx)
 	cmd := exec.CommandContext(ctx, binary, "app-server", "--listen", "stdio://")
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
@@ -64,7 +70,7 @@ func Start(ctx context.Context, binary, directory string, env []string) (*Client
 		stop()
 		return nil, errors.New("cannot start Codex app-server")
 	}
-	c := &Client{ctx: ctx, stop: stop, cmd: cmd, in: json.NewEncoder(stdin), out: make(chan message)}
+	c := &Client{server: server, authStatus: authStatus, ctx: ctx, stop: stop, cmd: cmd, in: json.NewEncoder(stdin), out: make(chan message)}
 	go func() {
 		defer close(c.out)
 		decoder := json.NewDecoder(stdout)
@@ -131,15 +137,15 @@ func (c *Client) Verify(required []string) (Status, error) {
 	var reply struct {
 		Data []Status `json:"data"`
 	}
-	err := c.rpc("mcpServerStatus/list", map[string]any{"serverName": "metricspire", "detail": "toolsAndAuthOnly", "limit": 10}, &reply)
+	err := c.rpc("mcpServerStatus/list", map[string]any{"serverName": c.server, "detail": "toolsAndAuthOnly", "limit": 10}, &reply)
 	if err != nil {
 		return Status{}, err
 	}
 	for _, s := range reply.Data {
-		if s.Name != "metricspire" {
+		if s.Name != c.server {
 			continue
 		}
-		if s.AuthStatus != "oAuth" || (len(s.ToolsError) > 0 && string(s.ToolsError) != "null") || s.ServerInfo.Name != "metricspire" {
+		if s.AuthStatus != c.authStatus || (len(s.ToolsError) > 0 && string(s.ToolsError) != "null") || s.ServerInfo.Name != "metricspire" {
 			return s, errors.New("native MCP handshake failed; preserve authorization and check server configuration")
 		}
 		for _, name := range required {
@@ -175,7 +181,7 @@ func (c *Client) Call(tool string, args any, result any) error {
 			Text string `json:"text"`
 		} `json:"content"`
 	}
-	if err := c.rpc("mcpServer/tool/call", map[string]any{"threadId": c.thread, "server": "metricspire", "tool": tool, "arguments": args}, &reply); err != nil {
+	if err := c.rpc("mcpServer/tool/call", map[string]any{"threadId": c.thread, "server": c.server, "tool": tool, "arguments": args}, &reply); err != nil {
 		return err
 	}
 	if reply.IsError {
@@ -207,4 +213,31 @@ func (c *Client) Namespaces() ([]string, error) {
 		return nil, errors.New("MCP connected but no accessible namespaces")
 	}
 	return result.Namespaces, nil
+}
+
+// VerifyConnection inspects the effective merged configuration, not just the
+// user's TOML. Unlike `codex mcp get`, config/read retains helper commands.
+// Never return or log the raw configuration: it can contain credentials.
+func (c *Client) VerifyConnection(endpoint, helper string) error {
+	var reply struct {
+		Config struct {
+			Servers map[string]map[string]any `json:"mcp_servers"`
+		} `json:"config"`
+	}
+	if err := c.rpc("config/read", map[string]any{"includeLayers": false, "cwd": c.cmd.Dir}, &reply); err != nil {
+		return err
+	}
+	s := reply.Config.Servers[c.server]
+	if s["url"] != endpoint || s["http_headers_helper"] != helper || s["enabled"] == false {
+		return errors.New("effective Codex MCP endpoint or header helper differs from installation")
+	}
+	for _, k := range []string{"oauth", "command", "bearer_token_env_var", "http_headers", "env_http_headers"} {
+		if value, ok := s[k]; ok && value != nil {
+			return errors.New("effective Codex MCP connection mixes authentication or transports")
+		}
+	}
+	if old := reply.Config.Servers["metricspire"]; old != nil && old["enabled"] != false {
+		return errors.New("effective old OAuth connection remains enabled")
+	}
+	return nil
 }

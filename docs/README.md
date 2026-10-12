@@ -6,7 +6,7 @@ MetricSpire is a development preview. Start with the [project overview](../READM
 | --- | --- |
 | [Getting started](getting-started.md) | Run the offline semantic example and local catalog. |
 | [MCP integration](mcp.md) | Connect an AI client to a deployed service. |
-| [Codex installer](mcp-installer.md) | Package and verify colleague onboarding; native login and renewal require real-user acceptance. |
+| [Codex installer](mcp-installer.md) | Install CLI-backed local Codex access; verify actual tools and calls, with lifecycle acceptance tracked separately. |
 | [HTTP API](http-api.md) | Understand the stable request, permission, and audit boundary. |
 | [PostgreSQL online query](online-query.md) | Opt-in synchronous numeric-code queries over reviewed aggregates. |
 | [PostgreSQL table responsibilities](postgres-tables.md) | Separate control/history tables from business aggregates and cleanup decisions. |

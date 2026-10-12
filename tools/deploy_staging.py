@@ -91,7 +91,7 @@ def configure_exploration(package, namespace, catalog_path, warehouse, has_accep
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    for key in ("app", "profile", "commit", "mcp-url", "issuer", "workspace-parent"):
+    for key in ("app", "profile", "auth-profile", "commit", "mcp-url", "issuer", "workspace-parent"):
         p.add_argument("--" + key, required=True)
     p.add_argument("--namespace", default="acceptance")
     p.add_argument("--query", type=Path, default=ROOT / "testdata/acceptance/databricks-tpch/query.json")
@@ -127,7 +127,7 @@ def main():
         configure_exploration(package, a.namespace, a.exploration_catalog, a.exploration_warehouse, bool(a.analysis_query))
         build(source, work, package, commit)
         gate = [str(work / "release-gate"), "--app", a.app, "--profile", a.profile,
-                "--commit", commit, "--mcp-url", a.mcp_url, "--issuer", a.issuer,
+                "--auth-profile", a.auth_profile, "--commit", commit, "--mcp-url", a.mcp_url, "--issuer", a.issuer,
                 "--namespace", a.namespace]
         fixture = ["--query", str(a.query.resolve()), "--expected", str(a.expected.resolve())]
         run(gate + fixture + ["--preflight"], stream=True)

@@ -71,14 +71,14 @@ list_namespaces → search_metrics → explain_query → plan_query
                → submit_query → get_query / cancel_query
 ```
 
-Each request is authenticated. A Databricks Apps deployment needs a pre-registered public OAuth client and the user's own App and data permissions; a successful browser login alone is not query acceptance. See [MCP integration](docs/mcp.md) for client configuration, tools, safety limits, and the precise [current acceptance boundary](docs/development-status.md).
+Each request is authenticated. Local Codex users reuse Databricks CLI user authentication through the installer; each user still needs App and data permissions. A successful login alone is not query acceptance. See [MCP integration](docs/mcp.md) for client configuration, tools, safety limits, and the precise [current acceptance boundary](docs/development-status.md).
 
 ## Documentation
 
 | Start here | For |
 | --- | --- |
 | [Getting started](docs/getting-started.md) | Offline plan demo, local catalog workflow, service setup, verification. |
-| [MCP integration](docs/mcp.md) | Remote tools, OAuth client setup, request and job boundaries. |
+| [MCP integration](docs/mcp.md) | Remote tools, CLI authentication setup, request and job boundaries. |
 | [Architecture](docs/architecture.md) | Semantic, identity, control-plane, and engine adapter boundaries. |
 | [HTTP contract](docs/http-api.md) | Endpoints, permissions, errors, limits, and audit behavior. |
 | [Development status](docs/development-status.md) | Maintained preview boundary and known gaps. |
