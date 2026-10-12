@@ -3,6 +3,15 @@ set -euo pipefail
 
 package_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repository_root=$(cd "${package_dir}/../.." && pwd)
+revision=$(git -C "${repository_root}" rev-parse HEAD)
+git -C "${repository_root}" diff --exit-code HEAD -- cmd internal go.mod go.sum >/dev/null || {
+  echo "Commit service changes before building a version-attested package." >&2
+  exit 1
+}
+if [[ -n "$(git -C "${repository_root}" ls-files --others --exclude-standard -- cmd internal)" ]]; then
+  echo "Untracked service files prevent a version-attested build." >&2
+  exit 1
+fi
 output_dir="${repository_root}/dist/databricks-apps"
 
 rm -rf "${output_dir}"
@@ -17,7 +26,7 @@ for architecture in amd64 arm64; do
   binary="${output_dir}/metricspire-linux-${architecture}"
   archive="${binary}.gz"
   GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH="${architecture}" \
-    go build -trimpath -ldflags='-s -w' -o "${binary}" ./cmd/metricspire
+    go build -trimpath -ldflags="-s -w -X main.version=0.1.0-dev+${revision}" -o "${binary}" ./cmd/metricspire
   gzip -9 -c "${binary}" > "${archive}"
   checksum=$(shasum -a 256 "${archive}" | cut -d ' ' -f 1)
   printf '%s  %s\n' "${checksum}" "$(basename "${archive}")" > "${archive}.sha256"

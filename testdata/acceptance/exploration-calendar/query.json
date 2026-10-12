@@ -1,0 +1,21 @@
+{
+  "api_version": "metricspire.io/v1alpha1", "kind": "AnalysisQuery",
+  "source": "calendar_acceptance", "group_by": ["day"],
+  "time_range": {"dimension": "day", "start": "1999-08-02T00:00:00Z", "end": "1999-08-16T00:00:00Z", "timezone": "UTC"},
+  "time_grouping": {"dimension": "day", "granularity": "week", "week_start": "monday", "timezone": "UTC"},
+  "measures": [
+    {"name": "days", "op": "count_distinct", "field": "day"},
+    {"name": "weekday_days", "op": "count_distinct", "field": "day", "where": {
+      "op": "lte", "args": [{"op": "weekday", "args": [{"op": "ref", "ref": "day"}]}, {"op": "literal", "type": "integer", "value": "3"}]
+    }}
+  ],
+  "calculations": [{"name": "band", "expression": {"op": "case", "args": [
+    {"op": "eq", "args": [{"op": "ref", "ref": "days"}, {"op": "literal", "type": "integer", "value": "7"}]},
+    {"op": "literal", "type": "string", "value": "full"}, {"op": "literal", "type": "string", "value": "partial"}
+  ]}}],
+  "summarize": {"group_by": ["band"], "measures": [
+    {"name": "weeks", "op": "count"}, {"name": "total_days", "op": "sum", "field": "days"},
+    {"name": "total_weekdays", "op": "sum", "field": "weekday_days"}
+  ]},
+  "order_by": [{"field": "band", "direction": "asc"}], "limit": 20
+}

@@ -1,0 +1,10 @@
+{
+  "columns": [
+    {"name": "band", "type_name": "STRING", "type_text": "STRING"},
+    {"name": "weeks", "type_name": "LONG", "type_text": "BIGINT"},
+    {"name": "total_days", "type_name": "LONG", "type_text": "BIGINT"},
+    {"name": "total_weekdays", "type_name": "LONG", "type_text": "BIGINT"}
+  ],
+  "rows": [["full", 2, 14, 8]],
+  "truncated": false
+}
