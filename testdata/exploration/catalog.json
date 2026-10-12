@@ -1,0 +1,252 @@
+{
+  "api_version": "metricspire.io/v1alpha1",
+  "kind": "AnalysisCatalog",
+  "metadata": {
+    "name": "retail_demo",
+    "version": "1"
+  },
+  "namespace": "demo",
+  "tenant": "demo",
+  "datasets": [
+    {
+      "name": "orders",
+      "resource": {
+        "kind": "table",
+        "table": "orders"
+      },
+      "fields": [
+        {
+          "name": "order_id",
+          "column": "order_id",
+          "type": "string"
+        },
+        {
+          "name": "person_id",
+          "column": "person_id",
+          "type": "string"
+        },
+        {
+          "name": "day",
+          "column": "day",
+          "type": "date",
+          "calendar_timezone": "UTC"
+        },
+        {
+          "name": "item_id",
+          "column": "item_id",
+          "type": "string"
+        },
+        {
+          "name": "amount",
+          "column": "amount",
+          "type": "decimal"
+        },
+        {
+          "name": "valid",
+          "column": "valid",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "labels",
+      "resource": {
+        "kind": "table",
+        "table": "labels"
+      },
+      "fields": [
+        {
+          "name": "person_id",
+          "column": "person_id",
+          "type": "string"
+        },
+        {
+          "name": "day",
+          "column": "day",
+          "type": "date",
+          "calendar_timezone": "UTC"
+        },
+        {
+          "name": "tier",
+          "column": "tier",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "items",
+      "resource": {
+        "kind": "table",
+        "table": "items"
+      },
+      "fields": [
+        {
+          "name": "item_id",
+          "column": "item_id",
+          "type": "string"
+        },
+        {
+          "name": "category_id",
+          "column": "category_id",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "categories",
+      "resource": {
+        "kind": "table",
+        "table": "categories"
+      },
+      "fields": [
+        {
+          "name": "category_id",
+          "column": "category_id",
+          "type": "string"
+        },
+        {
+          "name": "category",
+          "column": "category",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "attributes": [
+    {
+      "name": "day",
+      "dataset": "orders",
+      "field": "day"
+    },
+    {
+      "name": "person",
+      "dataset": "orders",
+      "field": "person_id",
+      "internal_only": true
+    },
+    {
+      "name": "amount",
+      "dataset": "orders",
+      "field": "amount"
+    },
+    {
+      "name": "order",
+      "dataset": "orders",
+      "field": "order_id"
+    },
+    {
+      "name": "valid",
+      "dataset": "orders",
+      "field": "valid"
+    },
+    {
+      "name": "tier",
+      "dataset": "labels",
+      "field": "tier"
+    },
+    {
+      "name": "category",
+      "dataset": "categories",
+      "field": "category"
+    }
+  ],
+  "relationships": [
+    {
+      "name": "week_label",
+      "from": "orders",
+      "to": "labels",
+      "keys": [
+        {
+          "from": "person_id",
+          "to": "person_id"
+        }
+      ],
+      "snapshot": {
+        "from": "day",
+        "to": "day",
+        "anchor": "week_end"
+      },
+      "missing": "preserve_null"
+    },
+    {
+      "name": "order_item",
+      "from": "orders",
+      "to": "items",
+      "keys": [
+        {
+          "from": "item_id",
+          "to": "item_id"
+        }
+      ],
+      "missing": "preserve_null"
+    },
+    {
+      "name": "item_category",
+      "from": "items",
+      "to": "categories",
+      "keys": [
+        {
+          "from": "category_id",
+          "to": "category_id"
+        }
+      ],
+      "missing": "preserve_null"
+    }
+  ],
+  "sources": [
+    {
+      "name": "purchases",
+      "dataset": "orders",
+      "dimensions": [
+        "day",
+        "person",
+        "amount",
+        "order",
+        "valid",
+        "tier",
+        "category"
+      ],
+      "roles": [
+        "analyst"
+      ],
+      "max_window_days": 28,
+      "max_rows": 100,
+      "timeout": 60000000000,
+      "fixed_filter": {
+        "op": "eq",
+        "args": [
+          {
+            "op": "ref",
+            "ref": "valid"
+          },
+          {
+            "op": "literal",
+            "type": "boolean",
+            "value": "true"
+          }
+        ]
+      }
+    }
+  ],
+  "policy": {
+    "api_version": "metricspire.io/v1alpha1",
+    "kind": "PolicySource",
+    "metadata": {
+      "name": "retail_read",
+      "version": "1"
+    },
+    "tenant": "demo",
+    "rules": [
+      {
+        "name": "read",
+        "effect": "allow",
+        "roles": [
+          "analyst"
+        ],
+        "dimensions": [
+          "*"
+        ]
+      }
+    ]
+  }
+}

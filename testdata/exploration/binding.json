@@ -1,0 +1,12 @@
+{
+  "api_version": "metricspire.io/v1alpha1", "kind": "SourceBinding",
+  "metadata": {"name": "demo_binding", "version": "1"},
+  "manifest_fingerprint": "assigned_by_test", "engine": "databricks_sql",
+  "datasets": [{"name": "events", "resource": {"kind": "table", "table": "events"}, "fields": [
+    {"name": "event_id", "column": "event_id"},
+    {"name": "person_id", "column": "person_id"},
+    {"name": "event_date", "column": "event_date", "calendar_timezone": "UTC"},
+    {"name": "tier", "column": "tier"},
+    {"name": "event_kind", "column": "event_kind"}
+  ]}]
+}

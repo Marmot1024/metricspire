@@ -24,6 +24,8 @@ Clients ask for **metric codes and dimensions** rather than choosing physical ta
 
 This is a metric service, not a replacement for your data warehouse, BI system, or engine-native row and column security.
 
+Optional [temporary analysis](docs/exploration.md) uses reviewed external sources and fields for formulas, buckets, staged aggregates and approved associations without registering each result metric. It adds five MCP tools when configured; deployment and business acceptance are separate.
+
 ## What is implemented
 
 - **Governed catalog:** optimistic drafts, validation, immutable `trial` or `certified` releases, activation/deactivation, rollback, and release events in PostgreSQL.

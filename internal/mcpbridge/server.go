@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/marmot1024/metricspire/internal/application"
+	"github.com/marmot1024/metricspire/internal/exploration"
 	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -258,6 +259,9 @@ func newServer(backend Backend, version string) *mcp.Server {
 			}
 			return backend.CancelQuery(ctx, in)
 		})
+	if analysis, ok := backend.(AnalysisBackend); ok {
+		addAnalysisTools(s, analysis)
+	}
 	return s
 }
 
@@ -270,9 +274,13 @@ func namespacePath(namespace string) (string, error) {
 
 func add[In any](s *mcp.Server, name, description string, readOnly bool, handler func(context.Context, In) (any, error)) {
 	f, t := false, true
-	mcp.AddTool(s, &mcp.Tool{Name: name, Description: description, Annotations: &mcp.ToolAnnotations{
+	tool := &mcp.Tool{Name: name, Description: description, Annotations: &mcp.ToolAnnotations{
 		ReadOnlyHint: readOnly, IdempotentHint: readOnly || name == "cancel_query", DestructiveHint: &f, OpenWorldHint: &t,
-	}}, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
+	}}
+	if _, ok := any(*new(In)).(AnalysisInput); ok {
+		tool.InputSchema = exploration.MCPInputSchema()
+	}
+	mcp.AddTool(s, tool, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
 		out, err := handler(ctx, in)
 		if err == nil {
 			encoded, encodeErr := json.Marshal(out)

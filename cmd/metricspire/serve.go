@@ -152,6 +152,14 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		return err
 	}
 	defer jobs.Close()
+
+	analysis, analysisJobs, analysisCatalogs, err := buildServeExploration(filepath.Dir(*configPath), config.Exploration, clientConfig, store)
+	if err != nil {
+		return err
+	}
+	if analysisJobs != nil {
+		defer analysisJobs.Close()
+	}
 	var online httpapi.OnlineQueryService
 	onlineTimeout := httpapi.DefaultOnlineTimeout
 	var readiness httpapi.ReadinessChecker = store
@@ -253,7 +261,8 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		Readiness:  readiness,
 		Management: management, Catalog: store, CatalogSearch: catalogSearch, Governance: governanceService,
 		Bindings: bindingResolver, Queries: queries, Jobs: jobs, ExecutionCredential: executionCredential,
-		Online: online,
+		Online:   online,
+		Analysis: analysis, AnalysisJobs: analysisJobs, AnalysisCatalogs: analysisCatalogs,
 	}, logger)
 	if err != nil {
 		return err

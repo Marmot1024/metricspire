@@ -14,6 +14,15 @@ The neutral fixture in [`testdata/acceptance/databricks-tpch`](../testdata/accep
 
 One user completed Codex OAuth and a real staging query. A separate anonymous probe confirmed that Databricks Apps rejects `/api/*` before MetricSpire receives the request while publishing valid OAuth resource metadata. This does not prove universal onboarding, hot reload, post-expiry refresh, or second-user isolation, and it does not justify a static-token fallback or broader scope. See [MCP integration](mcp.md).
 
+## Exploration increment
+
+The separate exploration branch implements external catalog loading/validation,
+permission-filtered discovery, temporary expressions and two aggregate stages,
+composite/static/exact-date associations, and HTTP/MCP async execution. Local
+and public-calendar Databricks tests are distinct from deployed-user or business
+acceptance. See [the contract and limits](exploration.md). This increment has not
+been merged or deployed.
+
 ## Release boundary
 
 Before production use, repeat deployment-specific identity, scope, data-permission, cost, audit, query, cancellation, and failure-path checks against the intended resources and users. A build, mock test, HTTP 200, OAuth login, or one successful catalog call alone is not that acceptance.

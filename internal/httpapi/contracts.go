@@ -134,6 +134,9 @@ type Dependencies struct {
 	Queries             QueryService
 	Jobs                JobService
 	ExecutionCredential ExecutionCredentialProvider
+	Analysis            *application.AnalysisService
+	AnalysisJobs        *application.AnalysisJobs
+	AnalysisCatalogs    *application.ConfiguredAnalysisCatalogs
 	Online              OnlineQueryService // optional; absent by default, never falls back to SQL Warehouse
 }
 

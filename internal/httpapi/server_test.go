@@ -1120,11 +1120,11 @@ func newTestServerWithCredential(t *testing.T, config httpapi.Config, engine *fa
 	return newTestServerWithDependencies(t, config, engine, nil, nil, credential)
 }
 
-func newTestServerWithDependencies(t *testing.T, config httpapi.Config, engine *fakeEngine, recorder audit.Recorder, readiness httpapi.ReadinessChecker, credential httpapi.ExecutionCredentialProvider) (http.Handler, *fakeEngine, *observedResolvers) {
-	return newTestServerWithAuthentication(t, config, engine, recorder, readiness, credential, nil)
+func newTestServerWithDependencies(t *testing.T, config httpapi.Config, engine *fakeEngine, recorder audit.Recorder, readiness httpapi.ReadinessChecker, credential httpapi.ExecutionCredentialProvider, options ...func(*httpapi.Dependencies)) (http.Handler, *fakeEngine, *observedResolvers) {
+	return newTestServerWithAuthentication(t, config, engine, recorder, readiness, credential, nil, options...)
 }
 
-func newTestServerWithAuthentication(t *testing.T, config httpapi.Config, engine *fakeEngine, recorder audit.Recorder, readiness httpapi.ReadinessChecker, credential httpapi.ExecutionCredentialProvider, authenticator httpapi.Authenticator) (http.Handler, *fakeEngine, *observedResolvers) {
+func newTestServerWithAuthentication(t *testing.T, config httpapi.Config, engine *fakeEngine, recorder audit.Recorder, readiness httpapi.ReadinessChecker, credential httpapi.ExecutionCredentialProvider, authenticator httpapi.Authenticator, options ...func(*httpapi.Dependencies)) (http.Handler, *fakeEngine, *observedResolvers) {
 	t.Helper()
 	repository := catalog.NewMemoryRepository()
 	management, err := catalog.NewService(repository)
@@ -1219,13 +1219,17 @@ func newTestServerWithAuthentication(t *testing.T, config httpapi.Config, engine
 	if readiness == nil {
 		readiness = httpapi.ReadinessFunc(func(context.Context) error { return nil })
 	}
-	server, err := httpapi.NewServer(config, httpapi.Dependencies{
+	dependencies := httpapi.Dependencies{
 		Authenticator: authenticator, Readiness: readiness,
 		Management: management, Catalog: repository, CatalogSearch: catalogSearch,
 		Governance: governanceService,
 		Bindings:   bindings, Queries: queries, Jobs: jobs,
 		ExecutionCredential: credential,
-	}, nil)
+	}
+	for _, option := range options {
+		option(&dependencies)
+	}
+	server, err := httpapi.NewServer(config, dependencies, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

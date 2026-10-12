@@ -30,7 +30,10 @@ func (server *Server) handleMCP(response http.ResponseWriter, request *http.Requ
 	if !ok {
 		return
 	}
-	backend := &remoteMCPBackend{server: server, request: request, principal: principal}
+	var backend mcpbridge.Backend = &remoteMCPBackend{server: server, request: request, principal: principal}
+	if server.deps.Analysis != nil {
+		backend = &analysisMCPBackend{remoteMCPBackend: backend.(*remoteMCPBackend)}
+	}
 	ctx := context.WithValue(request.Context(), remoteMCPBackendKey{}, mcpbridge.Backend(backend))
 	server.mcp.ServeHTTP(response, request.WithContext(ctx))
 }
