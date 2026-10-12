@@ -29,6 +29,7 @@ type Config struct {
 	ReleasePolicy  ReleasePolicyConfig  `json:"release_policy,omitempty" yaml:"release_policy,omitempty"`
 	Policies       []PolicyRoute        `json:"policies" yaml:"policies"`
 	Bindings       []BindingRoute       `json:"bindings" yaml:"bindings"`
+	Exploration    *ExplorationConfig   `json:"exploration,omitempty" yaml:"exploration,omitempty"`
 	Online         *OnlineConfig        `json:"online,omitempty" yaml:"online,omitempty"`
 }
 
@@ -108,6 +109,11 @@ func Load(path string) (Config, error) {
 }
 
 func (config Config) Validate() error {
+	if config.Exploration != nil {
+		if err := config.Exploration.Validate(); err != nil {
+			return err
+		}
+	}
 	if config.APIVersion != APIVersion || config.Kind != Kind {
 		return errors.New("runtime config has an invalid api_version or kind")
 	}

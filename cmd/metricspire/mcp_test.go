@@ -69,7 +69,7 @@ func assertMCPTools(t *testing.T, session *mcp.ClientSession) {
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if !reflect.DeepEqual(names, []string{"cancel_query", "explain_query", "get_query", "list_namespaces", "plan_query", "search_metrics", "submit_query"}) {
+	if !reflect.DeepEqual(names, []string{"cancel_analysis", "cancel_query", "discover_analysis", "explain_query", "get_analysis", "get_query", "list_namespaces", "plan_analysis", "plan_query", "search_metrics", "submit_analysis", "submit_query"}) {
 		t.Fatalf("unexpected tools: %v", names)
 	}
 }

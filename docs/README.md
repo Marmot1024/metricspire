@@ -10,6 +10,7 @@ MetricSpire is a development preview. Start with the [project overview](../READM
 | [PostgreSQL online query](online-query.md) | Opt-in synchronous numeric-code queries over reviewed aggregates. |
 | [PostgreSQL table responsibilities](postgres-tables.md) | Separate control/history tables from business aggregates and cleanup decisions. |
 | [Architecture](architecture.md) | Understand semantic, identity, storage, and engine boundaries. |
+| [Temporary analysis backend](exploration.md) | Configure external semantics and governed temporary analyses over HTTP/MCP. |
 | [Development status](development-status.md) | Check preview maturity and unverified paths. |
 
 The [Databricks Apps package guide](../deploy/databricks-apps/README.md) is **maintainer-specific staging documentation** beside its source, not the default installation path. The semantic schema under [`contracts/`](../contracts/metricspire.schema.json), neutral [`examples/`](../examples/orders/model.yaml), tests, license, and source code are also part of the public repository.

@@ -50,3 +50,9 @@ Limit user-facing recovery to one connection check, then report the failing stag
 Requests and responses are capped at 1 MiB and 8 MiB; query results are bounded, typed JSON. Cancelling a network request may leave an accepted job running: use `cancel_query` with its ID. After an uncertain submission response, check any known job before retrying; without an ID, report the uncertainty instead of blindly resubmitting.
 
 The local `metricspire mcp --api-url <origin>` bridge is for development compatibility. See [verification status](development-status.md) for acceptance gaps.
+
+Optional [exploration](exploration.md) adds `discover_analysis`, `plan_analysis`,
+`submit_analysis`, `get_analysis`, and `cancel_analysis` for temporary structured
+analyses over approved detail sources. Discover and plan first; no result-metric
+registration is required. Hosted deployments enable them through explicit runtime
+configuration. Permission/timeout failures never silently select another path.

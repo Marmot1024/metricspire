@@ -1,0 +1,39 @@
+{
+  "api_version": "metricspire.io/v1alpha1", "kind": "AnalysisQuery", "source": "activity",
+  "time_range": {"dimension": "day", "start": "2026-08-03T00:00:00Z", "end": "2026-08-17T00:00:00Z", "timezone": "UTC"},
+  "time_grouping": {"dimension": "day", "timezone": "UTC", "granularity": "week", "week_start": "monday"},
+  "group_by": ["person", "day", "tier"],
+  "measures": [
+    {"name": "days", "op": "count_distinct", "field": "day"},
+    {"name": "weekdays", "op": "count_distinct", "field": "day", "where": {"op": "lt", "args": [{"op": "weekday", "args": [{"op": "ref", "ref": "day"}]}, {"op": "literal", "type": "integer", "value": "4"}]}},
+    {"name": "weekends", "op": "count_distinct", "field": "day", "where": {"op": "gte", "args": [{"op": "weekday", "args": [{"op": "ref", "ref": "day"}]}, {"op": "literal", "type": "integer", "value": "4"}]}}
+  ],
+  "calculations": [
+    {"name": "band", "expression": {"op": "case", "args": [
+      {"op": "lte", "args": [{"op": "ref", "ref": "days"}, {"op": "literal", "type": "integer", "value": "2"}]}, {"op": "literal", "type": "string", "value": "low"},
+      {"op": "lte", "args": [{"op": "ref", "ref": "days"}, {"op": "literal", "type": "integer", "value": "4"}]}, {"op": "literal", "type": "string", "value": "medium"},
+      {"op": "literal", "type": "string", "value": "high"}
+    ]}},
+    {"name": "rate_gap", "expression": {"op": "subtract", "args": [
+      {"op": "divide", "args": [{"op": "ref", "ref": "weekdays"}, {"op": "literal", "type": "integer", "value": "4"}]},
+      {"op": "divide", "args": [{"op": "ref", "ref": "weekends"}, {"op": "literal", "type": "integer", "value": "3"}]}
+    ]}},
+    {"name": "preference", "expression": {"op": "case", "args": [
+      {"op": "gte", "args": [{"op": "ref", "ref": "rate_gap"}, {"op": "literal", "type": "decimal", "value": "0.2"}]}, {"op": "literal", "type": "string", "value": "weekday"},
+      {"op": "lte", "args": [{"op": "ref", "ref": "rate_gap"}, {"op": "literal", "type": "decimal", "value": "-0.2"}]}, {"op": "literal", "type": "string", "value": "weekend"},
+      {"op": "literal", "type": "string", "value": "balanced"}
+    ]}}
+  ],
+  "summarize": {
+    "group_by": ["day", "tier", "band", "preference"],
+    "measures": [
+      {"name": "person_weeks", "op": "count"},
+      {"name": "mean_days", "op": "avg", "field": "days"},
+      {"name": "mean_weekdays", "op": "avg", "field": "weekdays"},
+      {"name": "mean_weekends", "op": "avg", "field": "weekends"}
+    ],
+    "calculations": [{"name": "share", "expression": {"op": "share", "args": [{"op": "ref", "ref": "person_weeks"}], "partition_by": ["day", "tier"]}}]
+  },
+  "order_by": [{"field": "day", "direction": "asc"}, {"field": "tier", "direction": "asc"}, {"field": "band", "direction": "asc"}, {"field": "preference", "direction": "asc"}],
+  "limit": 100
+}

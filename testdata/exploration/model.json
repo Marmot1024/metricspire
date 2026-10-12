@@ -1,0 +1,24 @@
+{
+  "api_version": "metricspire.io/v1alpha1", "kind": "SemanticModel",
+  "metadata": {"name": "activity_demo", "version": "1"},
+  "spec": {
+    "datasets": [{"name": "events", "fields": [
+      {"name": "event_id", "data_type": "string"},
+      {"name": "person_id", "data_type": "string"},
+      {"name": "event_date", "data_type": "date"},
+      {"name": "tier", "data_type": "string"},
+      {"name": "event_kind", "data_type": "string"}
+    ]}],
+    "entities": [{"name": "events", "dataset": "events", "key": "event_id"}],
+    "dimensions": [
+      {"name": "person", "entity": "events", "field": "person_id", "type": "categorical"},
+      {"name": "day", "entity": "events", "field": "event_date", "type": "time", "time_granularities": ["day", "week", "month"]},
+      {"name": "tier", "entity": "events", "field": "tier", "type": "categorical"}
+    ],
+    "metrics": [{"name": "active_events", "display_name": "Active events", "description": "Approved primitive active event rows for the neutral fixture.", "owner": "demo-owner", "entity": "events", "kind": "aggregate", "value_type": "integer",
+      "expression": {"op": "count", "field": "events.event_id", "filters": [{"field": "events.event_kind", "operator": "eq", "values": ["active"]}]},
+      "allowed_dimensions": ["person", "day", "tier"], "time_dimension": "day",
+      "verification": {"status": "verified", "evidence": ["neutral_fixture"]}
+    }]
+  }
+}

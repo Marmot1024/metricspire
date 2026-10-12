@@ -112,6 +112,9 @@ func TestProtocolToolsUseOnlyExistingAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantNames := map[string]bool{"list_namespaces": true, "search_metrics": true, "explain_query": true, "plan_query": true, "submit_query": false, "get_query": true, "cancel_query": false}
+	for name, readOnly := range map[string]bool{"discover_analysis": true, "plan_analysis": true, "submit_analysis": false, "get_analysis": true, "cancel_analysis": false} {
+		wantNames[name] = readOnly
+	}
 	if len(listed.Tools) != len(wantNames) {
 		t.Fatalf("tools=%d", len(listed.Tools))
 	}

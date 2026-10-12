@@ -1,0 +1,126 @@
+{
+  "api_version": "metricspire.io/v1alpha1",
+  "kind": "AnalysisQuery",
+  "source": "purchases",
+  "group_by": [
+    "day",
+    "person",
+    "tier",
+    "category"
+  ],
+  "time_range": {
+    "dimension": "day",
+    "start": "2026-08-03T00:00:00Z",
+    "end": "2026-08-17T00:00:00Z",
+    "timezone": "UTC"
+  },
+  "time_grouping": {
+    "dimension": "day",
+    "granularity": "week",
+    "week_start": "monday",
+    "timezone": "UTC"
+  },
+  "measures": [
+    {
+      "name": "orders",
+      "op": "count_distinct",
+      "field": "order"
+    },
+    {
+      "name": "revenue",
+      "op": "sum",
+      "field": "amount"
+    }
+  ],
+  "calculations": [
+    {
+      "name": "band",
+      "expression": {
+        "op": "case",
+        "args": [
+          {
+            "op": "gte",
+            "args": [
+              {
+                "op": "ref",
+                "ref": "orders"
+              },
+              {
+                "op": "literal",
+                "type": "integer",
+                "value": "2"
+              }
+            ]
+          },
+          {
+            "op": "literal",
+            "type": "string",
+            "value": "repeat"
+          },
+          {
+            "op": "literal",
+            "type": "string",
+            "value": "single"
+          }
+        ]
+      }
+    }
+  ],
+  "summarize": {
+    "group_by": [
+      "day",
+      "tier",
+      "category",
+      "band"
+    ],
+    "measures": [
+      {
+        "name": "customer_weeks",
+        "op": "count"
+      },
+      {
+        "name": "total_revenue",
+        "op": "sum",
+        "field": "revenue"
+      }
+    ],
+    "calculations": [
+      {
+        "name": "proportion",
+        "expression": {
+          "op": "share",
+          "args": [
+            {
+              "op": "ref",
+              "ref": "customer_weeks"
+            }
+          ],
+          "partition_by": [
+            "day",
+            "tier",
+            "category"
+          ]
+        }
+      }
+    ]
+  },
+  "order_by": [
+    {
+      "field": "day",
+      "direction": "asc"
+    },
+    {
+      "field": "tier",
+      "direction": "asc"
+    },
+    {
+      "field": "category",
+      "direction": "asc"
+    },
+    {
+      "field": "band",
+      "direction": "asc"
+    }
+  ],
+  "limit": 100
+}

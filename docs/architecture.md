@@ -6,6 +6,11 @@ The opt-in [online HTTP path](online-query.md) uses a separate PostgreSQL read a
 
 ## Component boundaries
 
+Optional [exploration](exploration.md) adds a trusted external `AnalysisCatalog`
+and typed `AnalysisQuery` path: authorized detail sources and associations,
+temporary expressions, two aggregation stages, and audited asynchronous jobs.
+It uses separate warehouse budgets and does not require result metric registration.
+
 ```text
                         transactional control plane
 SemanticModel ──> CatalogService ──> CatalogRepository ──> PostgreSQL

@@ -49,6 +49,9 @@ type Server struct {
 }
 
 func NewServer(config Config, dependencies Dependencies, logger *slog.Logger) (*Server, error) {
+	if (dependencies.Analysis != nil || dependencies.AnalysisJobs != nil || dependencies.AnalysisCatalogs != nil) && (dependencies.Analysis == nil || dependencies.AnalysisJobs == nil || dependencies.AnalysisCatalogs == nil) {
+		return nil, errors.New("analysis service, jobs and catalogs must be configured together")
+	}
 	if dependencies.Authenticator == nil || dependencies.Readiness == nil || dependencies.Management == nil || dependencies.Catalog == nil || dependencies.CatalogSearch == nil || dependencies.Governance == nil || dependencies.Bindings == nil || dependencies.Queries == nil || dependencies.Jobs == nil {
 		return nil, errors.New("authenticator, readiness checker, management service, catalog reader, catalog searcher, governance service, binding resolver, query service, and job service are required")
 	}
@@ -86,6 +89,7 @@ func NewServer(config Config, dependencies Dependencies, logger *slog.Logger) (*
 }
 
 func (server *Server) routes() {
+	server.analysisRoutes()
 	server.mux.HandleFunc("/health/live", server.handleLiveness)
 	server.mux.HandleFunc("/health/ready", server.handleReadiness)
 	server.mux.HandleFunc("/.well-known/oauth-protected-resource", server.handleMCPProtectedResourceMetadata)
@@ -142,6 +146,24 @@ func (server *Server) handleUIContext(response http.ResponseWriter, request *htt
 		displayName = principal.Subject
 	}
 	models := []UIModelRoute(nil)
+	namespaces := configuredUINamespaces(server.config.UIModels)
+	if principal.Has(PermissionQuery) && server.deps.AnalysisCatalogs != nil {
+		rc := model.RequestContext{Tenant: principal.Tenant, Principal: principal.Subject, Roles: principal.Roles, RequestID: requestID(request)}
+		extra, err := server.deps.AnalysisCatalogs.Namespaces(request.Context(), rc)
+		if err != nil {
+			server.analysisError(response, request, err)
+			return
+		}
+		for _, name := range extra {
+			found := false
+			for _, existing := range namespaces {
+				found = found || existing == name
+			}
+			if !found {
+				namespaces = append(namespaces, name)
+			}
+		}
+	}
 	if principal.Has(PermissionManage) {
 		models = append(models, server.config.UIModels...)
 	}
@@ -149,7 +171,7 @@ func (server *Server) handleUIContext(response http.ResponseWriter, request *htt
 		AuthenticationProfile: server.config.AuthenticationProfile,
 		DisplayName:           displayName,
 		Permissions:           append([]Permission(nil), principal.Permissions...),
-		Namespaces:            configuredUINamespaces(server.config.UIModels),
+		Namespaces:            namespaces,
 		Models:                models,
 		SourcePrefixes:        server.config.UISourcePrefixes,
 	})

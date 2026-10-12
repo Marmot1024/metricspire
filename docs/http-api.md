@@ -10,6 +10,10 @@ Portable self-hosting uses OIDC with browser PKCE sessions or a separately audie
 
 ## Endpoints
 
+Opt-in [exploration endpoints](exploration.md#http-and-mcp) accept temporary
+structured analyses over approved external sources, without registering result
+metrics. They require `query:execute` and have separate execution budgets.
+
 | Permission | Method and path under `/api/v1` | Purpose |
 | --- | --- | --- |
 | Authenticated | `GET /ui/context` | Identity, permissions, and visible namespaces. |
