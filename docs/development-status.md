@@ -16,12 +16,12 @@ One user completed Codex OAuth and a real staging query. A separate anonymous pr
 
 ## Exploration increment
 
-The separate exploration branch implements external catalog loading/validation,
+Optional exploration implements external catalog loading/validation,
 permission-filtered discovery, temporary expressions and two aggregate stages,
 composite/static/exact-date associations, and HTTP/MCP async execution. Local
 and public-calendar Databricks tests are distinct from deployed-user or business
-acceptance. See [the contract and limits](exploration.md). This increment has not
-been merged or deployed.
+acceptance. See [the contract and limits](exploration.md). Existing deployments
+need an explicit configuration and rollout to enable these tools.
 
 ## Release boundary
 

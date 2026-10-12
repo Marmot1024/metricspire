@@ -1,9 +1,11 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"sync"
 	"time"
@@ -15,13 +17,16 @@ import (
 // AnalysisJobs is a bounded single-process manager, not a durable queue. It
 // is deliberately separate from the online query manager and its contracts.
 type AnalysisJobs struct {
-	service  *AnalysisService
-	mu       sync.Mutex
-	jobs     map[string]*analysisJob
-	slots    chan struct{}
-	capacity int
-	ttl      time.Duration
-	closed   bool
+	service       *AnalysisService
+	mu            sync.Mutex
+	jobs          map[string]*analysisJob
+	slots         chan struct{}
+	capacity      int
+	ttl           time.Duration
+	closed        bool
+	wait          sync.WaitGroup
+	retainedBytes int
+	resultBudget  int
 }
 
 var ErrAnalysisJobNotFound = errors.New("analysis job not found")
@@ -40,13 +45,25 @@ type analysisJob struct {
 	snapshot                     AnalysisJobSnapshot
 	namespace, tenant, principal string
 	cancel                       context.CancelFunc
+	finishing                    bool
+	output                       []byte
 }
 
-func NewAnalysisJobs(service *AnalysisService, concurrency, capacity int, ttl time.Duration) (*AnalysisJobs, error) {
+func NewAnalysisJobs(service *AnalysisService, concurrency, capacity int, ttl time.Duration, resultBytes ...int) (*AnalysisJobs, error) {
 	if service == nil || concurrency < 1 || concurrency > 32 || capacity < concurrency || capacity > 1000 || ttl <= 0 || ttl > 24*time.Hour {
 		return nil, errors.New("invalid analysis job manager budgets")
 	}
-	return &AnalysisJobs{service: service, jobs: map[string]*analysisJob{}, slots: make(chan struct{}, concurrency), capacity: capacity, ttl: ttl}, nil
+	budget := 32 << 20
+	if len(resultBytes) > 1 {
+		return nil, errors.New("invalid analysis result byte budget")
+	}
+	if len(resultBytes) == 1 {
+		budget = resultBytes[0]
+	}
+	if budget < 1 || budget > 256<<20 {
+		return nil, errors.New("invalid analysis result byte budget")
+	}
+	return &AnalysisJobs{resultBudget: budget, service: service, jobs: map[string]*analysisJob{}, slots: make(chan struct{}, concurrency), capacity: capacity, ttl: ttl}, nil
 }
 
 func (m *AnalysisJobs) Submit(ctx context.Context, in AnalysisInput) (AnalysisJobSnapshot, error) {
@@ -83,7 +100,7 @@ func (m *AnalysisJobs) Submit(ctx context.Context, in AnalysisInput) (AnalysisJo
 	m.mu.Lock()
 	for key, j := range m.jobs {
 		if j.snapshot.FinishedAt != nil && time.Since(*j.snapshot.FinishedAt) >= m.ttl {
-			delete(m.jobs, key)
+			m.remove(key)
 		}
 	}
 	if m.closed || len(m.jobs) >= m.capacity {
@@ -92,17 +109,29 @@ func (m *AnalysisJobs) Submit(ctx context.Context, in AnalysisInput) (AnalysisJo
 		return AnalysisJobSnapshot{}, &model.Problem{Code: "analysis_capacity", Message: "analysis job storage unavailable or full"}
 	}
 	m.jobs[id] = job
+	m.wait.Add(1)
 	snapshot := cloneResolverValue(job.snapshot)
 	m.mu.Unlock()
 	reserved = false
 	go func() {
+		defer m.wait.Done()
 		defer func() { cancel(); <-m.slots }()
-		output, err := m.service.executePlanned(worker, in, p, id)
+		output, err := m.service.executePlanned(worker, in, p, id, func(err error) error {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			job.finishing = true
+			if worker.Err() != nil {
+				return worker.Err()
+			}
+			return err
+		})
+		var encoded []byte
+		if err == nil {
+			encoded, err = json.Marshal(output)
+		}
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		if job.snapshot.Status == model.JobCancelled {
-			return
-		}
+		job.cancel = nil
 		now := time.Now()
 		job.snapshot.FinishedAt = &now
 		if err != nil {
@@ -113,7 +142,23 @@ func (m *AnalysisJobs) Submit(ctx context.Context, in AnalysisInput) (AnalysisJo
 			}
 		} else {
 			job.snapshot.Status = model.JobSucceeded
-			job.snapshot.Output = &output
+			// Retain encoded results to bound stored bytes, not an unbounded
+			// collection of decoded row maps. TTL is an upper retention limit.
+			for m.retainedBytes+len(encoded) > m.resultBudget {
+				oldest := ""
+				for key, candidate := range m.jobs {
+					if len(candidate.output) > 0 && (oldest == "" || candidate.snapshot.FinishedAt.Before(*m.jobs[oldest].snapshot.FinishedAt)) {
+						oldest = key
+					}
+				}
+				if oldest == "" {
+					m.remove(id)
+					return
+				}
+				m.remove(oldest)
+			}
+			job.output = encoded
+			m.retainedBytes += len(encoded)
 		}
 	}()
 	return snapshot, nil
@@ -128,7 +173,7 @@ func (m *AnalysisJobs) Get(namespace string, rc model.RequestContext, id string)
 	if err != nil {
 		return AnalysisJobSnapshot{}, err
 	}
-	return cloneResolverValue(j.snapshot), nil
+	return m.snapshot(j)
 }
 
 func (m *AnalysisJobs) Cancel(namespace string, rc model.RequestContext, id string) (AnalysisJobSnapshot, error) {
@@ -138,15 +183,10 @@ func (m *AnalysisJobs) Cancel(namespace string, rc model.RequestContext, id stri
 	if err != nil {
 		return AnalysisJobSnapshot{}, err
 	}
-	if j.snapshot.Status == model.JobRunning {
+	if j.snapshot.Status == model.JobRunning && !j.finishing {
 		j.cancel()
-		now := time.Now()
-		j.snapshot.Status = model.JobCancelled
-		j.snapshot.FinishedAt = &now
-		j.snapshot.ErrorCode = "cancelled"
-		j.snapshot.Output = nil
 	}
-	return cloneResolverValue(j.snapshot), nil
+	return m.snapshot(j)
 }
 
 func (m *AnalysisJobs) owned(namespace string, rc model.RequestContext, id string) (*analysisJob, error) {
@@ -159,11 +199,32 @@ func (m *AnalysisJobs) owned(namespace string, rc model.RequestContext, id strin
 
 func (m *AnalysisJobs) Close() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.closed = true
 	for _, j := range m.jobs {
-		if j.snapshot.Status == model.JobRunning {
+		if j.snapshot.Status == model.JobRunning && !j.finishing {
 			j.cancel()
 		}
 	}
+	m.mu.Unlock()
+	m.wait.Wait()
+}
+
+func (m *AnalysisJobs) remove(id string) {
+	if j := m.jobs[id]; j != nil {
+		m.retainedBytes -= len(j.output)
+		delete(m.jobs, id)
+	}
+}
+
+func (m *AnalysisJobs) snapshot(j *analysisJob) (AnalysisJobSnapshot, error) {
+	snapshot := cloneResolverValue(j.snapshot)
+	if len(j.output) > 0 {
+		snapshot.Output = &AnalysisOutput{}
+		decoder := json.NewDecoder(bytes.NewReader(j.output))
+		decoder.UseNumber()
+		if err := decoder.Decode(snapshot.Output); err != nil {
+			return AnalysisJobSnapshot{}, err
+		}
+	}
+	return snapshot, nil
 }

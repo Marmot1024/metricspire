@@ -55,7 +55,7 @@ func TestAnalysisRealMCPDatabricks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"staged", "temporary_condition", "missing_null", "missing_error", "duplicate_error"} {
+	for _, mode := range []string{"staged", "temporary_condition", "missing_null", "missing_error", "duplicate_error", "excluded_missing"} {
 		t.Run(mode, func(t *testing.T) {
 			f := realCalendarFixture(t)
 			switch mode {
@@ -68,6 +68,10 @@ func TestAnalysisRealMCPDatabricks(t *testing.T) {
 				}
 				f.query.Summarize = nil
 				f.query.OrderBy = nil
+			case "excluded_missing":
+				f.catalog.Relationships[0].Keys = []exploration.JoinKey{{From: "key", To: "key"}}
+				f.catalog.Relationships[0].Missing = "error"
+				f.query.Where = &exploration.Expression{Op: "eq", Args: []exploration.Expression{{Op: "weekday", Args: []exploration.Expression{{Op: "ref", Ref: "day"}}}, {Op: "literal", Type: model.DataTypeInteger, Value: "6"}}}
 			case "duplicate_error":
 				f.catalog.Relationships[0].Snapshot = nil
 			}
@@ -123,6 +127,9 @@ func TestAnalysisRealMCPDatabricks(t *testing.T) {
 				expected := [][]any{{3, "full", 2, 14, 8, 8.5, 1.0}}
 				if mode == "temporary_condition" {
 					expected = [][]any{{3, "full", 1, 7, 4, 12.0, .5}, {3, "partial", 1, 6, 3, 5.5, .5}}
+				}
+				if mode == "excluded_missing" {
+					expected = [][]any{{3, "partial", 2, 2, 0, 11.5, 1.0}}
 				}
 				checkRealCalendarRows(t, job.Result.Rows, expected)
 			}

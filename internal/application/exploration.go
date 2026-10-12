@@ -158,13 +158,13 @@ func (s *AnalysisService) Execute(ctx context.Context, in AnalysisInput) (Analys
 	}
 	ctx, cancel := context.WithDeadline(ctx, started.Add(p.Plan.Source.Timeout))
 	defer cancel()
-	return s.executePlanned(ctx, in, p, "")
+	return s.executePlanned(ctx, in, p, "", nil)
 }
 
 // Private execution accepts only plans produced by this service. Public
 // adapters must never deserialize an AnalysisPlanOutput to execute it.
-func (s *AnalysisService) executePlanned(ctx context.Context, in AnalysisInput, p AnalysisPlanOutput, jobID string) (AnalysisOutput, error) {
-	if err := ctx.Err(); err != nil {
+func (s *AnalysisService) executePlanned(ctx context.Context, in AnalysisInput, p AnalysisPlanOutput, jobID string, seal func(error) error) (AnalysisOutput, error) {
+	if err := ctx.Err(); err != nil && jobID == "" {
 		return AnalysisOutput{}, err
 	}
 	if err := exploration.Verify(p.Plan); err != nil {
@@ -176,15 +176,28 @@ func (s *AnalysisService) executePlanned(ctx context.Context, in AnalysisInput, 
 		event.ModelName = semantic.Name
 		event.ReleaseID = "external:" + semantic.Version
 	}
-	if err := s.audit.Record(control, event); err != nil {
+	// Accepted work must leave an audit trail even if cancelled before scheduling.
+	admission, stopAdmission := context.WithTimeout(context.WithoutCancel(control), auditCompletionTimeout)
+	admissionErr := s.audit.Record(admission, event)
+	stopAdmission()
+	if admissionErr != nil {
 		return AnalysisOutput{}, fmt.Errorf("%w: start analysis", audit.ErrUnavailable)
 	}
-	execution, err := s.engine.Execute(ctx, p.Plan)
+	var execution model.ExecutionSnapshot
+	err := ctx.Err()
+	if err == nil {
+		execution, err = s.engine.Execute(ctx, p.Plan)
+	}
 	if err == nil {
 		err = ctx.Err()
 	}
 	if err == nil {
 		err = validateAnalysisResult(p.Plan, execution)
+	}
+	// The job manager serializes this decision with cancellation. Terminal
+	// audit and public job state then describe the same execution outcome.
+	if seal != nil {
+		err = seal(err)
 	}
 	event.Kind = audit.EventQuerySucceeded
 	event.OccurredAt = time.Now()
@@ -205,6 +218,11 @@ func (s *AnalysisService) executePlanned(ctx context.Context, in AnalysisInput, 
 		return AnalysisOutput{}, fmt.Errorf("%w: complete analysis", audit.ErrUnavailable)
 	}
 	if err != nil {
+		return AnalysisOutput{}, err
+	}
+	// Completion audit may finish under its independent cleanup budget. Do not
+	// release rows if the query was cancelled or expired while it was recording.
+	if err := ctx.Err(); err != nil && seal == nil {
 		return AnalysisOutput{}, err
 	}
 	return AnalysisOutput{AnalysisPlanOutput: p, Execution: execution}, nil

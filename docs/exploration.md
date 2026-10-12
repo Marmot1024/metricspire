@@ -21,7 +21,8 @@ Every source must expose a root DATE attribute for mandatory bounded time ranges
 Attributes marked `internal_only: true` can define intermediate counting units
 and predicates, but cannot be returned as values. Counts are allowed; aliases,
 buckets and numeric aggregates retain the restriction. Discovery exposes this
-rule and planning rejects violations before submission. This does not provide
+rule and planning rejects violations before submission. Physical-column aliases
+must use the same restriction, including across dataset aliases. This does not provide
 statistical privacy or a minimum cohort size.
 `timeout` is a Go duration: YAML accepts `1m`; JSON uses nanoseconds.
 
@@ -73,7 +74,8 @@ analysis. Common business workflows belong in external semantics.
 The planner follows explicit directed paths, at most eight joins, with complete
 composite keys. Targets must match at most one row. Target aggregation prevents
 fanout; duplicate matches reject the query. Missing matches preserve NULL or
-reject according to configuration. No arbitrary caller-provided JOIN.
+reject according to configuration. Source and request row filters define the population before match checks.
+No arbitrary caller-provided JOIN.
 
 Exact DATE snapshots support `same_day`, `week_start`, and `week_end`, anchored
 to the root business date. Each week uses its own snapshot, including across
@@ -104,7 +106,13 @@ Requests contain no SQL, physical bindings, identity, policy or executable plan.
 Public discovery/plans/results omit those internals. Tokens reach only engine
 execution. Admission/completion audit failures withhold results. Jobs are owned
 by tenant, namespace and principal; accepted work survives request disconnect.
-Cancellation propagates to the warehouse. Concurrency exhaustion returns 429.
+Cancellation requests propagate to the warehouse; the worker publishes a terminal
+state after completion audit. Once that outcome is sealed, late cancellation does
+not change it. Shutdown drains workers and their audit cleanup before closing
+storage. Concurrency exhaustion returns 429. Completed results share a 32 MiB
+encoded-result budget; oldest results can expire before their TTL under pressure.
+Missing, expired and foreign jobs all return 404. Planning rejects requests whose
+combined literals, filters and join bindings exceed 1,000 parameters.
 This is a bounded single-process job manager: no restart recovery or durable
 queue. Time/row/byte/operator bounds are not a scan-byte or cost guarantee.
 

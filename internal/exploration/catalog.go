@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/marmot1024/metricspire/internal/canonical"
@@ -113,7 +114,7 @@ func ValidateCatalog(c Catalog) error {
 		fields[d.Name] = map[string]BoundField{}
 		physicalColumns := map[string]bool{}
 		for _, f := range d.Fields {
-			if !namePattern.MatchString(f.Name) || fields[d.Name][f.Name].Name != "" || !physicalIdentifier.MatchString(f.Column) || f.Column == "_analysis_matches" || physicalColumns[f.Column] || !validType(f.Type) {
+			if !namePattern.MatchString(f.Name) || fields[d.Name][f.Name].Name != "" || !physicalIdentifier.MatchString(f.Column) || strings.EqualFold(f.Column, "_analysis_matches") || physicalColumns[strings.ToLower(f.Column)] || !validType(f.Type) {
 				return invalid("catalog.datasets.fields", "invalid or duplicate field")
 			}
 			if f.Type == model.DataTypeDate {
@@ -124,15 +125,22 @@ func ValidateCatalog(c Catalog) error {
 				return invalid("catalog.datasets.fields", "calendar timezone applies to DATE fields only")
 			}
 			fields[d.Name][f.Name] = f
-			physicalColumns[f.Column] = true
+			physicalColumns[strings.ToLower(f.Column)] = true
 		}
 		datasets[d.Name] = d
 	}
 	attributes := map[string]Attribute{}
+	classifications := map[string]bool{}
 	for _, a := range c.Attributes {
 		if !namePattern.MatchString(a.Name) || attributes[a.Name].Name != "" || fields[a.Dataset][a.Field].Name == "" {
 			return invalid("catalog.attributes", "invalid or duplicate attribute")
 		}
+		r := datasets[a.Dataset].Resource
+		key := strings.ToLower(strings.Join([]string{r.Catalog, r.Schema, r.Table, fields[a.Dataset][a.Field].Column}, "."))
+		if restricted, exists := classifications[key]; exists && restricted != a.InternalOnly {
+			return invalid("catalog.attributes", "aliases of a physical column must share internal_only classification")
+		}
+		classifications[key] = a.InternalOnly
 		attributes[a.Name] = a
 	}
 	to := map[string]bool{}
@@ -512,6 +520,9 @@ func physicalFingerprint(p model.PhysicalPlan) (string, error) {
 }
 
 func detachPlan(p Plan) (Plan, error) {
+	if err := validateParameterBudget(p); err != nil {
+		return Plan{}, err
+	}
 	data, err := json.Marshal(p)
 	if err != nil {
 		return Plan{}, err

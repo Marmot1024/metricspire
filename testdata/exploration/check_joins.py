@@ -30,6 +30,11 @@ if mode == 'duplicate':
     db.execute("INSERT INTO labels VALUES ('p','2026-08-09','conflicting','east')")
 if mode == 'composite':
     db.execute("INSERT INTO labels VALUES ('p','2026-08-09','other_region','west')")
+if mode == 'excluded_fixed':
+    db.execute("UPDATE orders SET person_id='invalid' WHERE valid=0")
+    db.execute("INSERT INTO labels VALUES ('invalid','2026-08-09','bad1','east'),('invalid','2026-08-09','bad2','east')")
+if mode == 'excluded_where':
+    db.execute("INSERT INTO labels VALUES ('missing','2026-08-16','bad1','east'),('missing','2026-08-16','bad2','east')")
 params = {}
 for p in payload['statement']['parameters']:
     v = p['value']
@@ -42,6 +47,7 @@ if mode in ('duplicate','missing_error'):
     except sqlite3.OperationalError: print('rejected ambiguous or missing match'); sys.exit(0)
     raise AssertionError('bad relation returned data')
 expected = [('2026-08-03','end1','books',2,30),('2026-08-10',None,'books',1,40),('2026-08-10','end2','games',1,30)]
+if mode in ('excluded_fixed', 'excluded_where'): expected.pop(1)
 if mode == 'week_start': expected[0] = ('2026-08-03','start1','books',2,30); expected[2] = ('2026-08-10','start2','games',1,30)
 if mode == 'same_day': expected = [('2026-08-03','mid1','books',1,20),('2026-08-03','start1','books',1,10),('2026-08-10',None,'books',1,40),('2026-08-10','start2','games',1,30)]
 if mode == 'temporary_condition': expected[0] = ('2026-08-03','end1','books',1,20)

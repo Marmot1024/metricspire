@@ -30,12 +30,15 @@ func TestAnalysisDirectSourceMultiTableOracle(t *testing.T) {
 	if err != nil {
 		t.Skip("Python numerical oracle unavailable")
 	}
-	for _, mode := range []string{"normal", "same_day", "week_start", "duplicate", "missing_error", "composite", "temporary_condition", "staged_customers"} {
+	for _, mode := range []string{"normal", "same_day", "week_start", "duplicate", "missing_error", "composite", "temporary_condition", "staged_customers", "excluded_fixed", "excluded_where"} {
 		t.Run(mode, func(t *testing.T) {
 			c, q, rc := directFixture(t)
 			switch mode {
 			case "same_day", "week_start":
 				c.Relationships[0].Snapshot.Anchor = mode
+			case "excluded_fixed", "excluded_where":
+				c.Relationships[0].Missing = "error"
+				q.Where = &exploration.Expression{Op: "lt", Args: []exploration.Expression{{Op: "ref", Ref: "amount"}, {Op: "literal", Type: model.DataTypeDecimal, Value: "40"}}}
 			case "missing_error":
 				c.Relationships[0].Missing = "error"
 			case "composite":
@@ -173,5 +176,63 @@ func TestAnalysisInternalAttributesStayOutOfResults(t *testing.T) {
 				t.Fatal("removing output restriction did not invalidate plan")
 			}
 		})
+	}
+}
+
+func TestAnalysisRejectsConflictingPhysicalAliases(t *testing.T) {
+	for _, mode := range []string{"same_field", "same_table", "column_case", "reserved_case"} {
+		t.Run(mode, func(t *testing.T) {
+			c, _, _ := directFixture(t)
+			a := exploration.Attribute{Name: "exposed", Dataset: "orders", Field: "person_id"}
+			switch mode {
+			case "same_table":
+				d := c.Datasets[0]
+				d.Name = "copy"
+				c.Datasets = append(c.Datasets, d)
+				a.Dataset = "copy"
+			case "column_case":
+				c.Datasets[0].Fields = append(c.Datasets[0].Fields, exploration.BoundField{Name: "copy", Column: "PERSON_ID", Type: model.DataTypeString})
+				a.Field = "copy"
+			case "reserved_case":
+				c.Datasets[0].Fields = append(c.Datasets[0].Fields, exploration.BoundField{Name: "copy", Column: "_ANALYSIS_MATCHES", Type: model.DataTypeInteger})
+			}
+			c.Attributes = append(c.Attributes, a)
+			if err := exploration.ValidateCatalog(c); err == nil {
+				t.Fatal("physical classification bypass accepted")
+			}
+		})
+	}
+}
+
+func TestAnalysisPlansCombinedParameterBudget(t *testing.T) {
+	c, q, rc := directFixture(t)
+	// Seven binding parameters: date range, snapshot range and three duplicate guards.
+	// Plus one fixed-filter literal and one row-condition literal.
+	q.Where = &exploration.Expression{Op: "gte", Args: []exploration.Expression{{Op: "ref", Ref: "amount"}, {Op: "literal", Type: model.DataTypeDecimal, Value: "0"}}}
+	for i := 0; i < 10; i++ {
+		n := 100
+		if i == 9 {
+			n = 91
+		}
+		values := make([]string, n)
+		for j := range values {
+			values[j] = "books"
+		}
+		q.Filters = append(q.Filters, model.Filter{Dimension: "category", Operator: model.FilterIn, Values: values})
+	}
+	p, err := exploration.PlanCatalog(c, q, rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statement, err := databricks.CompileAnalysis(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statement.Parameters) != 1000 {
+		t.Fatalf("boundary count: %d", len(statement.Parameters))
+	}
+	q.Filters[9].Values = append(q.Filters[9].Values, "books")
+	if _, err := exploration.PlanCatalog(c, q, rc); err == nil {
+		t.Fatal("over-budget query was accepted before execution")
 	}
 }

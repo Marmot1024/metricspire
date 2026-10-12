@@ -175,6 +175,27 @@ func TestAnalysisWithholdsIncompleteAndUnauditedResults(t *testing.T) {
 	}
 }
 
+func TestAnalysisWithholdsResultCancelledDuringCompletionAudit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	completionRecorded := false
+	recorder := audit.RecorderFunc(func(_ context.Context, event audit.QueryEvent) error {
+		if event.Kind == audit.EventQuerySucceeded {
+			completionRecorded = true
+			cancel()
+		}
+		return nil
+	})
+	engine := analysisEngineFunc(func(_ context.Context, p exploration.Plan) (model.ExecutionSnapshot, error) {
+		return analysisSuccess(p), nil
+	})
+	service, in := analysisServiceFixture(t, engine, recorder, false, time.Minute)
+	out, err := service.Execute(ctx, in)
+	if !completionRecorded || !errors.Is(err, context.Canceled) || out.Execution.Result != nil {
+		t.Fatalf("result released after cancellation during completion audit: recorded=%v err=%v", completionRecorded, err)
+	}
+}
+
 func TestAnalysisAsyncOwnershipBudgetsAndCancellation(t *testing.T) {
 	entered := make(chan struct{})
 	stopped := make(chan struct{})
@@ -226,7 +247,7 @@ func TestAnalysisAsyncOwnershipBudgetsAndCancellation(t *testing.T) {
 		t.Fatal("cross-namespace job read")
 	}
 	snapshot, err := jobs.Cancel(in.Namespace, in.Context, job.ID)
-	if err != nil || snapshot.Status != model.JobCancelled || snapshot.Output != nil {
+	if err != nil || snapshot.Status != model.JobRunning || snapshot.Output != nil {
 		t.Fatal("cancel failed")
 	}
 	select {

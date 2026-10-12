@@ -123,7 +123,6 @@ func CompileAnalysis(p exploration.Plan) (Statement, error) {
 	if err != nil {
 		return Statement{}, err
 	}
-	predicates = append(predicates, guards...)
 	for _, f := range p.Base.Filters {
 		d := dimensions[f.Dimension]
 		col, err := ec.dimensionColumn(d)
@@ -136,21 +135,30 @@ func CompileAnalysis(p exploration.Plan) (Statement, error) {
 		}
 		predicates = append(predicates, predicate)
 	}
-	builder := analysisSQL{parameters: ec}
-	builder.current = "SELECT " + strings.Join(selects, ", ") + " FROM " + root + " AS t0 " + strings.Join(joins, " ") + " WHERE " + strings.Join(predicates, " AND ")
-	rowPredicates := []string{}
+	builder := analysisSQL{parameters: ec, rawRefs: map[string]string{}}
+	for name, dimension := range dimensions {
+		col, err := ec.dimensionColumn(dimension)
+		if err != nil {
+			return Statement{}, err
+		}
+		builder.rawRefs[name] = col
+	}
 	for _, condition := range []*exploration.Expression{p.Source.FixedFilter, p.Query.Where} {
 		if condition != nil {
 			sql, err := builder.expression(*condition)
 			if err != nil {
 				return Statement{}, err
 			}
-			rowPredicates = append(rowPredicates, sql)
+			predicates = append(predicates, "("+sql+")")
 		}
 	}
-	if len(rowPredicates) > 0 {
-		builder.append("SELECT * FROM " + builder.relation() + " WHERE " + strings.Join(rowPredicates, " AND "))
+	population := strings.Join(predicates, " AND ")
+	if len(guards) > 0 {
+		// CASE enforces short-circuiting: excluded rows cannot trigger match errors.
+		population = "CASE WHEN " + population + " THEN " + strings.Join(guards, " AND ") + " ELSE FALSE END"
 	}
+	builder.rawRefs = nil
+	builder.current = "SELECT " + strings.Join(selects, ", ") + " FROM " + root + " AS t0 " + strings.Join(joins, " ") + " WHERE " + population
 	if err = builder.stage(p.Query.GroupBy, p.Query.Measures, p.Query.Calculations, p.Query.TimeGrouping); err != nil {
 		return Statement{}, err
 	}
@@ -181,6 +189,7 @@ func CompileAnalysis(p exploration.Plan) (Statement, error) {
 }
 
 type analysisSQL struct {
+	rawRefs    map[string]string
 	parameters *expressionCompiler
 	next       int
 	current    string
@@ -240,6 +249,9 @@ func (b *analysisSQL) stage(groups []string, ms []exploration.Measure, cs []expl
 
 func (b *analysisSQL) expression(e exploration.Expression) (string, error) {
 	if e.Op == "ref" {
+		if b.rawRefs != nil {
+			return b.rawRefs[e.Ref], nil
+		}
 		return quote(e.Ref), nil
 	}
 	if e.Op == "literal" {

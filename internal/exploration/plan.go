@@ -181,6 +181,9 @@ func Prepare(q Query, s Source, base model.PhysicalPlan, rc model.RequestContext
 		return Plan{}, err
 	}
 	p := Plan{Source: s, Query: q, Base: base, Columns: cols}
+	if err := validateParameterBudget(p); err != nil {
+		return Plan{}, err
+	}
 	// Detach slices and pointers from caller-owned request and resolver objects.
 	data, err := json.Marshal(p)
 	if err != nil {
@@ -230,6 +233,9 @@ func Verify(p Plan) error {
 		if !slices.Contains(p.Source.Dimensions, ref) {
 			return invalid("plan.internal_only", "unknown internal attribute")
 		}
+	}
+	if err := validateParameterBudget(p); err != nil {
+		return err
 	}
 	return validateOutputAccess(p.Query, p.InternalOnly)
 }

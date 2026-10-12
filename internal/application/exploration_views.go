@@ -1,7 +1,9 @@
 package application
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"slices"
 	"time"
 
@@ -85,7 +87,19 @@ func PublicAnalysisJob(s AnalysisJobSnapshot) AnalysisJobView {
 		v.Plan = &p
 		v.Result = s.Output.Execution.Result
 	}
-	return cloneResolverValue(v)
+	// Typed result cells include int64 values; float64 round-trips corrupt
+	// values above 2^53. Keep their JSON numeric representation exact.
+	data, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	var detached AnalysisJobView
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&detached); err != nil {
+		panic(err)
+	}
+	return detached
 }
 
 // Discover exposes only sources granted by role and attributes granted by
