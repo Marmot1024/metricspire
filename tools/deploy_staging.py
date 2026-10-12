@@ -65,6 +65,30 @@ def preserve_config(frozen, package):
     shutil.copytree(frozen / "config", package / "config")
 
 
+def configure_exploration(package, namespace, catalog_path, warehouse, has_acceptance):
+    runtime_path = package / "config/runtime.json"
+    runtime = json.loads(runtime_path.read_text())
+    existing = runtime.get("exploration")
+    if (existing or catalog_path) and not has_acceptance:
+        raise RuntimeError("configured exploration requires analysis query/result acceptance fixtures")
+    if not catalog_path:
+        return  # Existing catalogs and execution budgets are preserved verbatim.
+    catalog = json.loads(catalog_path.read_text())
+    if catalog.get("tenant") != runtime["authentication"]["databricks_apps"]["tenant"] or catalog.get("namespace") != namespace:
+        raise RuntimeError("approved exploration catalog does not match target tenant/namespace")
+    target = package / "config/analysis-acceptance.json"
+    if existing:
+        if (existing.get("warehouse_id") != warehouse
+                or "analysis-acceptance.json" not in existing.get("catalog_paths", [])
+                or not target.is_file() or json.loads(target.read_text()) != catalog):
+            raise RuntimeError("exploration differs from the approved existing catalog; review before replacing")
+        return
+    shutil.copyfile(catalog_path, target)
+    runtime["exploration"] = dict(catalog_paths=["analysis-acceptance.json"], warehouse_id=warehouse,
+                                  concurrency=2, capacity=20, result_ttl="30m")
+    runtime_path.write_text(json.dumps(runtime, indent=2) + "\n")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     for key in ("app", "profile", "commit", "mcp-url", "issuer", "workspace-parent"):
@@ -77,8 +101,10 @@ def main():
     p.add_argument("--analysis-query", type=Path)
     p.add_argument("--analysis-expected", type=Path)
     a = p.parse_args()
-    if any((a.exploration_catalog, a.exploration_warehouse, a.analysis_query, a.analysis_expected)) and not all((a.exploration_catalog, a.exploration_warehouse, a.analysis_query, a.analysis_expected)):
-        p.error("exploration requires its approved catalog, warehouse and query/result fixtures together")
+    if bool(a.exploration_catalog) != bool(a.exploration_warehouse) or bool(a.analysis_query) != bool(a.analysis_expected):
+        p.error("catalog/warehouse and analysis query/expected must be supplied in pairs")
+    if a.exploration_catalog and not a.analysis_query:
+        p.error("a new exploration catalog requires query/result acceptance fixtures")
     commit = run(["git", "rev-parse", "--verify", a.commit + "^{commit}"], cwd=ROOT).decode().strip()
     db = lambda *args: ["databricks", *args, "--profile", a.profile]
     get_app = lambda: json.loads(run(db("apps", "get", a.app, "--output", "json")))
@@ -98,6 +124,7 @@ def main():
         extract_source(archive, source)
         run(db("workspace", "export-dir", frozen_path, str(frozen)))
         preserve_config(frozen, package)
+        configure_exploration(package, a.namespace, a.exploration_catalog, a.exploration_warehouse, bool(a.analysis_query))
         build(source, work, package, commit)
         gate = [str(work / "release-gate"), "--app", a.app, "--profile", a.profile,
                 "--commit", commit, "--mcp-url", a.mcp_url, "--issuer", a.issuer,
@@ -106,18 +133,6 @@ def main():
         run(gate + fixture + ["--preflight"], stream=True)
         if a.exploration_catalog:
             run([str(work / "metricspire-check"), "validate-analysis", "--catalog", str(a.exploration_catalog.resolve())])
-            catalog = json.loads(a.exploration_catalog.read_text())
-            runtime_path = package / "config/runtime.json"
-            runtime = json.loads(runtime_path.read_text())
-            if catalog.get("tenant") != runtime["authentication"]["databricks_apps"]["tenant"] or catalog.get("namespace") != a.namespace:
-                raise RuntimeError("approved exploration catalog does not match target tenant/namespace")
-            # Preserve any existing exploration configuration rather than overwrite it.
-            if "exploration" in runtime:
-                raise RuntimeError("exploration already configured; review its existing catalog before replacing")
-            shutil.copyfile(a.exploration_catalog, package / "config/analysis-acceptance.json")
-            runtime["exploration"] = dict(catalog_paths=["analysis-acceptance.json"], warehouse_id=a.exploration_warehouse,
-                                          concurrency=2, capacity=20, result_ttl="30m")
-            runtime_path.write_text(json.dumps(runtime, indent=2) + "\n")
         # Detect concurrent deployments before making any remote change.
         if get_app()["active_deployment"]["deployment_id"] != previous["deployment_id"]:
             raise RuntimeError("App changed during preflight; stop without deploying")
