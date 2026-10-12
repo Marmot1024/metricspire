@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	"golang.org/x/term"
 )
 
 //go:embed skill/SKILL.md
@@ -137,8 +138,7 @@ func run(args []string, out io.Writer) error {
 			fmt.Fprintln(out, "Codex 当前未报告已登录。需要登录时，在普通终端运行：codex mcp login metricspire")
 			return errors.New("连接已配置，登录尚未验证；本次未发起授权")
 		}
-		info, err := os.Stdin.Stat()
-		if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
 			return errors.New("首次登录需要交互终端；请运行 codex mcp login metricspire")
 		}
 		fmt.Fprintln(out, "首次连接：将使用 Codex 原生浏览器登录，不指定额外 scopes。")

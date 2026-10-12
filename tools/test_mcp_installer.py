@@ -123,6 +123,13 @@ class InstallerTest(unittest.TestCase):
         self.assertNotEqual(self.run_file(terminal=True).returncode, 0)
         self.assert_no_login()
 
+    def test_null_stdin_never_starts_login(self):
+        result = subprocess.run(["sh", str(self.artifact)], env=self.env,
+                                stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.config.exists())
+        self.assert_no_login()
+
     def test_denied_login_stops_and_repeat_does_not_retry(self):
         self.env["FAKE_DENY"] = "1"
         self.assertNotEqual(self.run_file(terminal=True).returncode, 0)
@@ -177,6 +184,14 @@ class InstallerTest(unittest.TestCase):
 
 
 class BuilderTest(unittest.TestCase):
+    def test_invalid_mcp_ports_rejected_before_build(self):
+        c = dict(url="https://metrics.example.invalid/mcp", client_id="public",
+                 callback_url="http://127.0.0.1/callback/test", callback_port=43127)
+        for port in ("not-a-port", "65536"):
+            with self.subTest(port=port), self.assertRaises(ValueError):
+                builder.validate_connection(dict(c, url=f"https://metrics.example.invalid:{port}/mcp"))
+        builder.validate_connection(dict(c, url="https://metrics.example.invalid:443/mcp"))
+
     def test_secrets_and_remote_callbacks_rejected(self):
         c = dict(url="https://metrics.example.invalid/mcp", client_id="public",
                  callback_url="http://127.0.0.1/callback/test", callback_port=43127)

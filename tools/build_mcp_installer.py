@@ -56,6 +56,8 @@ def validate_connection(c):
         if not isinstance(c[key], str) or not c[key] or any(ord(ch) < 32 for ch in c[key]):
             raise ValueError("Invalid public connection field")
     u = urlsplit(c["url"])
+    # urlsplit defers port syntax/range validation until this property is read.
+    _ = u.port
     if u.scheme != "https" or not u.hostname or u.username or u.password or u.query or u.fragment:
         raise ValueError("MCP URL must use HTTPS without credentials, query or fragment")
     u = urlsplit(c["callback_url"])

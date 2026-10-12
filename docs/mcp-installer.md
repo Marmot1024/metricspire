@@ -8,7 +8,7 @@ sh ~/Downloads/metricspire-install.sh
 
 Requires Codex CLI 0.162.0+ on PATH and macOS/Linux (arm64 or amd64). No repository, Go, Python, Databricks CLI or PAT is needed on the user's machine. The file contains a temporary setup helper, the public connection parameters and a short usage skill; it installs no query CLI or credential helper.
 
-A new connection opens Codex's native OAuth login once, using the provider's default scopes. Existing matching connections and skills stay unchanged. Conflicting parameters, disabled connections and custom skills stop with a specific message. Rerunning the installer never automatically reauthorizes an existing connection. If Codex explicitly requires login, use `codex mcp login metricspire`; the installer does not logout, clear caches or expand scopes.
+A new connection run from an interactive terminal opens Codex's native OAuth login once, using the provider's default scopes. Non-interactive input (including `/dev/null`) never starts login. Existing matching connections and skills stay unchanged. Conflicting parameters, disabled connections and custom skills stop with a specific message. Rerunning the installer never automatically reauthorizes an existing connection. If Codex explicitly requires login, use `codex mcp login metricspire`; the installer does not logout, clear caches or expand scopes.
 
 After setup, open a fresh Codex session and ask: **使用 MetricSpire，调用 list_namespaces 验证连接。** The installed skill guides discovery and query execution. A saved OAuth record or browser callback does not prove tool access, query results or silent token renewal; validate those separately. A sandboxed diagnostic process may not share the normal client's credential access.
 
