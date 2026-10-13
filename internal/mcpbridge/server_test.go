@@ -79,7 +79,7 @@ func TestProtocolToolsUseOnlyExistingAPI(t *testing.T) {
 		case "/api/v1/ui/context":
 			fmt.Fprint(w, `{"namespaces":["acceptance"],"models":[{"model_name":"private_route"}],"display_name":"private_person"}`)
 		case "/api/v1/catalog/search":
-			if r.URL.Query().Get("namespace") != "acceptance" || r.URL.Query().Get("q") != "a&b" || r.URL.Query().Get("limit") != "20" {
+			if r.URL.Query().Get("namespace") != "acceptance" || r.URL.Query().Get("q") != "a&b" || r.URL.Query().Get("limit") != "5" {
 				t.Error("search not encoded/defaulted")
 			}
 			fmt.Fprint(w, `[{"name":"revenue","description":"Sum of paid orders","allowed_dimensions":["channel"],"model_name":"private_route"}]`)

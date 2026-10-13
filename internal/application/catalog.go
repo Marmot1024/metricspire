@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/marmot1024/metricspire/internal/catalog"
@@ -168,7 +169,7 @@ func (service *CatalogService) trialNamespaceEnabled(namespace string) bool {
 // SearchActive returns only metrics in active releases that the trusted
 // principal is authorized to query. Physical bindings are never exposed.
 func (service *CatalogService) SearchActive(ctx context.Context, scope QueryScope, search string, limit int) ([]MetricCatalogEntry, error) {
-	return service.searchActive(ctx, scope, search, nil, limit)
+	return service.searchActive(ctx, scope, search, nil, limit, true)
 }
 
 // SearchActiveCodes resolves exact counterparts for a bounded catalog merge.
@@ -184,10 +185,15 @@ func (service *CatalogService) SearchActiveCodes(ctx context.Context, scope Quer
 	for _, code := range codes {
 		wanted[code] = struct{}{}
 	}
-	return service.searchActive(ctx, scope, "", wanted, MaxCatalogSearchResults)
+	return service.searchActive(ctx, scope, "", wanted, MaxCatalogSearchResults, true)
 }
 
-func (service *CatalogService) searchActive(ctx context.Context, scope QueryScope, search string, codes map[string]struct{}, limit int) ([]MetricCatalogEntry, error) {
+// SearchActiveSummary omits binding and dimension-detail work for discovery.
+func (service *CatalogService) SearchActiveSummary(ctx context.Context, scope QueryScope, search string, limit int) ([]MetricCatalogEntry, error) {
+	return service.searchActive(ctx, scope, search, nil, limit, false)
+}
+
+func (service *CatalogService) searchActive(ctx context.Context, scope QueryScope, search string, codes map[string]struct{}, limit int, detailed bool) ([]MetricCatalogEntry, error) {
 	if strings.TrimSpace(scope.Namespace) == "" || strings.TrimSpace(scope.Context.Tenant) == "" || strings.TrimSpace(scope.Context.Principal) == "" {
 		return nil, errors.New("catalog search scope is incomplete")
 	}
@@ -199,9 +205,31 @@ func (service *CatalogService) searchActive(ctx context.Context, scope QueryScop
 		return nil, err
 	}
 	query := strings.ToLower(strings.TrimSpace(search))
-	results := make([]MetricCatalogEntry, 0)
+	type candidate struct {
+		entry   MetricCatalogEntry
+		release catalog.Release
+		bundle  model.PolicyBundle
+		metric  model.Metric
+	}
+	candidates := make([]candidate, 0)
 	for _, release := range releases {
 		if catalog.IsTrialRelease(release) && !service.trialNamespaceEnabled(scope.Namespace) {
+			continue
+		}
+		// Filter immutable definitions first. Unrelated models do not need policy
+		// compilation or binding resolution just to answer a narrow search.
+		matches := make([]model.Metric, 0)
+		for _, metric := range release.Manifest.Definitions.Metrics {
+			if codes != nil {
+				if _, wanted := codes[metric.Name]; !wanted {
+					continue
+				}
+			}
+			if matchesMetricCatalogQuery(query, metric) {
+				matches = append(matches, metric)
+			}
+		}
+		if len(matches) == 0 {
 			continue
 		}
 		modelScope := scope
@@ -217,57 +245,89 @@ func (service *CatalogService) searchActive(ctx context.Context, scope QueryScop
 		if err != nil {
 			return nil, err
 		}
-		resolvedBinding, err := service.bindings.ResolveBinding(ctx, modelScope, release)
-		if err != nil {
-			return nil, err
-		}
-		for _, metric := range release.Manifest.Definitions.Metrics {
-			candidate := model.SemanticQuery{Metrics: []string{metric.Name}}
-			if _, err := policy.Authorize(scope.Context, bundle, release.ManifestFingerprint, candidate); err != nil {
+		for _, metric := range matches {
+			if _, err := policy.Authorize(scope.Context, bundle, release.ManifestFingerprint, model.SemanticQuery{Metrics: []string{metric.Name}}); err != nil {
 				var problem *model.Problem
 				if errors.As(err, &problem) && problem.Code == "permission_denied" {
 					continue
 				}
 				return nil, err
 			}
-			if codes != nil {
-				if _, wanted := codes[metric.Name]; !wanted {
-					continue
-				}
-			}
-			if !matchesMetricCatalogQuery(query, metric) {
-				continue
-			}
-			authorizedDimensions, err := catalogDimensions(scope.Context, bundle, release.ManifestFingerprint, metric)
-			if err != nil {
-				return nil, err
-			}
-			dimensionDetails := CatalogDimensionDetails(release.Manifest, resolvedBinding, authorizedDimensions)
-			var granularities []model.TimeGranularity
-			for _, dimension := range release.Manifest.Definitions.Dimensions {
-				if dimension.Name == metric.TimeDimension {
-					granularities = append([]model.TimeGranularity(nil), dimension.TimeGranularities...)
-					break
-				}
-			}
-			results = append(results, MetricCatalogEntry{
+			entry := MetricCatalogEntry{
 				Namespace: release.Namespace, ModelName: release.Name, ReleaseID: release.ID,
 				ReleaseChannel: release.Channel, ManifestFingerprint: release.ManifestFingerprint, Name: metric.Name,
-				ExternalCode: metric.ExternalCode,
-				DisplayName:  metric.DisplayName, Description: metric.Description, Owner: metric.Owner,
-				VerificationStatus: metric.Verification.Status,
-				Tags:               append([]string(nil), metric.Tags...), UsageExamples: append([]string(nil), metric.UsageExamples...), Deprecated: metric.Deprecated,
-				Entity: metric.Entity, Kind: metric.Kind, ValueType: metric.ValueType, Unit: metric.Unit,
-				Expression:        metric.Expression,
-				AllowedDimensions: authorizedDimensions, DimensionDetails: dimensionDetails, TimeDimension: metric.TimeDimension,
-				TimeGranularities: granularities,
-			})
-			if len(results) == limit {
-				return results, nil
+				ExternalCode: metric.ExternalCode, DisplayName: metric.DisplayName, Description: metric.Description, Owner: metric.Owner,
+				VerificationStatus: metric.Verification.Status, Tags: append([]string(nil), metric.Tags...), UsageExamples: append([]string(nil), metric.UsageExamples...), Deprecated: metric.Deprecated,
+				Entity: metric.Entity, Kind: metric.Kind, ValueType: metric.ValueType, Unit: metric.Unit, Expression: metric.Expression,
+				TimeDimension: metric.TimeDimension,
 			}
+			candidates = append(candidates, candidate{entry, release, bundle, metric})
 		}
 	}
+	// Rank before taking the limit: an exact match must not be displaced by
+	// substring matches in an earlier model. Ties are stable across repositories.
+	sort.SliceStable(candidates, func(i, j int) bool {
+		left, right := candidates[i].entry, candidates[j].entry
+		lr, rr := catalogMatchRank(query, left), catalogMatchRank(query, right)
+		if lr != rr {
+			return lr < rr
+		}
+		if left.Name != right.Name {
+			return left.Name < right.Name
+		}
+		return left.ModelName < right.ModelName
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	results := make([]MetricCatalogEntry, 0, len(candidates))
+	bindings := make(map[string]model.SourceBinding)
+	for _, candidate := range candidates {
+		dimensions, err := catalogDimensions(scope.Context, candidate.bundle, candidate.release.ManifestFingerprint, candidate.metric)
+		if err != nil {
+			return nil, err
+		}
+		entry := candidate.entry
+		entry.AllowedDimensions = dimensions
+		if detailed {
+			binding, exists := bindings[candidate.release.ID]
+			if !exists {
+				modelScope := scope
+				modelScope.ModelName = candidate.release.Name
+				binding, err = service.bindings.ResolveBinding(ctx, modelScope, candidate.release)
+				if err != nil {
+					return nil, err
+				}
+				bindings[candidate.release.ID] = binding
+			}
+			entry.DimensionDetails = CatalogDimensionDetails(candidate.release.Manifest, binding, dimensions)
+		}
+		for _, dimension := range candidate.release.Manifest.Definitions.Dimensions {
+			if dimension.Name == entry.TimeDimension {
+				entry.TimeGranularities = append([]model.TimeGranularity(nil), dimension.TimeGranularities...)
+				break
+			}
+		}
+		results = append(results, entry)
+	}
 	return results, nil
+}
+
+func catalogMatchRank(query string, metric MetricCatalogEntry) int {
+	if query == "" {
+		return 2
+	}
+	for _, value := range []string{metric.Name, metric.ExternalCode, metric.DisplayName} {
+		if strings.ToLower(value) == query {
+			return 0
+		}
+	}
+	for _, value := range []string{metric.Name, metric.ExternalCode, metric.DisplayName} {
+		if strings.HasPrefix(strings.ToLower(value), query) {
+			return 1
+		}
+	}
+	return 2
 }
 
 // CatalogDimensionDetails describes semantic dimensions using a reviewed binding.

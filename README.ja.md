@@ -31,7 +31,7 @@ MetricSpire はオープンソースのセマンティック指標サービス�
 - **管理されたカタログ：** PostgreSQL に楽観的リビジョン管理付きの下書き、検証、変更不能な `trial` / `certified` リリース、有効化・無効化、ロールバック、履歴イベントを保存します。
 - **移植可能な意味論：** 制約付きの式と論理計画を採用し、環境固有のテーブル・列の対応付けはレビュー済みの `SourceBinding` に分離します。呼び出し側から任意の SQL は受け付けません。
 - **制御された実行：** 方針・エンジン能力の検査、決定的な計画、パラメーター化された Databricks SQL、タイムアウト、キャンセル、型付き結果、行数・バイト数の上限、失敗時に閉じる監査を備えます。
-- **三つの入口と一つのサービス：** 管理・検索 UI、厳格な HTTP API、七つのリモート MCP クエリツールが同じアプリケーションサービスを利用します。
+- **三つの入口と一つのサービス：** 管理・検索 UI、厳格な HTTP API、十一の基本リモート MCP クエリツールが同じアプリケーションサービスを利用します。
 - **明確な認証境界：** セルフホストでは標準 OIDC、Databricks Apps ではプラットフォーム管理の ID を利用します。製品側の権限でウェアハウス固有のデータ権限を上書きすることはありません。
 
 Databricks SQL は最初の分析エンジンアダプターです。PostgreSQL はトランザクション用の**制御プレーン**を担います。別途、明示的に有効化する[オンライン HTTP プレビュー](docs/online-query.md)では、数値の指標コードと専用の読み取り資格情報で審査済みの事前集計を取得できます。Warehouse への自動フォールバックは行いません。汎用の複数エンジン分析や本番の遅延・可用性保証はうたっていません。詳しくは[アーキテクチャ](docs/architecture.md)と [HTTP 契約](docs/http-api.md)（英語）をご覧ください。
@@ -67,8 +67,8 @@ go run ./cmd/metricspire plan \
 デプロイ済みのインスタンスは `/api/v1/mcp` で Streamable HTTP MCP を公開します（Databricks Apps で推奨するパス）。クライアントは URL に接続するだけで、リポジトリのクローンやローカル実行は不要です。ツールは探索、説明、計画、制限付きクエリの送信、状態取得、キャンセルを提供し、**任意 SQL や公開操作は提供しません**。
 
 ```text
-list_namespaces → search_metrics → explain_query → plan_query
-               → submit_query → get_query / cancel_query
+list_namespaces → search_metrics → get_metric_details → prepare_query → run_query
+               → get_query / cancel_query（未完了の場合のみ）
 ```
 
 各リクエストは個別に認証されます。ローカル Codex はインストーラー経由で Databricks CLI のユーザー認証を利用します。利用者自身の App とデータへの権限が必要で、ログイン成功だけではクエリの検証にはなりません。[MCP 接続](docs/mcp.md)に設定と安全上の制約、[開発状況](docs/development-status.md)に検証済みの範囲を記載しています（英語）。

@@ -143,7 +143,7 @@ func TestAnalysisHTTPAndMCPUseDirectSemantics(t *testing.T) {
 	}
 	session := connectAnalysisMCP(t, handler, "query")
 	tools, err := session.ListTools(t.Context(), nil)
-	if err != nil || len(tools.Tools) != 12 {
+	if err != nil || len(tools.Tools) != 16 {
 		t.Fatalf("tools=%v err=%v", tools, err)
 	}
 	args := map[string]any{"namespace": "demo", "query": f.query}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/audit"
@@ -52,9 +53,18 @@ func (backend *remoteMCPBackend) ListNamespaces(context.Context) ([]string, erro
 func (backend *remoteMCPBackend) SearchMetrics(ctx context.Context, input mcpbridge.SearchInput) ([]application.MetricCatalogEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, backend.server.config.ControlTimeout)
 	defer cancel()
-	result, err := backend.server.deps.CatalogSearch.SearchActive(ctx, application.QueryScope{
-		Namespace: input.Namespace, Context: backend.requestContext(),
-	}, input.Search, input.Limit)
+	started := time.Now()
+	scope := application.QueryScope{Namespace: input.Namespace, Context: backend.requestContext()}
+	search := backend.server.deps.CatalogSearch.SearchActive
+	if input.View != "detail" {
+		if summary, ok := backend.server.deps.CatalogSearch.(interface {
+			SearchActiveSummary(context.Context, application.QueryScope, string, int) ([]application.MetricCatalogEntry, error)
+		}); ok {
+			search = summary.SearchActiveSummary
+		}
+	}
+	result, err := search(ctx, scope, input.Search, input.Limit)
+	backend.server.logger.Info("MCP catalog search", "request_id", requestID(backend.request), "elapsed_ms", time.Since(started).Milliseconds(), "matches", len(result))
 	return result, backend.safeError(err)
 }
 
@@ -176,7 +186,7 @@ func (backend *remoteMCPBackend) safeError(err error) error {
 
 func safeMCPDomainDetail(problem *model.Problem) bool {
 	switch problem.Code {
-	case "required", "duplicate_value", "invalid_query", "invalid_time", "time_range_required", "time_range_exceeded", "unsupported_timezone", "limit_exceeded", "budget_exceeded":
+	case "prepared_query_changed", "required", "duplicate_value", "invalid_query", "invalid_time", "time_range_required", "time_range_exceeded", "unsupported_timezone", "limit_exceeded", "budget_exceeded":
 		return true
 	case "unknown_reference":
 		// The same code is also used for internal bindings and expression

@@ -77,6 +77,10 @@ func (manager *JobManager) Submit(submissionContext context.Context, input Query
 	if input.Context.Tenant == "" || input.Context.Principal == "" || input.Context.RequestID == "" {
 		return QueryJobSnapshot{}, errors.New("trusted request context is incomplete")
 	}
+	if input.ExpectedPlan != nil {
+		expected := *input.ExpectedPlan
+		input.ExpectedPlan = &expected
+	}
 	now := time.Now().UTC()
 	id := manager.newID()
 	jobParent := executionauth.PropagateAccessToken(manager.parent, submissionContext)

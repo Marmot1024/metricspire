@@ -27,7 +27,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func TestRemoteMCPAuthenticatesEveryRequestAndExposesSevenScopedTools(t *testing.T) {
+func TestRemoteMCPAuthenticatesEveryRequestAndExposesScopedTools(t *testing.T) {
 	const requestToken = "secret-mcp-request-token"
 	const executionToken = "secret-mcp-execution-token"
 	var credentialCalls atomic.Int32
@@ -61,6 +61,7 @@ func TestRemoteMCPAuthenticatesEveryRequestAndExposesSevenScopedTools(t *testing
 	wantTools := map[string]bool{
 		"list_namespaces": true, "search_metrics": true, "explain_query": true, "plan_query": true,
 		"submit_query": false, "get_query": true, "cancel_query": false,
+		"get_metric_details": true, "discover_query_routes": true, "prepare_query": true, "run_query": false,
 	}
 	if len(listed.Tools) != len(wantTools) {
 		t.Fatalf("tools=%d, want %d", len(listed.Tools), len(wantTools))
@@ -81,7 +82,7 @@ func TestRemoteMCPAuthenticatesEveryRequestAndExposesSevenScopedTools(t *testing
 	}
 
 	query := readQuery(t)
-	catalogOutput := callRemoteMCP(t, session, "search_metrics", map[string]any{"namespace": "demo", "search": "gross"}, false)
+	catalogOutput := callRemoteMCP(t, session, "search_metrics", map[string]any{"namespace": "demo", "search": "gross", "view": "detail"}, false)
 	for _, expected := range []string{`"dimension_details"`, `"name":"order_date"`, `"data_type":"timestamp"`} {
 		if !strings.Contains(catalogOutput, expected) {
 			t.Fatalf("catalog dimension metadata missing %q from %q", expected, catalogOutput)
@@ -189,8 +190,8 @@ func TestRemoteMCPAPIPathConnectsWithAuthenticatedUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Tools) != 7 {
-		t.Fatalf("API-path MCP tools=%d, want 7", len(listed.Tools))
+	if len(listed.Tools) != 11 {
+		t.Fatalf("API-path MCP tools=%d, want 11", len(listed.Tools))
 	}
 	output := callRemoteMCP(t, session, "list_namespaces", map[string]any{}, false)
 	if !strings.Contains(output, `"namespaces"`) {
@@ -543,7 +544,7 @@ func TestTrialPublicationExposesUnverifiedCatalogWithoutChangingCertifiedGate(t 
 	response.Body.Close()
 	session := connectRemoteMCP(t, handler, "query")
 	listed, err := session.ListTools(t.Context(), nil)
-	if err != nil || len(listed.Tools) != 7 {
+	if err != nil || len(listed.Tools) != 11 {
 		t.Fatalf("MCP tools=%#v error=%v", listed, err)
 	}
 	out := callRemoteMCP(t, session, "search_metrics", map[string]any{"namespace": "matchingstory", "search": "gross"}, false)
@@ -1242,6 +1243,7 @@ type fakeEngine struct {
 	executions     int
 	executionToken string
 	block          bool
+	result         *model.TypedResult
 	started        chan struct{}
 	startOnce      sync.Once
 }
@@ -1266,7 +1268,14 @@ func (engine *fakeEngine) Execute(ctx context.Context, plan model.PhysicalPlan) 
 	return model.ExecutionSnapshot{Job: model.ExecutionJob{
 		ID: "job_test", Status: model.JobSucceeded, PhysicalFingerprint: plan.Fingerprint,
 		RowLimit: int64(plan.Limit), SubmittedAt: now, StartedAt: &now, FinishedAt: &now,
-	}, Result: &model.TypedResult{}}, nil
+	}, Result: engine.typedResult()}, nil
+}
+
+func (engine *fakeEngine) typedResult() *model.TypedResult {
+	if engine.result != nil {
+		return engine.result
+	}
+	return &model.TypedResult{}
 }
 
 func (engine *fakeEngine) executionCount() int {
