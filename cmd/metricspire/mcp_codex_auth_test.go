@@ -98,8 +98,8 @@ func TestMCPRemoteStagingCodexNative(t *testing.T) {
 				names = append(names, name)
 			}
 			slices.Sort(names)
-			if !reflect.DeepEqual(names, []string{"cancel_query", "explain_query", "get_query", "list_namespaces", "plan_query", "search_metrics", "submit_query"}) {
-				t.Fatal("native connection does not expose the seven-tool contract")
+			if !reflect.DeepEqual(names, []string{"cancel_query", "discover_query_routes", "explain_query", "get_metric_details", "get_query", "list_namespaces", "plan_query", "prepare_query", "run_query", "search_metrics", "submit_query"}) {
+				t.Fatal("native connection does not expose the core tool contract")
 			}
 			caller := &nativeToolCaller{rpc: rpc, threadID: thread.Thread.ID, server: server}
 			verifyMCPStagingAcceptance(t, caller, "Codex native OAuth / "+phase+" / "+attempt)

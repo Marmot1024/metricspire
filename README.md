@@ -31,7 +31,7 @@ Optional [temporary analysis](docs/exploration.md) uses reviewed external source
 - **Governed catalog:** optimistic drafts, validation, immutable `trial` or `certified` releases, activation/deactivation, rollback, and release events in PostgreSQL.
 - **Portable semantics:** constrained expressions and logical plans, with environment-specific table and column mappings in reviewed `SourceBinding` files. No caller-provided SQL.
 - **Guarded execution:** policy checks, capability checks, deterministic plans, parameterized Databricks SQL, timeouts, cancellation, typed results, row/byte limits, and fail-closed audit.
-- **One service, three surfaces:** a maintainer/query UI, strict HTTP management and query APIs, and seven remote MCP query tools using the same application services.
+- **One service, three surfaces:** a maintainer/query UI, strict HTTP management and query APIs, and eleven core remote MCP query tools using the same application services.
 - **Explicit identity boundaries:** portable OIDC for self-hosting or managed identity in Databricks Apps. Product permissions never override warehouse-native data permissions.
 
 Databricks SQL is the first analytical adapter. PostgreSQL remains the transactional **control plane**. A separate, opt-in [online HTTP preview](docs/online-query.md) reads reviewed precomputed aggregates using numeric metric codes and dedicated SELECT-only credentials; it never falls back to Warehouse execution. General multi-engine analytics and production latency/availability guarantees are not claimed. See the [architecture](docs/architecture.md) and [HTTP contract](docs/http-api.md) for the trust boundaries.
@@ -67,8 +67,8 @@ The context file is trusted only in this offline demonstration; network callers 
 A deployed instance exposes Streamable HTTP MCP at `/api/v1/mcp` (the preferred Databricks Apps path). Clients connect by URL; they do not clone or run MetricSpire locally. The tools support discovery, explanation, planning, bounded query submission, status, and cancellation—**not** raw SQL or publication.
 
 ```text
-list_namespaces → search_metrics → explain_query → plan_query
-               → submit_query → get_query / cancel_query
+list_namespaces → search_metrics → get_metric_details → prepare_query → run_query
+               → get_query / cancel_query (only while unfinished)
 ```
 
 Each request is authenticated. Local Codex users reuse Databricks CLI user authentication through the installer; each user still needs App and data permissions. A successful login alone is not query acceptance. See [MCP integration](docs/mcp.md) for client configuration, tools, safety limits, and the precise [current acceptance boundary](docs/development-status.md).

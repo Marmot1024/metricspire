@@ -288,7 +288,7 @@ func TestMCPRemoteStagingTimeContractAcceptance(t *testing.T) {
 	var entries struct {
 		Metrics []application.MetricCatalogEntry `json:"metrics"`
 	}
-	mcpCall(t, session, "search_metrics", mcpbridge.SearchInput{Namespace: "acceptance", Search: "gross_revenue"}, &entries)
+	mcpCall(t, session, "search_metrics", mcpbridge.SearchInput{Namespace: "acceptance", Search: "gross_revenue", View: "detail"}, &entries)
 	if len(entries.Metrics) != 1 {
 		t.Fatalf("unexpected metric discovery: %#v", entries.Metrics)
 	}
@@ -344,7 +344,7 @@ func verifyMCPStagingAcceptance(t *testing.T, session mcpToolCaller, transport s
 	var entries struct {
 		Metrics []application.MetricCatalogEntry `json:"metrics"`
 	}
-	mcpCall(t, session, "search_metrics", mcpbridge.SearchInput{Namespace: "acceptance", Search: "gross_revenue"}, &entries)
+	mcpCall(t, session, "search_metrics", mcpbridge.SearchInput{Namespace: "acceptance", Search: "gross_revenue", View: "detail"}, &entries)
 	if len(entries.Metrics) != 1 || entries.Metrics[0].Name != "gross_revenue" {
 		t.Fatal("unexpected metric discovery")
 	}

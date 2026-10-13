@@ -87,6 +87,20 @@ type QueryInput struct {
 	// JobID is assigned by the trusted server-side JobManager. Public
 	// transports decode only SemanticQuery and therefore cannot forge it.
 	JobID string
+	// ExpectedPlan is an equality guard, never a caller-selected release or
+	// binding. ExecuteActive checks it against the freshly authorized plan.
+	ExpectedPlan *PlanExpectation
+}
+
+type PlanExpectation struct {
+	ReleaseID           string `json:"release_id"`
+	ManifestFingerprint string `json:"manifest_fingerprint"`
+	LogicalFingerprint  string `json:"logical_fingerprint"`
+	PhysicalFingerprint string `json:"physical_fingerprint"`
+}
+
+func ExpectPlan(plan PlanOutput) PlanExpectation {
+	return PlanExpectation{plan.Release.ID, plan.Release.ManifestFingerprint, plan.Logical.Fingerprint, plan.Physical.Fingerprint}
 }
 
 type ExplainOutput struct {
@@ -230,6 +244,9 @@ func (s *QueryService) ExecuteActive(ctx context.Context, input QueryInput) (Que
 	planned, err := s.PlanActive(controlContext, input)
 	if err != nil {
 		return QueryOutput{}, err
+	}
+	if input.ExpectedPlan != nil && *input.ExpectedPlan != ExpectPlan(planned) {
+		return QueryOutput{}, &model.Problem{Code: "prepared_query_changed", Path: "query", Message: "query, release, policy or binding changed; prepare the query again before submitting"}
 	}
 	return s.executePlanned(ctx, controlContext, input, planned)
 }

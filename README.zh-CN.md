@@ -31,7 +31,7 @@ MetricSpire 是开源的语义指标服务。经评审的指标定义发布一�
 - **受治理的目录：** PostgreSQL 保存带乐观版本控制的草稿、校验结果、不可变的 `trial`/`certified` 发布、生效或撤下状态、回滚及版本事件。
 - **可移植的语义：** 使用受约束的表达式和逻辑计划；环境相关的表与字段映射由经过评审的 `SourceBinding` 管理，不接受调用方传入原始 SQL。
 - **受控执行：** 查询前检查策略与引擎能力；Databricks SQL 适配器使用参数化语句、超时、取消、类型化结果、行数与字节限制，以及失败即关闭的审计。
-- **三个入口、一套服务：** 维护与查询界面、严格的 HTTP 管理/查询 API，以及七个远程 MCP 查询工具共用应用服务。
+- **三个入口、一套服务：** 维护与查询界面、严格的 HTTP 管理/查询 API，以及十一个核心远程 MCP 查询工具共用应用服务。
 - **清晰的身份边界：** 自托管可选通用 OIDC；Databricks Apps 使用平台托管身份。产品权限不能覆盖仓库原生的数据权限。
 
 Databricks SQL 是首个分析引擎适配器。PostgreSQL 仍承担事务性**控制面**；另外可显式启用[在线 HTTP 预览](docs/online-query.md)，通过数字指标 code 和独立只读凭据查询已审核的预计算汇总数据，不会自动回退到数仓。当前不承诺通用多引擎分析，也不宣称已达到生产环境的延迟或可用性指标。详细边界见[架构](docs/architecture.md)与 [HTTP 契约](docs/http-api.md)（英文）。
@@ -67,8 +67,8 @@ go run ./cmd/metricspire plan \
 部署后的实例通过 `/api/v1/mcp` 提供 Streamable HTTP MCP（Databricks Apps 推荐此路径）。客户端只需连接 URL，不必克隆仓库或在本地运行 MetricSpire。工具支持发现、解释、规划、受限查询提交、状态读取与取消；**不**提供原始 SQL 或发布操作。
 
 ```text
-list_namespaces → search_metrics → explain_query → plan_query
-               → submit_query → get_query / cancel_query
+list_namespaces → search_metrics → get_metric_details → prepare_query → run_query
+               → get_query / cancel_query（仅作业尚未完成时）
 ```
 
 每次请求都会独立鉴权。本地 Codex 用户通过安装器复用 Databricks CLI 用户授权，仍需具备自己的 App 与数据权限；登录成功本身不等于查询验收。客户端配置、工具行为与安全边界见 [MCP 接入](docs/mcp.md)，当前验收范围见[开发状态](docs/development-status.md)（英文）。
