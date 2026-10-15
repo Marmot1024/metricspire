@@ -122,7 +122,7 @@ func addFastTools(s *mcp.Server, b FastBackend) {
 		}
 		return b.PrepareQuery(ctx, in)
 	})
-	add(s, "run_query", "Execute a prepared query once after authorization/fingerprint checks; costs may apply. Return result or pending job_id. Continue with get_query/cancel_query, never resubmit that job.", false, func(ctx context.Context, in RunQueryInput) (any, error) {
+	add(s, "run_query", "Execute only after requested meaning and population/exclusions are resolved. Preparation is not user confirmation. Authorization/fingerprints are checked; costs may apply. Return result or pending job_id. Continue with get_query/cancel_query, never resubmit that job.", false, func(ctx context.Context, in RunQueryInput) (any, error) {
 		if _, err := namespacePath(in.Namespace); err != nil {
 			return nil, err
 		}

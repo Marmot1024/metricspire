@@ -15,7 +15,7 @@ type selectionGuidance struct {
 }
 
 func searchSelection(count, limit int) selectionGuidance {
-	next := "Review candidate definitions, population/exclusions, denominator and grain. Rank is not semantic fit. Execute an unambiguous match; ask about material differences."
+	next := "Review candidate definitions, population/exclusions, denominator and grain. Rank is not semantic fit. Execute an unambiguous match. If a material population/exclusion choice is unresolved or a requested rule is undocumented, ask and stop before execution; a generic total with a caveat does not resolve that choice."
 	if count == 0 {
 		next = "No authorized lexical match in this search. Refine terms/aliases and confirm the unmet definition with the user before approved exploration; do not infer data absence."
 	}
@@ -31,7 +31,7 @@ type metricComparison struct {
 // Compare only published, authorized metadata. Never derive an exclusion,
 // denominator or role default from names, popularity, or SQL expressions.
 func compareMetrics(metrics []MetricDetail) metricComparison {
-	out := metricComparison{DifferingFields: []string{}, MissingDefinitions: []string{}, NextStep: "Compare the listed fields in metrics. Differences may be intentional across requested metrics; ask only if they leave the requested meaning ambiguous. Missing definitions require clarification, not inference. Role/history ranking cannot change scope. After confirming no suitable metric, discover and plan approved exploration."}
+	out := metricComparison{DifferingFields: []string{}, MissingDefinitions: []string{}, NextStep: "Compare the listed fields in metrics. Differences may be intentional across requested metrics; ask only if they leave the requested meaning ambiguous. If a material population/exclusion choice is unresolved or a requested rule is undocumented, ask and stop before execution. A verified metric or generic total plus a caveat cannot resolve that choice. Missing definitions require clarification, not inference. Role/history ranking cannot change scope. After confirming no suitable metric, discover and plan approved exploration."}
 	fields := []struct {
 		name  string
 		value func(MetricDetail) any

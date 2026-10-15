@@ -23,6 +23,11 @@ A full result page can omit candidates; even one lexical match is not proof of
 a unique business meaning. Details add `comparison.differing_fields` and
 `missing_definitions` beside authorized metric definitions. Comparison covers
 description, unit, type, time field, allowed dimensions/calendars and verification.
+If a user has not chosen between including and excluding test accounts, stop
+before execution and ask for that choice. A verified generic count plus a
+warning does not resolve the ambiguity; successful preparation is not user
+confirmation. The same rule applies when a requested exclusion is undocumented.
+
 It does not extract population or denominators from prose, invent missing
 metadata, or implement a semantic-match score. Different requested metrics may
 intentionally differ; compare them against the user's actual question.
