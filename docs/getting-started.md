@@ -58,6 +58,12 @@ go run ./cmd/metricspire release-list \
 
 This demonstrates draft revisions, explicit publication, immutable releases, and the active pointer. PostgreSQL stores control metadata, not analytical facts or result rows. To execute `query-active`, additionally provide a reviewed source binding, a read-only Databricks SQL warehouse, and appropriate engine credentials. Real-engine tests are opt-in and require an explicitly configured environment.
 
+## Configure your team
+
+Use the [team configuration templates](../config/README.md) for a private runtime
+file, business names/aliases and checksum-verified semantic exports. The
+`validate-domains` command checks them offline, without database or Git access.
+
 ## Run the HTTP service
 
 `metricspire serve --config <runtime.yaml>` assembles the catalog, identity, query, audit, job, UI, and engine adapters. Start from the non-secret [portable OIDC example](../examples/runtime.example.yaml) or the [Databricks Apps example](../examples/runtime.databricks-apps.example.yaml); supply secrets through the environment or deployment platform, not the config file.

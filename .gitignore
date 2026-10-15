@@ -26,3 +26,9 @@ __pycache__/
 /.claude/
 /project-research/
 /local-notes/
+
+# Private deployment configuration and semantic checkouts
+/config/local/
+/semantic_layer/
+/semantic-assets/
+/.worktrees/

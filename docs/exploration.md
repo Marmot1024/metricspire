@@ -4,6 +4,9 @@ Exploration uses an approved external semantic catalog to query detail rows.
 It does not require registering each result formula as a metric. Existing
 `SemanticQuery` and the online metric service keep their own contracts.
 
+See [team configuration](../config/README.md) for business aliases, private Git
+source provenance and checksum-verified exported catalogs.
+
 ## External semantics
 
 The operator exports reviewed warehouse semantics into an `AnalysisCatalog`

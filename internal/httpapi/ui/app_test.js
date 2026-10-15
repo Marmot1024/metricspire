@@ -104,11 +104,11 @@ test("metric registry searches external codes and presents structured formulas",
   assert.equal(metricCalculationNote(metric), "去重计数字段 player.user_id；仅统计满足 payment.amount <> '0' 的记录。");
 });
 
-test("matchingstory list shortens only its own default physical source", () => {
-  const prefixes = {matchingstory: "mm.mm"};
-  assert.equal(compactSourceName("mm.mm.dws_daily_player_activity", "matchingstory", prefixes), "dws_daily_player_activity");
-  assert.equal(compactSourceName("other.db.events", "matchingstory", prefixes), "other.db.events");
-  assert.equal(compactSourceName("mm.mm.events", "acceptance", prefixes), "mm.mm.events");
+test("demo_commerce list shortens only its own default physical source", () => {
+  const prefixes = {demo_commerce: "demo.analytics"};
+  assert.equal(compactSourceName("demo.analytics.daily_activity", "demo_commerce", prefixes), "daily_activity");
+  assert.equal(compactSourceName("other.db.events", "demo_commerce", prefixes), "other.db.events");
+  assert.equal(compactSourceName("demo.analytics.events", "acceptance", prefixes), "demo.analytics.events");
 });
 
 test("metric detail plan query uses a bounded calendar range without executing SQL", () => {
@@ -299,7 +299,7 @@ test("published derived metrics cannot be flattened through the aggregate copy f
 
 test("saving a metric writes one draft revision without a separate browser-only apply step", async () => {
   const {context, run} = editorContext();
-  run("state.draft.revision = 1; state.governanceRoute = {namespace: 'matchingstory', model_name: 'daily'}");
+  run("state.draft.revision = 1; state.governanceRoute = {namespace: 'demo_commerce', model_name: 'daily'}");
   const values = {"metric-external-code": "1001", "metric-code": "daily_revenue", "metric-display-name": "日收入",
     "metric-description": "按自然日汇总订单收入", "metric-owner": "data-team", "metric-entity": "orders",
     "metric-operation": "sum", "metric-value-type": "decimal", "metric-field": "orders.amount"};
@@ -424,7 +424,7 @@ test("maintainer catalog uses one server-composed page and keeps total counts", 
   context.requestJSON = (path) => { paths.push(path); return new Promise((resolve) => { finishPage = resolve; }); };
   context.renderCatalog = () => {};
   context.updateQueryBuilder = () => {};
-  run("state.context = {permissions: ['query:execute', 'model:manage'], models: []}; state.namespace = 'matchingstory'");
+  run("state.context = {permissions: ['query:execute', 'model:manage'], models: []}; state.namespace = 'demo_commerce'");
   const loading = run("loadCatalog()");
   finishPage({items: [{name: "daily_active_users", release_id: "rel_1", catalog_status: "published"}],
     counts: {published: 1, draft: 4, governance: 30, total: 35}, next_cursor: "next"});
@@ -439,9 +439,9 @@ test("maintainer catalog uses one server-composed page and keeps total counts", 
 
 test("selecting a summary loads only that metric's authorized full detail", async () => {
   const {context, run} = editorContext();
-  const summary = {namespace: "matchingstory", name: "revenue", semantic_model_name: "daily", catalog_status: "published", summary: true};
+  const summary = {namespace: "demo_commerce", name: "revenue", semantic_model_name: "daily", catalog_status: "published", summary: true};
   context.metric = summary;
-  run("state.namespace = 'matchingstory'");
+  run("state.namespace = 'demo_commerce'");
   run("state.catalogView = [metric]");
   const calls = [];
   context.requestJSON = async (path) => {
@@ -451,7 +451,7 @@ test("selecting a summary loads only that metric's authorized full detail", asyn
   let displayed;
   context.renderMetricDetail = (metric) => { displayed = metric; };
   await run("loadMetricDetail(metric, state.metricDetailSequence)");
-  assert.deepEqual(calls, ["/api/v1/catalog/detail?namespace=matchingstory&name=revenue&model=daily"]);
+  assert.deepEqual(calls, ["/api/v1/catalog/detail?namespace=demo_commerce&name=revenue&model=daily"]);
   assert.equal(displayed.description, "已登记业务口径");
   assert.equal(run("state.catalogView[0].summary"), false);
   await run("loadMetricDetail(metric, state.metricDetailSequence)");
@@ -468,7 +468,7 @@ test("next-page failure preserves already rendered metrics", async () => {
   };
   context.renderCatalog = () => {};
   context.updateQueryBuilder = () => {};
-  run("state.context = {permissions: ['query:execute', 'model:manage'], models: []}; state.namespace = 'matchingstory'");
+  run("state.context = {permissions: ['query:execute', 'model:manage'], models: []}; state.namespace = 'demo_commerce'");
   await run("loadCatalog()");
   await run("loadCatalog(true)");
   assert.deepEqual(JSON.parse(JSON.stringify(run("state.catalogView.map((entry) => entry.name)"))), ["daily_active_users"]);

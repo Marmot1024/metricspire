@@ -55,12 +55,18 @@ func TestFreshMCPClientUsesCompactDiscoveryAndPreparedExecution(t *testing.T) {
 			t.Fatalf("summary contains %s", forbidden)
 		}
 	}
+	if !strings.Contains(summary, `"selection"`) || !strings.Contains(summary, `"candidate_count":1`) {
+		t.Fatal("search guidance missing:", summary)
+	}
 	if observed.bindingCalls != 0 {
 		t.Fatal("summary resolved bindings")
 	}
 	details := callRemoteMCP(t, session, "get_metric_details", map[string]any{"namespace": "demo", "metrics": []string{"gross_revenue", "refund_rate"}}, false)
 	if !strings.Contains(details, "dimension_details") || !strings.Contains(details, "time_granularities") || strings.Contains(details, `"expression":`) {
 		t.Fatal(details)
+	}
+	if !strings.Contains(details, `"comparison"`) || !strings.Contains(details, `"differing_fields"`) || !strings.Contains(details, "Role/history") {
+		t.Fatal("comparison guidance missing:", details)
 	}
 	prepared := prepareFast(t, session)
 	if engine.executionCount() != 0 || creds.Load() != 0 {

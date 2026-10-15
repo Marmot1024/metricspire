@@ -34,3 +34,8 @@ jobs:
       - run: go test -race ./...
       - run: go vet ./...
       - run: CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' ./cmd/metricspire
+      - name: Build and smoke-test the restricted Docker context
+        if: matrix.go == '1.26.x'
+        run: |
+          docker build -t metricspire:ci .
+          docker run --rm --network none -v "$PWD/config/domains.example.yaml:/etc/metricspire/domains.yaml:ro" metricspire:ci validate-domains --config /etc/metricspire/domains.yaml

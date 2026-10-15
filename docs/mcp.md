@@ -10,6 +10,32 @@ After installation, reopen or reconnect Codex and call `list_namespaces`. An aut
 
 URL-only native OAuth remains an alternative for other clients, requiring a registered public client and validated refresh behavior; its implementation is preserved on `backup/native-oauth-20261012`. It is not the default local Codex onboarding route. See [operator setup](../deploy/databricks-apps/README.md#oauth-client-onboarding) and [release acceptance](mcp-native-acceptance.md).
 
+## Business discovery and metric selection
+
+When configured on hosted MCP, `list_namespaces` adds `business_domains`: authorized logical
+names and aliases mapped to canonical namespaces. Use these instead of asking
+users for repository URLs; source provenance, artifact paths and physical
+bindings are not included. Operators configure them in [team configuration](../config/README.md).
+The legacy local `mcp --api-url` bridge returns canonical namespaces only.
+
+Search returns `selection.candidate_count`, `at_limit` and next-step guidance.
+A full result page can omit candidates; even one lexical match is not proof of
+a unique business meaning. Details add `comparison.differing_fields` and
+`missing_definitions` beside authorized metric definitions. Comparison covers
+description, unit, type, time field, allowed dimensions/calendars and verification.
+It does not extract population or denominators from prose, invent missing
+metadata, or implement a semantic-match score. Different requested metrics may
+intentionally differ; compare them against the user's actual question.
+
+Use an unambiguous maintained definition directly. Present material differences
+when several definitions could answer the request; keep a user's confirmed
+scope through follow-up questions. Roles and history never silently alter a
+definition. After refining a missing search, confirm the unmet meaning before
+approved exploration. An explicit request already defining the temporary scope
+does not require a redundant permission question. Permission, connection and
+timeout errors never prove absence. Usage tracking and role recommendation
+storage are not implemented by this change.
+
 ## Query workflow
 
 | Tool | Behavior |

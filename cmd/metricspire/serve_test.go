@@ -190,10 +190,10 @@ func TestConfiguredUISourcePrefixesOnlyUsesUnambiguousBindings(t *testing.T) {
 		}}
 	}
 	got := configuredUISourcePrefixes([]application.BindingConfiguration{
-		route("matchingstory", "mm", "mm"), route("matchingstory", "mm", "mm"),
-		route("mixed", "mm", "mm"), route("mixed", "other", "db"),
+		route("demo_commerce", "demo", "analytics"), route("demo_commerce", "demo", "analytics"),
+		route("mixed", "demo", "analytics"), route("mixed", "other", "db"),
 	})
-	if got["matchingstory"] != "mm.mm" || got["mixed"] != "" {
+	if got["demo_commerce"] != "demo.analytics" || got["mixed"] != "" {
 		t.Fatalf("source prefixes = %#v", got)
 	}
 }
@@ -214,7 +214,7 @@ func TestMCPAuthorizationServerFollowsAuthenticationProvider(t *testing.T) {
 
 func TestTrialReleasesRequireConfiguredNamespacesAndDeploymentAcknowledgement(t *testing.T) {
 	config := runtimeconfig.Config{
-		ReleasePolicy: runtimeconfig.ReleasePolicyConfig{TrialNamespaces: []string{"matchingstory"}},
+		ReleasePolicy: runtimeconfig.ReleasePolicyConfig{TrialNamespaces: []string{"demo_commerce"}},
 	}
 	value := ""
 	getenv := func(string) string { return value }
@@ -222,7 +222,7 @@ func TestTrialReleasesRequireConfiguredNamespacesAndDeploymentAcknowledgement(t 
 		t.Fatal("configured trial namespaces were accepted without deployment acknowledgement")
 	}
 	value = "approved-trial"
-	if enabled, err := enabledTrialNamespaces(config, getenv); err != nil || len(enabled) != 1 || enabled[0] != "matchingstory" {
+	if enabled, err := enabledTrialNamespaces(config, getenv); err != nil || len(enabled) != 1 || enabled[0] != "demo_commerce" {
 		t.Fatalf("enabled trial namespaces=%v, %v", enabled, err)
 	}
 	config.ReleasePolicy.TrialNamespaces = nil

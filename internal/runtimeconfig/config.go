@@ -22,6 +22,8 @@ const (
 )
 
 type Config struct {
+	DomainsPath    string               `json:"domains_path,omitempty" yaml:"domains_path,omitempty"`
+	Domains        []BusinessDomain     `json:"-" yaml:"-"`
 	APIVersion     string               `json:"api_version" yaml:"api_version"`
 	Kind           string               `json:"kind" yaml:"kind"`
 	HTTP           HTTPConfig           `json:"http" yaml:"http"`
@@ -100,6 +102,9 @@ type BindingRoute struct {
 func Load(path string) (Config, error) {
 	var config Config
 	if err := contractio.ReadFile(path, &config); err != nil {
+		return Config{}, err
+	}
+	if err := config.loadDomainRegistry(path); err != nil {
 		return Config{}, err
 	}
 	if err := config.Validate(); err != nil {

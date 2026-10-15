@@ -18,6 +18,8 @@ MetricSpire is an open-source semantic metrics service. Publish a reviewed defin
 
 > **Development preview.** The Databricks Apps staging path has been exercised, but there is no production-ready or published `v0.1.0` release. [See the verified boundary](docs/development-status.md).
 
+[Configure your team](config/README.md): private runtime settings, business aliases and reviewed semantic exports.
+
 ## Why it exists
 
 Clients ask for **metric codes and dimensions** rather than choosing physical tables or generating unrestricted SQL. MetricSpire owns the definition, approved binding, active version, product policy, and query budgets. The analytical engine still decides whether the real user can read the underlying data.
