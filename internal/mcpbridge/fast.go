@@ -90,7 +90,7 @@ type RunQueryOutput struct {
 }
 
 func addFastTools(s *mcp.Server, b FastBackend) {
-	add(s, "get_metric_details", "Get definitions and authorized dimension types, grains and calendar timezones for 1-20 selected exact metric names in one call. No query, expressions or physical mappings. Use before prepare_query.", true, func(ctx context.Context, in MetricDetailsInput) (any, error) {
+	add(s, "get_metric_details", "Compare definitions, units, authorized dimensions and calendars for 1-20 exact metric names. Review comparison gaps/differences before prepare_query; differences alone do not prove ambiguity.", true, func(ctx context.Context, in MetricDetailsInput) (any, error) {
 		if _, err := namespacePath(in.Namespace); err != nil {
 			return nil, err
 		}
@@ -105,21 +105,24 @@ func addFastTools(s *mcp.Server, b FastBackend) {
 			seen[name] = true
 		}
 		out, err := b.GetMetricDetails(ctx, in)
-		return map[string]any{"metrics": out}, err
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"metrics": out, "comparison": compareMetrics(out)}, nil
 	})
-	add(s, "discover_query_routes", "Discover this user's available query categories for a namespace. Choose published_metrics when its maintained definition and grain answer the question; choose exploration for a requested temporary formula/cohort/counting grain only after discovering approved source semantics. No automatic fallback on empty search, permission or timeout. No data query.", true, func(ctx context.Context, in AnalysisDiscoveryInput) (any, error) {
+	add(s, "discover_query_routes", "Discover authorized metric/exploration routes and selection rules. Availability is not semantic fit or execution readiness. No data query.", true, func(ctx context.Context, in AnalysisDiscoveryInput) (any, error) {
 		if _, err := namespacePath(in.Namespace); err != nil {
 			return nil, err
 		}
 		return b.DiscoverQueryRoutes(ctx, in)
 	})
-	add(s, "prepare_query", "Preferred published-metric preflight: validate and return business definitions, normalized query and execution fingerprints in one call. No data query. Review meaning/time/grain, then pass query and expected_plan unchanged to run_query. No separate explain_query or plan_query needed.", true, func(ctx context.Context, in QueryInput) (any, error) {
+	add(s, "prepare_query", "Validate selected metric meaning/time/grain and return normalized query plus expected_plan. No execution; no extra explain/plan needed. Pass both unchanged to run_query.", true, func(ctx context.Context, in QueryInput) (any, error) {
 		if _, err := namespacePath(in.Namespace); err != nil {
 			return nil, err
 		}
 		return b.PrepareQuery(ctx, in)
 	})
-	add(s, "run_query", "Execute the prepared published-metric query once and wait briefly for its result. Requires user-authorized query scope. Current authorization and all fingerprints are rechecked before engine execution. Return results or the same pending job; use get_query/cancel_query, never run_query again for that job. No exploration fallback; costs may apply.", false, func(ctx context.Context, in RunQueryInput) (any, error) {
+	add(s, "run_query", "Execute a prepared query once after authorization/fingerprint checks; costs may apply. Return result or pending job_id. Continue with get_query/cancel_query, never resubmit that job.", false, func(ctx context.Context, in RunQueryInput) (any, error) {
 		if _, err := namespacePath(in.Namespace); err != nil {
 			return nil, err
 		}

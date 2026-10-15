@@ -18,7 +18,7 @@ func buildServeExploration(base string, c *runtimeconfig.ExplorationConfig, clie
 	if err := c.Validate(); err != nil {
 		return nil, nil, nil, err
 	}
-	catalogs := []exploration.Catalog{}
+	catalogs := append([]exploration.Catalog(nil), c.ReviewedCatalogs...)
 	for _, p := range c.CatalogPaths {
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(base, p)

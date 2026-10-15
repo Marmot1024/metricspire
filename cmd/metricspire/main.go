@@ -41,6 +41,8 @@ func runContext(ctx context.Context, arguments []string, stdout, stderr io.Write
 		return err
 	case "validate":
 		return runValidate(arguments[1:], stdout, stderr)
+	case "validate-domains":
+		return runValidateDomains(arguments[1:], stdout, stderr)
 	case "validate-analysis":
 		return runValidateAnalysis(arguments[1:], stdout, stderr)
 	case "compile":
@@ -189,6 +191,7 @@ func printUsage(writer io.Writer) {
 
 Usage:
   metricspire validate --source model.yaml
+  metricspire validate-domains --config config/local/domains.yaml
   metricspire validate-analysis --catalog reviewed-analysis.yaml
   metricspire compile --source model.yaml --out manifest.json
   metricspire compile-policy --source policy.yaml --manifest manifest.json --out policy.json

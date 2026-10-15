@@ -249,7 +249,8 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	}
 	logger := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	handler, err := httpapi.NewServer(httpapi.Config{
-		MaxBodyBytes: config.HTTP.MaxBodyBytes, ControlTimeout: controlTimeout,
+		BusinessDomains: config.Domains,
+		MaxBodyBytes:    config.HTTP.MaxBodyBytes, ControlTimeout: controlTimeout,
 		QueryTimeout: queryTimeout, OnlineTimeout: onlineTimeout, AllowedOrigin: config.HTTP.PublicURL,
 		MCPAuthorizationServer: mcpAuthorizationServer(config, environment),
 		AuthenticationProfile:  config.Authentication.Provider, MCPVersion: version,

@@ -17,3 +17,16 @@ The [TPCH](../testdata/acceptance/databricks-tpch) and [calendar](../testdata/ac
 Use [native acceptance](mcp-native-acceptance.md) for the release gate, [installer guidance](mcp-installer.md) for onboarding, [exploration](exploration.md) for query limits and [online query](online-query.md) for synchronous serving. Exact environment revisions, job receipts and prioritized tasks belong in the private handoff, not duplicate public status logs.
 
 Before rollout, complete discovery → plan → submit → successful result with an intended colleague, reconcile agreed business definitions and exercise permission denial. Authentication lifecycle acceptance remains separate from functional checks. Async jobs/results are process-local and do not survive restart; no multi-instance job continuity or production SLA is promised. Production deployment and production MCP acceptance are not established.
+
+
+## Local configuration and MCP contract additions
+
+Private `domains_path` configuration supplies tenant-scoped business aliases and
+checksum-verified exported analysis catalogs. `validate-domains` is offline;
+repository provenance is metadata, not Git synchronization or an exporter.
+See [team configuration](../config/README.md). MCP candidate comparison reports
+actual metadata differences and missing descriptions without inferring a
+population, choosing a role default or treating search rank as semantic fit.
+
+These local changes do not establish deployed-client latency, production
+acceptance, automatic Git export, additional engines or data refresh pipelines.

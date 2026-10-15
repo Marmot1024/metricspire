@@ -32,32 +32,32 @@ type AnalysisBackend interface {
 }
 
 func addAnalysisTools(s *mcp.Server, b AnalysisBackend) {
-	add(s, "discover_analysis", "Discover accessible exploration sources, typed attributes, approved relationship and snapshot rules, and budgets. internal_only attributes may define intermediate counting units or predicates but cannot be returned as values. No data query. Use maintained definitions; ask only about unresolved choices that materially change the result.", true, func(ctx context.Context, in AnalysisDiscoveryInput) (any, error) {
+	add(s, "discover_analysis", "Discover approved sources, fields, calendars, associations and budgets. internal_only fields cannot be output as values. Use after confirming metric coverage is unsuitable; no data query.", true, func(ctx context.Context, in AnalysisDiscoveryInput) (any, error) {
 		if _, err := namespacePath(in.Namespace); err != nil {
 			return nil, err
 		}
 		v, err := b.DiscoverAnalysis(ctx, in)
 		return map[string]any{"sources": v}, err
 	})
-	add(s, "plan_analysis", "Validate a temporary analysis without registering a metric or querying data. Return normalized counting stages, calendar, approved associations, result schema and semantic fingerprint. No implicit fallback from another tool's permission/timeout failure.", true, func(ctx context.Context, in AnalysisInput) (any, error) {
+	add(s, "plan_analysis", "Validate temporary formula, population and counting stages against approved semantics. Inspect normalized plan and gaps before submission. No execution or metric registration.", true, func(ctx context.Context, in AnalysisInput) (any, error) {
 		if _, err := namespacePath(in.Namespace); err != nil {
 			return nil, err
 		}
 		return b.PlanAnalysis(ctx, in)
 	})
-	add(s, "submit_analysis", "Submit a governed temporary analysis asynchronously against the configured warehouse. May incur cost. Plan first; retain job_id and poll get_analysis. Never automatically retry an uncertain submission.", false, func(ctx context.Context, in AnalysisInput) (any, error) {
+	add(s, "submit_analysis", "Execute the reviewed analysis once; costs may apply. Retain job_id for get_analysis/cancel_analysis. Never retry uncertain submissions blindly; no permission/timeout fallback.", false, func(ctx context.Context, in AnalysisInput) (any, error) {
 		if _, err := namespacePath(in.Namespace); err != nil {
 			return nil, err
 		}
 		return b.SubmitAnalysis(ctx, in)
 	})
-	add(s, "get_analysis", "Get your exploration job status, pinned semantic/query evidence and exact typed result. No online service fallback.", true, func(ctx context.Context, in AnalysisJobInput) (any, error) {
+	add(s, "get_analysis", "Read your analysis job, pinned semantic evidence and exact typed result. Keep verification and counting grain visible.", true, func(ctx context.Context, in AnalysisJobInput) (any, error) {
 		if err := validAnalysisJob(in); err != nil {
 			return nil, err
 		}
 		return b.GetAnalysis(ctx, in)
 	})
-	add(s, "cancel_analysis", "Cancel your exploration job, propagating cancellation to the warehouse. Finished jobs remain unchanged.", false, func(ctx context.Context, in AnalysisJobInput) (any, error) {
+	add(s, "cancel_analysis", "Request cancellation of your analysis job and warehouse work; finished outcomes remain unchanged.", false, func(ctx context.Context, in AnalysisJobInput) (any, error) {
 		if err := validAnalysisJob(in); err != nil {
 			return nil, err
 		}

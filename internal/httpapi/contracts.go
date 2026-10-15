@@ -10,6 +10,7 @@ import (
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/governance"
 	"github.com/marmot1024/metricspire/internal/model"
+	"github.com/marmot1024/metricspire/internal/runtimeconfig"
 )
 
 const (
@@ -145,6 +146,7 @@ type OnlineQueryService interface {
 }
 
 type Config struct {
+	BusinessDomains        []runtimeconfig.BusinessDomain
 	MaxBodyBytes           int64
 	ControlTimeout         time.Duration
 	QueryTimeout           time.Duration

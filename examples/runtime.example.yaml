@@ -1,5 +1,7 @@
 api_version: metricspire.io/v1alpha1
 kind: RuntimeConfig
+# Optional: business names and reviewed external catalog artifacts.
+# domains_path: ../config/local/domains.yaml
 http:
   address: 127.0.0.1:8080
   public_url: https://metrics.example.com

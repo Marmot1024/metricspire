@@ -37,7 +37,7 @@ var ErrAuthenticationUnavailable = errors.New("authentication dependency is unav
 // disabled account. Replacing a valid credential cannot restore that account.
 var ErrAuthenticationDenied = errors.New("verified identity is not permitted")
 
-//go:embed ui/*
+//go:embed ui/app.js ui/app.css ui/index.html
 var uiFiles embed.FS
 
 type Server struct {

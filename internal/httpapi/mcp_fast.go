@@ -46,7 +46,7 @@ func (b *remoteMCPBackend) DiscoverQueryRoutes(ctx context.Context, in mcpbridge
 		SelectionRules: []string{
 			"Use published_metrics when a maintained definition, population, denominator and time grain answer the question.",
 			"Use exploration for a requested temporary formula, cohort or counting grain only when available and approved sources/fields support its meaning; discover_analysis first.",
-			"Missing definitions or ambiguous semantics require specific clarification. Empty search alone does not justify exploration.",
+			"Resolve population, exclusions, denominator and counting grain before execution. Roles and usage history rank suggestions, never silently choose a different definition. Confirm no suitable authorized metric before exploration; empty search is not proof of absence.",
 			"Permission, connection and timeout failures never authorize switching query categories.",
 			"Availability is current-user catalog access, not business certification or proof that a data query succeeds.",
 		},

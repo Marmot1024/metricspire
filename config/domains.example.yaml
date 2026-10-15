@@ -1,0 +1,15 @@
+# Copy to config/local/domains.yaml; edit your business names here.
+api_version: metricspire.io/v1alpha1
+kind: DomainRegistry
+domains:
+  - tenant: acceptance
+    namespace: acceptance
+    display_name: Demo Commerce
+    aliases: [Orders, Retail]
+    # Optional source provenance; deployment must pin a reviewed commit.
+    # semantic_source:
+    #   repository: https://github.com/your-organization/private-semantics
+    #   revision: <full-40-character-commit>
+    #   catalogs:
+    #     - path: artifacts/commerce.analysis.json
+    #       sha256: <sha256-of-exported-file>

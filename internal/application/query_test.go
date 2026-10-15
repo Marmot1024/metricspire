@@ -182,11 +182,11 @@ func TestActiveTrialReleaseRequiresExplicitQueryOption(t *testing.T) {
 	}
 	repository := catalog.NewMemoryRepository()
 	management, _ := catalog.NewService(repository)
-	draft, err := management.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "matchingstory", Source: source, Actor: "tester"})
+	draft, err := management.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "demo_commerce", Source: source, Actor: "tester"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := management.PublishTrial(ctx, "matchingstory", source.Metadata.Name, draft.Revision, "tester", "trial"); err != nil {
+	if _, err := management.PublishTrial(ctx, "demo_commerce", source.Metadata.Name, draft.Revision, "tester", "trial"); err != nil {
 		t.Fatal(err)
 	}
 	policies := application.PolicyResolverFunc(func(context.Context, application.QueryScope, catalog.Release) (model.PolicySource, error) {
@@ -196,13 +196,13 @@ func TestActiveTrialReleaseRequiresExplicitQueryOption(t *testing.T) {
 		return model.SourceBinding{}, nil
 	})
 	input := application.QueryInput{QueryScope: application.QueryScope{
-		Namespace: "matchingstory", ModelName: source.Metadata.Name, Context: requestContext,
+		Namespace: "demo_commerce", ModelName: source.Metadata.Name, Context: requestContext,
 	}, Query: query}
 	ordinary, _ := application.NewQueryService(repository, policies, bindings, noOpEngine{}, audit.DiscardRecorder)
 	if _, err := ordinary.ExplainActive(ctx, input); err == nil || !strings.Contains(err.Error(), "metric_not_verified") {
 		t.Fatalf("ordinary service accepted trial release: %v", err)
 	}
-	staging, _ := application.NewQueryService(repository, policies, bindings, noOpEngine{}, audit.DiscardRecorder, application.WithTrialReleaseNamespaces("matchingstory"))
+	staging, _ := application.NewQueryService(repository, policies, bindings, noOpEngine{}, audit.DiscardRecorder, application.WithTrialReleaseNamespaces("demo_commerce"))
 	if _, err := staging.ExplainActive(ctx, input); err != nil {
 		t.Fatalf("explicit trial namespace rejected release: %v", err)
 	}

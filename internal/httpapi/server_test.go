@@ -481,10 +481,10 @@ func TestHTTPQueryJobEnforcesTimeout(t *testing.T) {
 
 func TestTrialPublicationExposesUnverifiedCatalogWithoutChangingCertifiedGate(t *testing.T) {
 	handler, engine, _ := newTestServer(t, httpapi.Config{
-		TrialReleaseNamespaces: []string{"matchingstory"},
-		UIModels:               []httpapi.UIModelRoute{{Namespace: "matchingstory", ModelName: "commerce"}},
+		TrialReleaseNamespaces: []string{"demo_commerce"},
+		UIModels:               []httpapi.UIModelRoute{{Namespace: "demo_commerce", ModelName: "commerce"}},
 	})
-	path := httpapi.APIPrefix + "/namespaces/matchingstory/models/commerce/"
+	path := httpapi.APIPrefix + "/namespaces/demo_commerce/models/commerce/"
 	source := readSource(t)
 	for index := range source.Spec.Metrics {
 		source.Spec.Metrics[index].Verification.Status = model.VerificationUnverified
@@ -522,7 +522,7 @@ func TestTrialPublicationExposesUnverifiedCatalogWithoutChangingCertifiedGate(t 
 		t.Fatalf("release lost trial status: %#v", release)
 	}
 
-	response = performJSON(handler, http.MethodGet, httpapi.APIPrefix+"/catalog/search?namespace=matchingstory&q=gross", "query", nil)
+	response = performJSON(handler, http.MethodGet, httpapi.APIPrefix+"/catalog/search?namespace=demo_commerce&q=gross", "query", nil)
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("catalog status=%d body=%s", response.StatusCode, readBody(t, response))
 	}
@@ -537,7 +537,7 @@ func TestTrialPublicationExposesUnverifiedCatalogWithoutChangingCertifiedGate(t 
 		}
 	}
 	query := readQuery(t)
-	response = performJSON(handler, http.MethodPost, httpapi.APIPrefix+"/namespaces/matchingstory/plan", "query", query)
+	response = performJSON(handler, http.MethodPost, httpapi.APIPrefix+"/namespaces/demo_commerce/plan", "query", query)
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("trial release plan status=%d body=%s", response.StatusCode, readBody(t, response))
 	}
@@ -547,11 +547,11 @@ func TestTrialPublicationExposesUnverifiedCatalogWithoutChangingCertifiedGate(t 
 	if err != nil || len(listed.Tools) != 11 {
 		t.Fatalf("MCP tools=%#v error=%v", listed, err)
 	}
-	out := callRemoteMCP(t, session, "search_metrics", map[string]any{"namespace": "matchingstory", "search": "gross"}, false)
+	out := callRemoteMCP(t, session, "search_metrics", map[string]any{"namespace": "demo_commerce", "search": "gross"}, false)
 	if !strings.Contains(out, `"verification_status":"unverified"`) {
 		t.Fatalf("MCP catalog hid trial verification status: %s", out)
 	}
-	callRemoteMCP(t, session, "plan_query", map[string]any{"namespace": "matchingstory", "query": query}, false)
+	callRemoteMCP(t, session, "plan_query", map[string]any{"namespace": "demo_commerce", "query": query}, false)
 	if engine.executionCount() != 0 {
 		t.Fatal("catalog discovery unexpectedly executed SQL")
 	}
@@ -1165,7 +1165,7 @@ func newTestServerWithAuthentication(t *testing.T, config httpapi.Config, engine
 		observed.lastScope = scope
 		observed.bindingCalls++
 		resolved := binding
-		if scope.Namespace == "matchingstory" {
+		if scope.Namespace == "demo_commerce" {
 			resolved.ManifestFingerprint = ""
 		}
 		return resolved, nil

@@ -88,14 +88,14 @@ func TestTrialReleasePreservesUnverifiedStatusAndOperationalMetadataGate(t *test
 	for index := range source.Spec.Metrics {
 		source.Spec.Metrics[index].Verification.Status = model.VerificationUnverified
 	}
-	draft, err := service.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "matchingstory", Source: source, Actor: "tester"})
+	draft, err := service.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "demo_commerce", Source: source, Actor: "tester"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Publish(ctx, "matchingstory", source.Metadata.Name, draft.Revision, "tester", "ordinary"); !errors.Is(err, catalog.ErrNotPublishable) {
+	if _, err := service.Publish(ctx, "demo_commerce", source.Metadata.Name, draft.Revision, "tester", "ordinary"); !errors.Is(err, catalog.ErrNotPublishable) {
 		t.Fatalf("ordinary publish error = %v", err)
 	}
-	release, err := service.PublishTrial(ctx, "matchingstory", source.Metadata.Name, draft.Revision, "tester", "trial only")
+	release, err := service.PublishTrial(ctx, "demo_commerce", source.Metadata.Name, draft.Revision, "tester", "trial only")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestTrialReleasePreservesUnverifiedStatusAndOperationalMetadataGate(t *test
 	if !catalog.IsTrialRelease(release) || catalog.IsTrialRelease(catalog.Release{Channel: catalog.ReleaseChannelCertified}) {
 		t.Fatal("trial release channel was not recognized exactly")
 	}
-	if _, err := service.PublishTrial(ctx, "matchingstory", source.Metadata.Name, draft.Revision, "tester", "duplicate"); !errors.Is(err, catalog.ErrConflict) {
+	if _, err := service.PublishTrial(ctx, "demo_commerce", source.Metadata.Name, draft.Revision, "tester", "duplicate"); !errors.Is(err, catalog.ErrConflict) {
 		t.Fatalf("duplicate release error = %v", err)
 	}
 
