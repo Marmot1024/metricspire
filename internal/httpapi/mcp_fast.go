@@ -99,7 +99,7 @@ func preparedQuery(in mcpbridge.QueryInput, plan application.PlanOutput, elapsed
 			}
 		}
 	}
-	return mcpbridge.PreparedQuery{Namespace: in.Namespace, Query: in.Query, ExpectedPlan: application.ExpectPlan(plan), Metrics: metrics, Engine: plan.Physical.Engine, ElapsedMS: elapsed, NextStep: "Review meaning, population, time bounds and grain; send query and expected_plan unchanged to run_query. Ask only about unresolved semantics or expanded scope."}
+	return mcpbridge.PreparedQuery{Namespace: in.Namespace, Query: in.Query, ExpectedPlan: application.ExpectPlan(plan), Metrics: metrics, Engine: plan.Physical.Engine, ElapsedMS: elapsed, NextStep: "Preparation validates a plan; it does not resolve user intent. If population/exclusion choices remain unresolved or the requested rule is undocumented, ask the user and STOP before run_query. Do not execute a generic total and add a caveat. Otherwise review meaning/time/grain and send query and expected_plan unchanged to run_query."}
 }
 
 func (b *remoteMCPBackend) RunQuery(ctx context.Context, in mcpbridge.RunQueryInput) (mcpbridge.RunQueryOutput, error) {
