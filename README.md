@@ -2,13 +2,13 @@
 
 <h1 align="center">MetricSpire</h1>
 
-<p align="center"><strong>Business metrics for your applications and AI assistants.</strong></p>
+<p align="center"><strong>A metric catalog and data service with MCP access.</strong></p>
 
 <p align="center"><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a></p>
 
-MetricSpire is an open-source service for defining and querying business metrics, such as revenue, order count and refund rate. Your data team defines how each metric is calculated. Applications and AI assistants then request that metric by name, with the dates, filters and breakdowns they need.
+MetricSpire is an open-source metric catalog and data service. It manages metric definitions and versions in one place, serves data queries through an HTTP API, and connects AI assistants through MCP.
 
-For example, an app and an AI assistant can both ask for revenue by customer region using the same reviewed definition, instead of each writing its own SQL.
+Optionally, connect an external semantic knowledge base describing approved data sources, fields and relationships. This supports exploratory analysis without first registering every temporary result as a fixed metric.
 
 > **Development preview.** Querying your data requires a configured service and data permissions. There is no published production-ready release. [Check the current status](docs/development-status.md).
 
@@ -44,7 +44,7 @@ Your team connects reviewed metric definitions to existing warehouse tables. Met
 
 **Databricks SQL is the first analytical engine.** PostgreSQL stores definitions, versions and audit records. Your data still needs to be collected and prepared upstream; MetricSpire does not replace that pipeline or provide a chart dashboard. It does not host an AI model or accept arbitrary SQL from callers.
 
-Additional opt-in paths support [temporary analysis](docs/exploration.md) over approved data sources and [online HTTP queries](docs/online-query.md) over precomputed PostgreSQL aggregates. They require separate configuration and acceptance.
+Exploratory analysis uses a reviewed, structured semantic catalog; see [external semantics and configuration](docs/exploration.md). A separate opt-in path supports [online HTTP queries](docs/online-query.md) over precomputed PostgreSQL aggregates. Both require configuration and acceptance.
 
 ## Documentation and project status
 

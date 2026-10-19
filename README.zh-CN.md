@@ -2,13 +2,13 @@
 
 <h1 align="center">MetricSpire</h1>
 
-<p align="center"><strong>让应用和 AI 助手查询同一套业务指标。</strong></p>
+<p align="center"><strong>指标库与数据服务，通过 MCP 连接 AI。</strong></p>
 
 <p align="center"><a href="README.md">English</a> · <strong>简体中文</strong> · <a href="README.ja.md">日本語</a></p>
 
-MetricSpire 是一个开源的业务指标服务，用来定义和查询收入、订单数、退款率等指标。数据团队维护每个指标怎么算，应用和 AI 助手按指标名称查询，指定日期、筛选条件和分组方式，就能获取结果。
+MetricSpire 是一个开源的指标库与数据服务。它集中管理指标定义和版本，通过 HTTP API 提供数据查询，并通过 MCP 接入 AI 助手。
 
-例如，应用和 AI 助手都要查“按客户地区分组的收入”，可以使用同一个经过审核的定义，不必各自编写一套 SQL。
+你也可以按需接入外部语义知识库，以审核过的数据源、字段和关联定义支撑探索性分析，无需先将每个临时分析结果登记为固定指标。
 
 > **开发预览版。** 查询自己的数据前，需要部署并配置服务，以及相应的数据权限。目前尚无生产就绪的正式版本。[查看当前状态](docs/development-status.md)（英文）。
 
@@ -44,7 +44,7 @@ MetricSpire 根据已发布的定义计算结果。下面是仓库[预期样例�
 
 **Databricks SQL 是首个分析引擎。** PostgreSQL 保存指标定义、版本和审计记录。数据采集与加工仍需由上游完成；MetricSpire 不替代这条链路，也不提供图表看板。它不托管 AI 模型，不接受调用方提交任意 SQL。
 
-另外可以单独启用[临时探索分析](docs/exploration.md)，查询已获批的数据源；或启用[在线 HTTP 查询](docs/online-query.md)，读取 PostgreSQL 中的预计算汇总数据。这两条路径需要分别配置和验收。
+探索性分析使用经过审核的结构化语义目录，接入方式见[外部语义与配置](docs/exploration.md)。另外可以单独启用[在线 HTTP 查询](docs/online-query.md)，读取 PostgreSQL 中的预计算汇总数据。这两条路径需要分别配置和验收。
 
 ## 文档与项目状态
 
