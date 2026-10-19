@@ -20,10 +20,10 @@ New to MetricSpire? Read the [overview and sample result](../README.md) first, t
 
 | Document | Read it for |
 | --- | --- |
-| [Architecture](architecture.md) | Definitions, identity, storage and execution boundaries. |
+| [Architecture and adapter support](architecture.md) | Integration diagram, OLAP versus metric storage, shipped adapters and extension contracts. |
 | [MCP integration](mcp.md) | Tool workflow, metric selection, errors and job handling. |
 | [HTTP API](http-api.md) | Requests, permissions, results, errors and audit limits. |
-| [Temporary analysis](exploration.md) | Optional structured analyses over approved external sources. |
+| [Exploratory analysis](exploration.md) | Connect an external semantic layer for temporary queries over approved sources. |
 | [PostgreSQL online query](online-query.md) | Optional synchronous queries over precomputed aggregates. |
 | [PostgreSQL table responsibilities](postgres-tables.md) | Control/history tables, business aggregates and cleanup boundaries. |
 | [Native MCP acceptance](mcp-native-acceptance.md) | Maintainer checks for a specific deployment and client. |

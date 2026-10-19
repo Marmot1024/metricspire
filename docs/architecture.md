@@ -1,8 +1,35 @@
 # Architecture
 
-MetricSpire is a modular monolith with a deliberately small trusted core. The semantic contract is `metricspire.io/v1alpha1`; its version is independent of the product release. PostgreSQL holds catalog and audit state, while an analytical-engine adapter executes bounded semantic queries. HTTP, UI, and MCP share the same application services.
+MetricSpire sits between data consumers and the engines that query business data. It manages metric definitions and exposes data queries through HTTP and MCP. The web UI uses the same HTTP services.
 
-The opt-in [online HTTP path](online-query.md) uses a separate PostgreSQL read adapter for reviewed precomputed aggregates. Its source bindings, SELECT-only credential and short handling budget are separate from the Warehouse analytical route. It does not change the catalog repository into a fact store, add MCP tools, or silently fall back to Warehouse execution.
+## Integration architecture
+
+![Clients call MetricSpire, which stores metric definitions in a relational database, queries business data in OLAP through adapters, and optionally loads an external semantic layer for exploration.](assets/architecture.svg)
+
+Solid arrows show service calls or data writes. The dashed arrow supplies optional semantic configuration. The diagram separates three responsibilities:
+
+| Responsibility | What belongs there | Integration design |
+| --- | --- | --- |
+| OLAP engine / warehouse | Business tables and query computation, populated by existing data pipelines. | Analytical adapters for engines such as ClickHouse, Doris or Databricks SQL. |
+| Metric store | Metric definitions, immutable versions, publication state and audit records. | A relational repository, such as MySQL or PostgreSQL. This is a separate adapter family from query execution. |
+| External semantic-layer repository, optional | Field meanings, source definitions, approved relationships and business rules used to build temporary analyses. | Reviewed definitions exported to MetricSpire's structured analysis-catalog format. Business rows remain in the query engine. |
+
+The table describes integration roles, not a list of shipped adapters. The current implementation is below. MetricSpire is a modular monolith; the semantic contract, `metricspire.io/v1alpha1`, is versioned independently of the product release.
+
+## Adapter support
+
+| Path | Shipped implementation | Scope |
+| --- | --- | --- |
+| Metric storage | [PostgreSQL repository](../internal/repository/postgres) | Catalog lifecycle, versions and durable audit. MySQL is an extension target; its repository adapter is not implemented. |
+| Analytical metric queries | [Databricks SQL adapter](../internal/adapter/databricks) | Published metrics, bounded asynchronous execution, HTTP, web queries and MCP. ClickHouse and Doris adapters are not implemented. |
+| Exploratory queries, opt-in | Databricks analysis adapter + external `AnalysisCatalog` | Temporary queries over approved fields and relationships through HTTP/MCP, with separate execution budgets. No metric registration is required. |
+| Precomputed aggregate queries, opt-in | [PostgreSQL query adapter](../internal/adapter/postgresquery) | A separate synchronous HTTP path with reviewed SUM-based aggregates, freshness checks and a read-only credential. It does not provide general OLAP analysis or MCP tools. |
+
+The current [`serve` bootstrap](../cmd/metricspire/serve.go) assembles PostgreSQL storage and Databricks analytical execution. Enabling the PostgreSQL aggregate path does not remove that deployment requirement. There is no runtime switch that makes ClickHouse, Doris or MySQL available today.
+
+Adding an OLAP engine requires an implementation of [`QueryEngine`](../internal/application/query.go), explicit capabilities, compatible source bindings, execution/cancellation handling, bootstrap wiring and conformance tests. Exploration has a separate `AnalysisEngine` contract in [the analysis service](../internal/application/exploration.go); metric-query support alone does not enable it. Adding a metric store instead requires the catalog repository and audit contracts, including transactional publication and migration behavior. These two extension paths must remain separate.
+
+The opt-in [online HTTP path](online-query.md) uses PostgreSQL as a business-data source, separately from PostgreSQL's catalog-storage role. Its source bindings, SELECT-only credential and short handling budget are independent of analytical execution. Requests never silently switch paths after a failure.
 
 ## Component boundaries
 
@@ -11,23 +38,9 @@ and typed `AnalysisQuery` path: authorized detail sources and associations,
 temporary expressions, two aggregation stages, and audited asynchronous jobs.
 It uses separate warehouse budgets and does not require result metric registration.
 
-```text
-                        transactional control plane
-SemanticModel ──> CatalogService ──> CatalogRepository ──> PostgreSQL
-     │                 │
-     │                 └── draft -> validate -> publish -> active -> rollback
-     │
-     └──> SemanticManifest + PolicyBundle
-                         │
-trusted RequestContext + SemanticQuery
-              │          └──> LogicalPlan
-PolicyResolver┘
-BindingResolver + EngineCapabilities
-                         └──> PhysicalPlan
-                                   └──> audited async job ──> QueryEngine ──> TypedResult
-                                           │
-                                           └── Databricks SQL (first adapter)
-```
+1. **Publish:** validate a metric draft, compile its definition and save an immutable release in the metric store. Publication changes the active release pointer and retains history.
+2. **Query a metric:** authenticate the caller, resolve the active release, check policy, build a logical plan, bind it to the configured engine, record admission, execute and record completion before returning a typed result. HTTP and MCP call the same query application service; the web UI calls HTTP.
+3. **Explore:** load reviewed external semantics, authorize the requested sources and fields, plan a temporary query, and execute it through the analysis adapter with its own jobs and budgets. This path can run without a registered metric and does not inherit all source permissions from the metric catalog.
 
 - `CatalogRepository` owns transactional drafts, revisions, releases, the active pointer, and release events. PostgreSQL stores JSONB definitions and manifests, not analytical facts or query results.
 - `QueryEngine` owns analytical execution, capabilities, timeout/cancellation, and typed results. It is a different adapter family from `CatalogRepository`.
