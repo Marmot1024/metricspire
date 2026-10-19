@@ -17,9 +17,9 @@ Repository administrators should protect `main`: require a pull request, require
 ## Local quality gate
 
 ```bash
+python3 tools/check_docs.py
 node --test internal/httpapi/ui/app_test.js
 python3 -m unittest tools/test_mcp_installer.py tools/test_deploy_staging.py
-python3 -m unittest tools/test_mcp_installer.py
 python3 -m unittest discover -s deploy/databricks-apps -p test_render.py
 go mod verify
 go test -race ./...
@@ -42,3 +42,5 @@ Real PostgreSQL, Databricks, OAuth, and deployed-App tests are opt-in. They must
 ## Documentation
 
 Update the closest stable guide when a public contract changes. Keep `README.md`, `README.zh-CN.md`, and `README.ja.md` aligned for top-level product claims. Historical phase logs and environment-specific evidence belong in ignored local notes, not the public documentation tree.
+
+For documentation changes, run `python3 tools/check_docs.py` and execute any changed local example commands. Check that the three overview pages describe the same capability and maturity boundaries, and that examples distinguish stored fixture results from live queries. The checker covers local file/Markdown-heading links, JSON examples and repeated prose; it does not validate external URLs, translations, browser layout or deployment acceptance. A prose-only change does not require rerunning unrelated database or authentication acceptance.

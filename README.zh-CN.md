@@ -1,97 +1,60 @@
-<p align="center"><img src="docs/assets/metricspire-mark.svg" width="62" height="62" alt="MetricSpire 标识"></p>
+<p align="center"><img src="docs/assets/metricspire-mark.svg" width="44" height="44" alt="MetricSpire"></p>
 
 <h1 align="center">MetricSpire</h1>
 
-<p align="center"><strong>问指标，不问物理表。</strong></p>
-
-<p align="center">经过评审的定义 · 有边界的查询 · UI、API 与 MCP 共用一套契约</p>
+<p align="center"><strong>让应用和 AI 助手查询同一套业务指标。</strong></p>
 
 <p align="center"><a href="README.md">English</a> · <strong>简体中文</strong> · <a href="README.ja.md">日本語</a></p>
 
-<p align="center"><img src="docs/assets/semantic-workflow.svg" alt="以公开订单示例说明：定义收入指标，按客户地区发起结构化请求，经过授权与有边界的规划后执行。"></p>
+MetricSpire 是一个开源的业务指标服务，用来定义和查询收入、订单数、退款率等指标。数据团队维护每个指标怎么算，应用和 AI 助手按指标名称查询，指定日期、筛选条件和分组方式，就能获取结果。
 
-<p align="center"><sub>基于仓库公开的 <code>orders</code> 模型绘制；并非产品截图，也不代表实时查询结果。</sub></p>
+例如，应用和 AI 助手都要查“按客户地区分组的收入”，可以使用同一个经过审核的定义，不必各自编写一套 SQL。
 
-<p align="center"><a href="docs/getting-started.md">体验公开示例</a> · <a href="docs/mcp.md">连接 AI 客户端</a> · <a href="docs/architecture.md">了解架构</a></p>
+> **开发预览版。** 查询自己的数据前，需要部署并配置服务，以及相应的数据权限。目前尚无生产就绪的正式版本。[查看当前状态](docs/development-status.md)（英文）。
 
-MetricSpire 是开源的语义指标服务。经评审的指标定义发布一次，应用与 AI Agent 就能按指标 code 和维度使用同一套治理链路。服务解析生效版本，执行策略与限额检查；真实数据的访问权仍由分析引擎裁定。
+## 一个例子：从问题到结果
 
-> **开发预览版，尚非生产就绪。** Databricks Apps staging 路径经过验证，但计划中的 `v0.1.0` 尚未发布。[查看已验证范围](docs/development-status.md)（英文）。
+配置好公开的订单样例数据（TPCH）后，AI 助手可以把下面的问题转换成指标查询：
 
-[配置你的团队](config/README.md)：私有运行配置、业务名称与别名、经过审核的语义导出文件。
+> 查询样例订单 1–5，按客户类型和订单状态分组，返回收入、订单数和平均订单金额。
 
-## 为什么做 MetricSpire
+MetricSpire 根据已发布的定义计算结果。下面是仓库[预期样例结果](testdata/acceptance/databricks-tpch/expected.json)的前两行：
 
-调用方提交**指标 code 与维度**，不自行选择物理表或生成不受约束的 SQL。MetricSpire 管理业务定义、经过审核的物理绑定、生效版本、产品权限与查询限额；底层分析引擎仍负责判断真实用户能否读取数据。
+| 客户类型 | 订单状态 | 收入 | 订单数 | 平均订单金额 |
+| --- | --- | ---: | ---: | ---: |
+| BUILDING | F | 228570.52 | 1 | 228570.52 |
+| BUILDING | O | 203010.51 | 1 | 203010.51 |
 
-它是指标服务，不代替数据仓库、BI 系统，也不会绕过引擎原生的行列权限。
+这个样例将收入定义为所选订单总金额之和。你可以查看对应的[指标定义](testdata/acceptance/databricks-tpch/model.yaml)与[结构化请求](testdata/acceptance/databricks-tpch/query.json)。表格引用已保存的测试结果，并非实时演示。AI 客户端负责理解问题，MetricSpire 负责校验并执行结构化请求。
 
-可选的[探索分析](docs/exploration.md)基于外挂语义层的获批明细源和字段，支持临时公式、分桶、两阶段聚合与受控关联，无需先登记结果指标。启用后增加五个 MCP 工具；部署和真实业务验收仍需分别完成。
+## 从哪里开始？
 
-## 已实现的能力
+| 你的目标 | 入口 | 需要准备 |
+| --- | --- | --- |
+| 在本地 Codex CLI 中使用团队服务 | [获取团队安装器](docs/mcp-installer.md#get-the-installer) | 已部署的实例、团队提供的安装器，以及你自己的 Databricks 访问权限。 |
+| 连接其他 MCP 客户端 | [MCP 连接指南](docs/mcp.md#connect) | 实例地址，以及该部署支持的身份认证配置。 |
+| 不连接数据，先理解指标定义 | [运行离线示例](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database) | Go；无需数据库或云账号。示例生成查询计划，不返回数据结果。 |
+| 为团队部署服务 | [服务配置指南](docs/getting-started.md#run-the-http-service) | PostgreSQL、身份认证配置和分析引擎。 |
 
-- **受治理的目录：** PostgreSQL 保存带乐观版本控制的草稿、校验结果、不可变的 `trial`/`certified` 发布、生效或撤下状态、回滚及版本事件。
-- **可移植的语义：** 使用受约束的表达式和逻辑计划；环境相关的表与字段映射由经过评审的 `SourceBinding` 管理，不接受调用方传入原始 SQL。
-- **受控执行：** 查询前检查策略与引擎能力；Databricks SQL 适配器使用参数化语句、超时、取消、类型化结果、行数与字节限制，以及失败即关闭的审计。
-- **三个入口、一套服务：** 维护与查询界面、严格的 HTTP 管理/查询 API，以及十一个核心远程 MCP 查询工具共用应用服务。
-- **清晰的身份边界：** 自托管可选通用 OIDC；Databricks Apps 使用平台托管身份。产品权限不能覆盖仓库原生的数据权限。
+已有网页访问权限？打开团队实例，从**指标目录**开始。仓库不附带公开服务实例，也不包含公司的指标定义。上述详细指南目前为英文。
 
-Databricks SQL 是首个分析引擎适配器。PostgreSQL 仍承担事务性**控制面**；另外可显式启用[在线 HTTP 预览](docs/online-query.md)，通过数字指标 code 和独立只读凭据查询已审核的预计算汇总数据，不会自动回退到数仓。当前不承诺通用多引擎分析，也不宣称已达到生产环境的延迟或可用性指标。详细边界见[架构](docs/architecture.md)与 [HTTP 契约](docs/http-api.md)（英文）。
+## 它在数据系统里负责哪一部分？
 
-## 试用语义规划
+团队把审核过的指标定义连接到现有数仓表。MetricSpire 检查用户权限，选择当前生效的定义，执行查询并返回带类型的结果表。网页、HTTP API 和 MCP 工具使用同一套服务。维护者可以审核和发布定义变更，保留历史，需要时回滚到之前的版本。
 
-需要 Go 1.26 或 1.27。下面的离线示例编译中立的订单模型并生成计划，无需数据库，也不会向 Warehouse 提交查询。
+**Databricks SQL 是首个分析引擎。** PostgreSQL 保存指标定义、版本和审计记录。数据采集与加工仍需由上游完成；MetricSpire 不替代这条链路，也不提供图表看板。它不托管 AI 模型，不接受调用方提交任意 SQL。
 
-```bash
-mkdir -p dist/demo
-go run ./cmd/metricspire compile \
-  --source examples/orders/model.yaml \
-  --out dist/demo/manifest.json
-go run ./cmd/metricspire compile-policy \
-  --source examples/orders/policy.yaml \
-  --manifest dist/demo/manifest.json \
-  --out dist/demo/policy-bundle.json
-go run ./cmd/metricspire plan \
-  --manifest dist/demo/manifest.json \
-  --policy dist/demo/policy-bundle.json \
-  --context examples/orders/context.json \
-  --query examples/orders/query.json \
-  --binding examples/orders/binding.json \
-  --capabilities examples/orders/capabilities.json \
-  --logical-out dist/demo/logical-plan.json \
-  --physical-out dist/demo/physical-plan.json
-```
+另外可以单独启用[临时探索分析](docs/exploration.md)，查询已获批的数据源；或启用[在线 HTTP 查询](docs/online-query.md)，读取 PostgreSQL 中的预计算汇总数据。这两条路径需要分别配置和验收。
 
-示例中的 context 文件**仅在离线演示中**被信任；网络调用方不能自行指定身份、策略、绑定、发布版本、引擎或 SQL。本地 PostgreSQL 发布、服务启动与验证命令见[快速上手](docs/getting-started.md)（英文）。
+## 文档与项目状态
 
-## 连接 AI 客户端
+- [快速上手](docs/getting-started.md) — 离线示例、本地指标目录与服务配置。
+- [MCP 接入](docs/mcp.md) · [HTTP API](docs/http-api.md) — 连接客户端或应用。
+- [团队配置](config/README.md) — 私有运行配置、业务别名和已审核的语义导出文件。
+- [架构](docs/architecture.md) — 指标定义、权限与执行边界。
+- [开发状态](docs/development-status.md) — 已实现能力、验证证据和待完成项。
+- [贡献指南](CONTRIBUTING.md) · [全部文档](docs/README.md)。
 
-部署后的实例通过 `/api/v1/mcp` 提供 Streamable HTTP MCP（Databricks Apps 推荐此路径）。客户端只需连接 URL，不必克隆仓库或在本地运行 MetricSpire。工具支持发现、解释、规划、受限查询提交、状态读取与取消；**不**提供原始 SQL 或发布操作。
+以上文档目前为英文。当前尚未确立生产就绪、通用多引擎分析或生产延迟与可用性保证。试用指标始终保留未验证标识。语义契约 [`metricspire.io/v1alpha1`](contracts/metricspire.schema.json) 与计划中的产品 `v0.1.0` 分别管理版本。
 
-```text
-list_namespaces → search_metrics → get_metric_details → prepare_query → run_query
-               → get_query / cancel_query（仅作业尚未完成时）
-```
-
-每次请求都会独立鉴权。本地 Codex 用户通过安装器复用 Databricks CLI 用户授权，仍需具备自己的 App 与数据权限；登录成功本身不等于查询验收。客户端配置、工具行为与安全边界见 [MCP 接入](docs/mcp.md)，当前验收范围见[开发状态](docs/development-status.md)（英文）。
-
-## 文档导航
-
-| 文档（英文） | 内容 |
-| --- | --- |
-| [快速上手](docs/getting-started.md) | 离线规划、本地目录流程、服务配置与验证。 |
-| [MCP 接入](docs/mcp.md) | 远程工具、CLI 授权配置及作业边界。 |
-| [架构](docs/architecture.md) | 语义、身份、控制面与引擎适配器边界。 |
-| [HTTP 契约](docs/http-api.md) | 端点、权限、错误、限额及审计行为。 |
-| [开发状态](docs/development-status.md) | 预览版验收边界、未完成项与发布门槛。 |
-| [贡献指南](CONTRIBUTING.md) | 分支、PR、测试、迁移与数据安全规范。 |
-
-[文档索引](docs/README.md)区分对外指南和维护者专用的 staging 部署说明；阶段验收记录仅在本地保留，不混入公开产品文档。
-
-机器可读的语义契约是 [`metricspire.io/v1alpha1`](contracts/metricspire.schema.json)；其版本与计划中的产品 `v0.1.0` 独立演进。
-
-## 范围与许可
-
-MetricSpire 不负责 ETL、不托管 LLM、不开放任意 SQL、不导出海量结果，也不执行跨引擎 Join。不支持的计划会在执行前失败，而非悄悄改变语义。
-
-采用 [Apache 2.0](LICENSE) 许可。项目为独立的 clean-room 实现，示例采用中立的公开数据；请勿提交凭据、私有业务 Schema 或生产数据。
+采用 [Apache 2.0](LICENSE) 许可。公开示例使用中立数据；公司定义、凭据和生产数据应保留在仓库之外。

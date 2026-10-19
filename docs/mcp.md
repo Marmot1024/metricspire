@@ -1,6 +1,6 @@
 # MCP integration
 
-MetricSpire serves stateless Streamable HTTP MCP at `/api/v1/mcp` on Databricks Apps, and also `/mcp` on self-hosted deployments. Users connect to a deployed service; no repository checkout is needed.
+MetricSpire serves stateless Streamable HTTP MCP at `/api/v1/mcp` on Databricks Apps, and also `/mcp` on self-hosted deployments. Users connect to a deployed service; no repository checkout is needed. MetricSpire does not provide a shared public instance. Obtain your team's connection details first.
 
 ## Connect
 
@@ -8,7 +8,7 @@ For teams using local Codex CLI, use the [single-file installer](mcp-installer.m
 
 After installation, reopen or reconnect Codex and call `list_namespaces`. An authenticated CLI profile does not itself prove MCP access. Never mix stored native OAuth or static bearer headers into this connection. Keep the profile and workspace stable, and do not place credentials in prompts, configuration, Git or issue reports.
 
-URL-only native OAuth remains an alternative for other clients, requiring a registered public client and validated refresh behavior; its implementation is preserved on `backup/native-oauth-20261012`. It is not the default local Codex onboarding route. See [operator setup](../deploy/databricks-apps/README.md#oauth-client-onboarding) and [release acceptance](mcp-native-acceptance.md).
+URL-only native OAuth remains an alternative for other clients, requiring a registered public client and validated refresh behavior; its implementation is preserved on `backup/native-oauth-20261012`. It is not the default local Codex onboarding route. See [operator setup](../deploy/databricks-apps/README.md#identity-and-mcp) and [release acceptance](mcp-native-acceptance.md).
 
 ## Business discovery and metric selection
 
@@ -43,6 +43,8 @@ storage are not implemented by this change.
 
 ## Query workflow
 
+The hosted MCP implementation defines eleven core tools, with five additional exploration tools when enabled. The installer verifies the original seven-tool compatibility baseline, not the complete current tool set. Use the connected server's advertised tools for the actual inventory.
+
 | Tool | Behavior |
 | --- | --- |
 | `list_namespaces`, `search_metrics` | Discover permitted domains and compact candidates. Search defaults to five matches, ranks exact codes/names first, and omits expressions and dimension details. |
@@ -55,7 +57,7 @@ storage are not implemented by this change.
 | `submit_query` | Submit a bounded query job; warehouse costs may apply. |
 | `get_query`, `cancel_query` | Read or cancel a job owned by the same tenant and principal. |
 
-Hosted MCP exposes eleven core tools and, when configured, five exploration tools. Prefer **search → selected details → prepare → run** after discovering the namespace. No separate explain/plan calls are needed on this path; poll only if the returned job is pending or running. The server's initialization instructions, tool descriptions and returned next steps describe this workflow without local skills or conversation history. Clients still control tool selection; this is guidance, not guaranteed client behavior or a latency SLA.
+Prefer **search → selected details → prepare → run** after discovering the namespace. No separate explain/plan calls are needed on this path; poll only if the returned job is pending or running. The server's initialization instructions, tool descriptions and returned next steps describe this workflow without local skills or conversation history. Clients still control tool selection; this is guidance, not guaranteed client behavior or a latency SLA.
 
 Pass the normalized `query` and all four `expected_plan` values from `prepare_query` unchanged to `run_query`. They are equality guards, not release-selection authority. The service rechecks current authorization and the actual plan immediately before engine execution, including asynchronous execution. A changed query, release, policy or binding is rejected; prepare again and review the new scope. Published verification/channel status remains visible throughout this workflow.
 

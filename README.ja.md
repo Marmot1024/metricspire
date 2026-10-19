@@ -1,97 +1,60 @@
-<p align="center"><img src="docs/assets/metricspire-mark.svg" width="62" height="62" alt="MetricSpire のロゴ"></p>
+<p align="center"><img src="docs/assets/metricspire-mark.svg" width="44" height="44" alt="MetricSpire"></p>
 
 <h1 align="center">MetricSpire</h1>
 
-<p align="center"><strong>テーブルではなく、指標を問い合わせる。</strong></p>
-
-<p align="center">レビュー済みの定義 · 制限付きクエリ · UI・API・MCP に共通の契約</p>
+<p align="center"><strong>アプリと AI アシスタントで、同じ業務指標を使う。</strong></p>
 
 <p align="center"><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <strong>日本語</strong></p>
 
-<p align="center"><img src="docs/assets/semantic-workflow.svg" alt="公開 orders サンプルの概念図。売上指標を定義し、顧客の地域別に問い合わせ、認可と制限付き計画を経て実行します。"></p>
+MetricSpire は、売上・注文数・返金率などの業務指標を定義し、問い合わせるためのオープンソースサービスです。データチームが各指標の計算方法を管理し、アプリや AI アシスタントは指標名、期間、絞り込み条件、集計単位を指定して結果を取得します。
 
-<p align="center"><sub>公開 <code>orders</code> モデルに基づく図解です。製品のスクリーンショットや実際のクエリ結果ではありません。</sub></p>
+たとえば、アプリと AI アシスタントがどちらも顧客地域別の売上を調べる場合、個別に SQL を書く代わりに、同じレビュー済みの定義を使えます。
 
-<p align="center"><a href="docs/getting-started.md">サンプルを試す</a> · <a href="docs/mcp.md">AI クライアントを接続</a> · <a href="docs/architecture.md">構成を読む</a></p>
+> **開発プレビュー。** 自分のデータを問い合わせるには、設定済みのサービスとデータ権限が必要です。本番利用に対応した正式版はまだ公開していません。[現在の状況](docs/development-status.md)（英語）をご確認ください。
 
-MetricSpire はオープンソースのセマンティック指標サービスです。レビュー済みの指標を一度公開すれば、アプリや AI エージェントが指標コードとディメンションで同じガバナンス経路を利用できます。有効なリリースを解決し、方針と上限を適用したうえで、実データへのアクセス可否は分析エンジンに委ねます。
+## 質問から結果までの例
 
-> **開発プレビューであり、本番利用を保証しません。** Databricks Apps の staging 経路は検証されていますが、予定している `v0.1.0` は未公開です。[検証済みの範囲](docs/development-status.md)（英語）をご覧ください。
+公開の注文サンプルデータ（TPCH）を設定した環境では、AI アシスタントが次の質問を指標クエリに変換できます。
 
-[チームの設定](config/README.md)：非公開の実行設定、業務名と別名、レビュー済みのセマンティック定義。
+> サンプル注文 1–5 について、顧客セグメントと注文ステータス別に、売上・注文数・平均注文金額を調べてください。
 
-## なぜ MetricSpire が必要か
+MetricSpire は公開済みの定義に従って計算します。リポジトリの[期待結果](testdata/acceptance/databricks-tpch/expected.json)の先頭 2 行は次のとおりです。
 
-呼び出し側は物理テーブルや無制限の SQL ではなく、**指標コードとディメンション**を指定します。MetricSpire はビジネス定義、レビュー済みのバインディング、有効な版、製品側の権限とクエリ上限を管理します。元データのアクセス権限は分析エンジンが判断します。
+| 顧客セグメント | 注文ステータス | 売上 | 注文数 | 平均注文金額 |
+| --- | --- | ---: | ---: | ---: |
+| BUILDING | F | 228570.52 | 1 | 228570.52 |
+| BUILDING | O | 203010.51 | 1 | 203010.51 |
 
-これは指標サービスであり、データウェアハウスや BI システム、エンジン固有の行・列レベルの権限管理を置き換えるものではありません。
+このサンプルでは、売上を対象注文の合計金額と定義しています。[指標定義](testdata/acceptance/databricks-tpch/model.yaml)と[構造化クエリ](testdata/acceptance/databricks-tpch/query.json)も確認できます。表は保存済みのテスト結果であり、ライブデモではありません。質問の解釈は AI クライアントが、構造化リクエストの検証と実行は MetricSpire が担当します。
 
-任意設定の[探索分析](docs/exploration.md)では、外部セマンティック定義の承認済みソースと属性を使い、指標登録なしで式、分類、二段階集計、承認済み関連を実行できます。有効化すると MCP ツールが五つ追加されます。デプロイと業務検証は別途必要です。
+## どこから始めますか？
 
-## 実装済みの機能
+| 目的 | 入口 | 必要なもの |
+| --- | --- | --- |
+| ローカル Codex CLI からチームのサービスを使う | [チーム用インストーラーを入手](docs/mcp-installer.md#get-the-installer) | 稼働中のインスタンス、チームのインストーラー、自分の Databricks アクセス権。 |
+| 別の MCP クライアントを接続する | [MCP 接続ガイド](docs/mcp.md#connect) | インスタンスの URL と、その環境に対応した認証設定。 |
+| データに接続せず指標定義を試す | [オフラインサンプル](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database) | Go のみ。データベースやクラウドアカウントは不要です。生成されるのはクエリ計画であり、データの結果ではありません。 |
+| チーム用のサービスを構築する | [サービス設定](docs/getting-started.md#run-the-http-service) | PostgreSQL、認証設定、分析エンジン。 |
 
-- **管理されたカタログ：** PostgreSQL に楽観的リビジョン管理付きの下書き、検証、変更不能な `trial` / `certified` リリース、有効化・無効化、ロールバック、履歴イベントを保存します。
-- **移植可能な意味論：** 制約付きの式と論理計画を採用し、環境固有のテーブル・列の対応付けはレビュー済みの `SourceBinding` に分離します。呼び出し側から任意の SQL は受け付けません。
-- **制御された実行：** 方針・エンジン能力の検査、決定的な計画、パラメーター化された Databricks SQL、タイムアウト、キャンセル、型付き結果、行数・バイト数の上限、失敗時に閉じる監査を備えます。
-- **三つの入口と一つのサービス：** 管理・検索 UI、厳格な HTTP API、十一の基本リモート MCP クエリツールが同じアプリケーションサービスを利用します。
-- **明確な認証境界：** セルフホストでは標準 OIDC、Databricks Apps ではプラットフォーム管理の ID を利用します。製品側の権限でウェアハウス固有のデータ権限を上書きすることはありません。
+Web アクセス権がある場合は、チームのインスタンスを開き、**指標カタログ**から始めてください。このリポジトリには公開サービスのインスタンスや社内の指標定義は含まれていません。詳細ガイドは現在英語です。
 
-Databricks SQL は最初の分析エンジンアダプターです。PostgreSQL はトランザクション用の**制御プレーン**を担います。別途、明示的に有効化する[オンライン HTTP プレビュー](docs/online-query.md)では、数値の指標コードと専用の読み取り資格情報で審査済みの事前集計を取得できます。Warehouse への自動フォールバックは行いません。汎用の複数エンジン分析や本番の遅延・可用性保証はうたっていません。詳しくは[アーキテクチャ](docs/architecture.md)と [HTTP 契約](docs/http-api.md)（英語）をご覧ください。
+## データシステムでの役割
 
-## セマンティック計画を試す
+チームがレビュー済みの指標定義を既存のテーブルに接続します。MetricSpire はユーザーの権限を確認し、有効な定義を選び、クエリを実行して型付きの結果テーブルを返します。Web UI、HTTP API、MCP ツールは同じサービスを使います。管理者は定義の変更をレビューして公開し、履歴を残し、以前の版に戻せます。
 
-Go 1.26 または 1.27 が必要です。以下のオフライン例は中立的な注文モデルをコンパイルして計画を出力します。データベースは不要で、ウェアハウスへのクエリも送信しません。
+**最初の分析エンジンは Databricks SQL です。** PostgreSQL には定義、版、監査記録を保存します。データの収集と加工は上流で必要です。MetricSpire はそのパイプラインやグラフダッシュボードを提供しません。AI モデルをホストせず、呼び出し側から任意の SQL も受け付けません。
 
-```bash
-mkdir -p dist/demo
-go run ./cmd/metricspire compile \
-  --source examples/orders/model.yaml \
-  --out dist/demo/manifest.json
-go run ./cmd/metricspire compile-policy \
-  --source examples/orders/policy.yaml \
-  --manifest dist/demo/manifest.json \
-  --out dist/demo/policy-bundle.json
-go run ./cmd/metricspire plan \
-  --manifest dist/demo/manifest.json \
-  --policy dist/demo/policy-bundle.json \
-  --context examples/orders/context.json \
-  --query examples/orders/query.json \
-  --binding examples/orders/binding.json \
-  --capabilities examples/orders/capabilities.json \
-  --logical-out dist/demo/logical-plan.json \
-  --physical-out dist/demo/physical-plan.json
-```
+追加設定により、承認済みデータソースに対する[一時分析](docs/exploration.md)、または PostgreSQL の事前集計データに対する[オンライン HTTP クエリ](docs/online-query.md)を利用できます。それぞれに設定と受け入れ検証が必要です。
 
-例の context ファイルを信頼するのは**このオフラインデモに限ります**。ネットワーク経由の呼び出しで、ID、方針、バインディング、リリース、エンジン、SQL を利用者が指定することはできません。ローカル PostgreSQL の公開手順、サービス起動、検証は[はじめに](docs/getting-started.md)（英語）を参照してください。
+## ドキュメントと開発状況
 
-## AI クライアントを接続する
+- [はじめに](docs/getting-started.md) — オフラインサンプル、ローカルカタログ、サービス設定。
+- [MCP 接続](docs/mcp.md) · [HTTP API](docs/http-api.md) — クライアントやアプリとの接続。
+- [チーム設定](config/README.md) — 非公開設定、業務名の別名、レビュー済みの意味定義のエクスポート。
+- [アーキテクチャ](docs/architecture.md) — 定義、権限、実行の境界。
+- [開発状況](docs/development-status.md) — 実装済みの機能、検証の根拠、残っている課題。
+- [貢献ガイド](CONTRIBUTING.md) · [ドキュメント一覧](docs/README.md)。
 
-デプロイ済みのインスタンスは `/api/v1/mcp` で Streamable HTTP MCP を公開します（Databricks Apps で推奨するパス）。クライアントは URL に接続するだけで、リポジトリのクローンやローカル実行は不要です。ツールは探索、説明、計画、制限付きクエリの送信、状態取得、キャンセルを提供し、**任意 SQL や公開操作は提供しません**。
+詳細ドキュメントは現在英語です。本番運用への対応、汎用的な複数エンジン分析、本番環境の遅延や可用性は保証されていません。試用指標には未検証の表示が残ります。意味定義の契約 [`metricspire.io/v1alpha1`](contracts/metricspire.schema.json) と予定する製品版 `v0.1.0` は別々にバージョン管理します。
 
-```text
-list_namespaces → search_metrics → get_metric_details → prepare_query → run_query
-               → get_query / cancel_query（未完了の場合のみ）
-```
-
-各リクエストは個別に認証されます。ローカル Codex はインストーラー経由で Databricks CLI のユーザー認証を利用します。利用者自身の App とデータへの権限が必要で、ログイン成功だけではクエリの検証にはなりません。[MCP 接続](docs/mcp.md)に設定と安全上の制約、[開発状況](docs/development-status.md)に検証済みの範囲を記載しています（英語）。
-
-## ドキュメント
-
-| 文書（英語） | 内容 |
-| --- | --- |
-| [はじめに](docs/getting-started.md) | オフライン計画、ローカルカタログ、サービス設定と検証。 |
-| [MCP 接続](docs/mcp.md) | リモートツール、CLI 認証設定、ジョブの境界。 |
-| [アーキテクチャ](docs/architecture.md) | 意味論、ID、制御プレーン、エンジンアダプター。 |
-| [HTTP 契約](docs/http-api.md) | エンドポイント、権限、エラー、上限、監査。 |
-| [開発状況](docs/development-status.md) | プレビュー段階の検証範囲、未完了項目、リリース条件。 |
-| [コントリビューション](CONTRIBUTING.md) | ブランチ、PR、テスト、移行、データ安全の規約。 |
-
-[ドキュメント一覧](docs/README.md)では公開ガイドとメンテナー向け staging 手順を分けています。過去のフェーズ検証記録はローカルに保管します。
-
-機械可読のセマンティック契約は [`metricspire.io/v1alpha1`](contracts/metricspire.schema.json) です。この契約の版は予定される製品版 `v0.1.0` とは独立しています。
-
-## 対象範囲とライセンス
-
-MetricSpire は ETL、LLM ホスティング、任意 SQL、巨大な結果のエクスポート、エンジン間 Join を提供しません。未対応の計画は実行前に失敗し、意味を黙って変えることはありません。
-
-[Apache 2.0](LICENSE) の下で公開しています。中立的な公開サンプルを用いた独立した clean-room 実装です。認証情報、非公開の業務 Schema、本番データをコミットしないでください。
+[Apache 2.0](LICENSE) ライセンスです。公開サンプルは中立なデータを使います。社内定義、認証情報、本番データはこのリポジトリに含めないでください。

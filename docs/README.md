@@ -1,19 +1,34 @@
 # Documentation
 
-MetricSpire is a development preview. Start with the [project overview](../README.md), then choose a guide:
+New to MetricSpire? Read the [overview and sample result](../README.md) first, then choose a path. Detailed guides are currently in English; [中文](../README.zh-CN.md) and [日本語](../README.ja.md) overviews cover the same product scope.
 
-| Document | Audience |
+## Use your team's service
+
+- **Web:** open your team's instance and start in the metric catalog. The repository does not provide a public instance.
+- **Local Codex CLI:** [get the team installer](mcp-installer.md#get-the-installer), install it using your existing Databricks profile, and verify a first query.
+- **Other AI clients:** read [MCP integration](mcp.md#connect) for deployment-specific connection and authentication requirements.
+- **Applications:** read the [HTTP API and sample request](http-api.md#example-query-a-published-metric).
+
+## Learn or operate
+
+- [Offline example](getting-started.md#compile-and-inspect-a-plan-without-a-database) — compile metric definitions and inspect a plan without a database.
+- [Service setup](getting-started.md#run-the-http-service) — prepare catalog storage, identity, bindings and engine access.
+- [Team configuration](../config/README.md) — maintain private runtime settings, business aliases and reviewed semantic exports.
+- [Development status](development-status.md) — distinguish implemented features, acceptance evidence and remaining gaps before a pilot.
+
+## Reference
+
+| Document | Read it for |
 | --- | --- |
-| [Getting started](getting-started.md) | Run the offline semantic example and local catalog. |
-| [MCP integration](mcp.md) | Connect an AI client to a deployed service. |
-| [Codex installer](mcp-installer.md) | Install CLI-backed local Codex access; verify actual tools and calls, with lifecycle acceptance tracked separately. |
-| [HTTP API](http-api.md) | Understand the stable request, permission, and audit boundary. |
-| [PostgreSQL online query](online-query.md) | Opt-in synchronous numeric-code queries over reviewed aggregates. |
-| [PostgreSQL table responsibilities](postgres-tables.md) | Separate control/history tables from business aggregates and cleanup decisions. |
-| [Architecture](architecture.md) | Understand semantic, identity, storage, and engine boundaries. |
-| [Temporary analysis backend](exploration.md) | Configure external semantics and governed temporary analyses over HTTP/MCP. |
-| [Development status](development-status.md) | Check preview maturity and unverified paths. |
+| [Architecture](architecture.md) | Definitions, identity, storage and execution boundaries. |
+| [MCP integration](mcp.md) | Tool workflow, metric selection, errors and job handling. |
+| [HTTP API](http-api.md) | Requests, permissions, results, errors and audit limits. |
+| [Temporary analysis](exploration.md) | Optional structured analyses over approved external sources. |
+| [PostgreSQL online query](online-query.md) | Optional synchronous queries over precomputed aggregates. |
+| [PostgreSQL table responsibilities](postgres-tables.md) | Control/history tables, business aggregates and cleanup boundaries. |
+| [Native MCP acceptance](mcp-native-acceptance.md) | Maintainer checks for a specific deployment and client. |
+| [Contributing](../CONTRIBUTING.md) | Development workflow and checks, including documentation validation. |
 
-The [Databricks Apps package guide](../deploy/databricks-apps/README.md) is **maintainer-specific staging documentation** beside its source, not the default installation path. The semantic schema under [`contracts/`](../contracts/metricspire.schema.json), neutral [`examples/`](../examples/orders/model.yaml), tests, license, and source code are also part of the public repository.
+The [Databricks Apps package guide](../deploy/databricks-apps/README.md) is for maintainers deploying a dedicated staging instance. The machine-readable [semantic contract](../contracts/metricspire.schema.json) and neutral [examples](../examples/orders/model.yaml) are available beside the code.
 
-Phase checklists, dated test receipts, environment/operator notes, generated uploads, credentials, and customer or production data are **not** product documentation. Keep working notes in the Git-ignored `local-notes/` directory; generated builds belong in ignored `dist/`. Never commit tokens or secrets even to an ignored directory. The previously published phase notes remain reachable in Git history; moving them out of the current tree does not erase that history.
+Keep environment receipts, historical phase logs, credentials and private business assets outside public documentation. Use ignored local notes for non-secret working records; never commit secrets.

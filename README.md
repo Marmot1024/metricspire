@@ -1,97 +1,60 @@
-<p align="center"><img src="docs/assets/metricspire-mark.svg" width="62" height="62" alt="MetricSpire mark"></p>
+<p align="center"><img src="docs/assets/metricspire-mark.svg" width="44" height="44" alt="MetricSpire"></p>
 
 <h1 align="center">MetricSpire</h1>
 
-<p align="center"><strong>Ask for a metric, not a table.</strong></p>
-
-<p align="center">Reviewed definitions · bounded queries · one contract across UI, API, and MCP</p>
+<p align="center"><strong>Business metrics for your applications and AI assistants.</strong></p>
 
 <p align="center"><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a></p>
 
-<p align="center"><img src="docs/assets/semantic-workflow.svg" alt="Illustrated path through the neutral orders example: define gross revenue, request it by customer region, then authorize and execute a bounded plan."></p>
+MetricSpire is an open-source service for defining and querying business metrics, such as revenue, order count and refund rate. Your data team defines how each metric is calculated. Applications and AI assistants then request that metric by name, with the dates, filters and breakdowns they need.
 
-<p align="center"><sub>Illustration based on the public <code>orders</code> model; not a product screenshot or a claim of live query results.</sub></p>
+For example, an app and an AI assistant can both ask for revenue by customer region using the same reviewed definition, instead of each writing its own SQL.
 
-<p align="center"><a href="docs/getting-started.md">Explore the example</a> · <a href="docs/mcp.md">Connect an AI client</a> · <a href="docs/architecture.md">Read the architecture</a></p>
+> **Development preview.** Querying your data requires a configured service and data permissions. There is no published production-ready release. [Check the current status](docs/development-status.md).
 
-MetricSpire is an open-source semantic metrics service. Publish a reviewed definition once; applications and AI agents can then request it by code and dimension through the same governed workflow. The service resolves the active release, applies policy and limits, and delegates physical data access to the analytical engine.
+## An example: from a question to a result
 
-> **Development preview.** The Databricks Apps staging path has been exercised, but there is no production-ready or published `v0.1.0` release. [See the verified boundary](docs/development-status.md).
+With the public sample order dataset (TPCH) configured, an AI assistant can turn this request into a metric query:
 
-[Configure your team](config/README.md): private runtime settings, business aliases and reviewed semantic exports.
+> For sample orders 1–5, show revenue, order count and average order value by customer segment and order status.
 
-## Why it exists
+MetricSpire uses the published definitions to calculate the result. Here are the first two rows of the repository's [expected sample result](testdata/acceptance/databricks-tpch/expected.json):
 
-Clients ask for **metric codes and dimensions** rather than choosing physical tables or generating unrestricted SQL. MetricSpire owns the definition, approved binding, active version, product policy, and query budgets. The analytical engine still decides whether the real user can read the underlying data.
+| Customer segment | Order status | Revenue | Orders | Average order value |
+| --- | --- | ---: | ---: | ---: |
+| BUILDING | F | 228570.52 | 1 | 228570.52 |
+| BUILDING | O | 203010.51 | 1 | 203010.51 |
 
-This is a metric service, not a replacement for your data warehouse, BI system, or engine-native row and column security.
+In this sample, revenue is the sum of the selected orders' total prices. The [definitions](testdata/acceptance/databricks-tpch/model.yaml) and [structured query](testdata/acceptance/databricks-tpch/query.json) are available to inspect. These are stored fixture results, not a live demo. The AI client interprets the question; MetricSpire validates and executes the structured request.
 
-Optional [temporary analysis](docs/exploration.md) uses reviewed external sources and fields for formulas, buckets, staged aggregates and approved associations without registering each result metric. It adds five MCP tools when configured; deployment and business acceptance are separate.
+## Choose where to start
 
-## What is implemented
+| Your goal | Start here | You will need |
+| --- | --- | --- |
+| Use your team's service from local Codex CLI | [Get the team installer](docs/mcp-installer.md#get-the-installer) | A deployed instance, its team installer, and your own Databricks access. |
+| Connect another MCP client | [MCP connection guide](docs/mcp.md#connect) | An instance URL and the authentication setup supported by that deployment. |
+| Understand metric definitions without connecting to data | [Run the offline example](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database) | Go; no database or cloud account. This produces query plans, not data results. |
+| Run a service for your team | [Service setup](docs/getting-started.md#run-the-http-service) | PostgreSQL, identity configuration and an analytical engine. |
 
-- **Governed catalog:** optimistic drafts, validation, immutable `trial` or `certified` releases, activation/deactivation, rollback, and release events in PostgreSQL.
-- **Portable semantics:** constrained expressions and logical plans, with environment-specific table and column mappings in reviewed `SourceBinding` files. No caller-provided SQL.
-- **Guarded execution:** policy checks, capability checks, deterministic plans, parameterized Databricks SQL, timeouts, cancellation, typed results, row/byte limits, and fail-closed audit.
-- **One service, three surfaces:** a maintainer/query UI, strict HTTP management and query APIs, and eleven core remote MCP query tools using the same application services.
-- **Explicit identity boundaries:** portable OIDC for self-hosting or managed identity in Databricks Apps. Product permissions never override warehouse-native data permissions.
+Already have web access? Open your team's instance and start in the **metric catalog**. This repository does not include a public instance or your company's metric definitions.
 
-Databricks SQL is the first analytical adapter. PostgreSQL remains the transactional **control plane**. A separate, opt-in [online HTTP preview](docs/online-query.md) reads reviewed precomputed aggregates using numeric metric codes and dedicated SELECT-only credentials; it never falls back to Warehouse execution. General multi-engine analytics and production latency/availability guarantees are not claimed. See the [architecture](docs/architecture.md) and [HTTP contract](docs/http-api.md) for the trust boundaries.
+## How it fits into your data stack
 
-## Try the semantic workflow
+Your team connects reviewed metric definitions to existing warehouse tables. MetricSpire then checks the user's access, selects the active definition, runs the query and returns a table of typed values. The web UI, HTTP API and MCP tools share the same service. Maintainers can review and publish definition changes, retain history and roll back to an earlier version.
 
-Requires Go 1.26 or 1.27. This offline example compiles a neutral order model and produces plans; it does not need a database or submit a warehouse query.
+**Databricks SQL is the first analytical engine.** PostgreSQL stores definitions, versions and audit records. Your data still needs to be collected and prepared upstream; MetricSpire does not replace that pipeline or provide a chart dashboard. It does not host an AI model or accept arbitrary SQL from callers.
 
-```bash
-mkdir -p dist/demo
-go run ./cmd/metricspire compile \
-  --source examples/orders/model.yaml \
-  --out dist/demo/manifest.json
-go run ./cmd/metricspire compile-policy \
-  --source examples/orders/policy.yaml \
-  --manifest dist/demo/manifest.json \
-  --out dist/demo/policy-bundle.json
-go run ./cmd/metricspire plan \
-  --manifest dist/demo/manifest.json \
-  --policy dist/demo/policy-bundle.json \
-  --context examples/orders/context.json \
-  --query examples/orders/query.json \
-  --binding examples/orders/binding.json \
-  --capabilities examples/orders/capabilities.json \
-  --logical-out dist/demo/logical-plan.json \
-  --physical-out dist/demo/physical-plan.json
-```
+Additional opt-in paths support [temporary analysis](docs/exploration.md) over approved data sources and [online HTTP queries](docs/online-query.md) over precomputed PostgreSQL aggregates. They require separate configuration and acceptance.
 
-The context file is trusted only in this offline demonstration; network callers cannot supply their own identity, policy, binding, release, engine, or SQL. For local PostgreSQL publication, service startup, and verification commands, continue with [Getting started](docs/getting-started.md).
+## Documentation and project status
 
-## Connect an AI client
+- [Getting started](docs/getting-started.md) — offline example, local catalog and service setup.
+- [MCP integration](docs/mcp.md) · [HTTP API](docs/http-api.md) — connect a client or application.
+- [Team configuration](config/README.md) — private settings, business aliases and reviewed semantic exports.
+- [Architecture](docs/architecture.md) — definitions, permissions and execution boundaries.
+- [Development status](docs/development-status.md) — implemented features, verification evidence and remaining gaps.
+- [Contributing](CONTRIBUTING.md) · [All documentation](docs/README.md).
 
-A deployed instance exposes Streamable HTTP MCP at `/api/v1/mcp` (the preferred Databricks Apps path). Clients connect by URL; they do not clone or run MetricSpire locally. The tools support discovery, explanation, planning, bounded query submission, status, and cancellation—**not** raw SQL or publication.
+Production readiness, multi-engine analytics and production latency or availability guarantees are not established. Trial metrics remain visibly unverified. The semantic contract, [`metricspire.io/v1alpha1`](contracts/metricspire.schema.json), is versioned separately from the planned product `v0.1.0` release.
 
-```text
-list_namespaces → search_metrics → get_metric_details → prepare_query → run_query
-               → get_query / cancel_query (only while unfinished)
-```
-
-Each request is authenticated. Local Codex users reuse Databricks CLI user authentication through the installer; each user still needs App and data permissions. A successful login alone is not query acceptance. See [MCP integration](docs/mcp.md) for client configuration, tools, safety limits, and the precise [current acceptance boundary](docs/development-status.md).
-
-## Documentation
-
-| Start here | For |
-| --- | --- |
-| [Getting started](docs/getting-started.md) | Offline plan demo, local catalog workflow, service setup, verification. |
-| [MCP integration](docs/mcp.md) | Remote tools, CLI authentication setup, request and job boundaries. |
-| [Architecture](docs/architecture.md) | Semantic, identity, control-plane, and engine adapter boundaries. |
-| [HTTP contract](docs/http-api.md) | Endpoints, permissions, errors, limits, and audit behavior. |
-| [Development status](docs/development-status.md) | Maintained preview boundary and known gaps. |
-| [Contributing](CONTRIBUTING.md) | Branch, pull-request, test, migration, and data-safety workflow. |
-
-The [documentation index](docs/README.md) separates product guides from maintainer-specific staging instructions. Historical phase acceptance notes are kept locally, not in the public documentation tree.
-
-The machine-readable semantic contract is [`metricspire.io/v1alpha1`](contracts/metricspire.schema.json). That contract version is independent of the planned product `v0.1.0` release.
-
-## Scope and license
-
-MetricSpire does not perform ETL, host an LLM, provide arbitrary SQL access, stream large exports, or join across engines. Unsupported plans fail before execution rather than silently changing semantics.
-
-Licensed under [Apache 2.0](LICENSE). This is an independent clean-room implementation with neutral public examples; do not commit credentials, private schemas, or production data.
+Licensed under [Apache 2.0](LICENSE). Public examples use neutral data; keep company definitions, credentials and production data outside this repository.
