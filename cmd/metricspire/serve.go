@@ -255,7 +255,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		MCPAuthorizationServer: mcpAuthorizationServer(config, environment),
 		AuthenticationProfile:  config.Authentication.Provider, MCPVersion: version,
 		TrialReleaseNamespaces: trialNamespaces,
-		UIModels:               configuredUIModels(config.Bindings),
+		UIModels:               configuredUIModels(config.Bindings, config.Policies),
 		UISourcePrefixes:       configuredUISourcePrefixes(bindings),
 	}, httpapi.Dependencies{
 		Authenticator: authenticator, AuthEndpoints: authEndpoints,
@@ -331,16 +331,20 @@ func mcpAuthorizationServer(config runtimeconfig.Config, environment serveEnviro
 	return ""
 }
 
-func configuredUIModels(routes []runtimeconfig.BindingRoute) []httpapi.UIModelRoute {
-	models := make([]httpapi.UIModelRoute, 0, len(routes))
-	seen := make(map[string]struct{}, len(routes))
-	for _, route := range routes {
+func configuredUIModels(bindings []runtimeconfig.BindingRoute, policies []runtimeconfig.PolicyRoute) []httpapi.UIModelRoute {
+	bound := make(map[string]bool, len(bindings))
+	for _, route := range bindings {
+		bound[route.Namespace+"\x00"+route.ModelName] = true
+	}
+	models := []httpapi.UIModelRoute{}
+	seen := map[string]bool{}
+	for _, route := range policies {
 		key := route.Namespace + "\x00" + route.ModelName
-		if _, exists := seen[key]; exists {
+		if !bound[key] || route.Tenant == "" || seen[route.Tenant+"\x00"+key] {
 			continue
 		}
-		seen[key] = struct{}{}
-		models = append(models, httpapi.UIModelRoute{Namespace: route.Namespace, ModelName: route.ModelName})
+		seen[route.Tenant+"\x00"+key] = true
+		models = append(models, httpapi.UIModelRoute{Tenant: route.Tenant, Namespace: route.Namespace, ModelName: route.ModelName})
 	}
 	return models
 }
