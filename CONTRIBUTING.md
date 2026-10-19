@@ -28,7 +28,17 @@ CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' ./cmd/metricspire
 git diff --check
 ```
 
-Real PostgreSQL, Databricks, OAuth, and deployed-App tests are opt-in. They must use explicitly reviewed resources and must not be represented as passed when only mocks or fixtures ran.
+CI starts a disposable PostgreSQL 17 service and runs catalog and online HTTP integration tests on every Go matrix entry. `METRICSPIRE_REQUIRE_POSTGRES_TESTS=1` makes missing database URLs a failure instead of a skip. Locally, these tests remain opt-in; use a disposable loopback database with permission to create schemas and roles:
+
+```bash
+export METRICSPIRE_TEST_DATABASE_URL='postgres://USER:PASSWORD@127.0.0.1:PORT/DISPOSABLE_DB?sslmode=disable'
+export METRICSPIRE_ONLINE_TEST_DATABASE_URL="$METRICSPIRE_TEST_DATABASE_URL"
+METRICSPIRE_REQUIRE_POSTGRES_TESTS=1 go test -race -count=1 -v ./internal/repository/postgres ./internal/httpapi
+```
+
+Repository and online HTTP fixtures create and remove their own isolated schemas and synthetic roles. The full CI suite also exercises the CLI catalog workflow in the disposable service's default schema; those rows are discarded with the service. Coverage includes first install, upgrade from the original catalog schema, checksum drift rejection, migration and publication transaction rollback, lifecycle/concurrent writes, and online HTTP permissions/failure boundaries. Sustained load remains separately opt-in via `METRICSPIRE_ONLINE_SOAK_DURATION`; shared-runner timings are not production SLAs. No offline business data is synchronized by these tests.
+
+Databricks, external OAuth, and deployed-App tests remain opt-in. They must use explicitly reviewed resources and must not be represented as passed when only mocks or fixtures ran.
 
 ## Product and data rules
 
