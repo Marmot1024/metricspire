@@ -22,6 +22,8 @@ const (
 )
 
 type Config struct {
+	Storage        StorageConfig        `json:"storage,omitempty" yaml:"storage,omitempty"`
+	QueryEngine    QueryEngineConfig    `json:"query_engine,omitempty" yaml:"query_engine,omitempty"`
 	DomainsPath    string               `json:"domains_path,omitempty" yaml:"domains_path,omitempty"`
 	Domains        []BusinessDomain     `json:"-" yaml:"-"`
 	APIVersion     string               `json:"api_version" yaml:"api_version"`
@@ -38,6 +40,8 @@ type Config struct {
 // Online serving is opt-in and uses a dedicated read-only database credential.
 // tenant_shared explicitly describes data access; UC user policies are not copied.
 type OnlineConfig struct {
+	Driver         string              `json:"driver,omitempty" yaml:"driver,omitempty"`
+	DatabaseURLEnv string              `json:"database_url_env,omitempty" yaml:"database_url_env,omitempty"`
 	Tenant         string              `json:"tenant" yaml:"tenant"`
 	Namespaces     []string            `json:"namespaces" yaml:"namespaces"`
 	DataAccess     string              `json:"data_access" yaml:"data_access"`
@@ -114,6 +118,9 @@ func Load(path string) (Config, error) {
 }
 
 func (config Config) Validate() error {
+	if err := config.validateEngines(); err != nil {
+		return err
+	}
 	if config.Exploration != nil {
 		if err := config.Exploration.Validate(); err != nil {
 			return err
@@ -215,7 +222,7 @@ func (config Config) Validate() error {
 	if _, err := ParseDuration(config.HTTP.QueryTimeout, 2*time.Minute); err != nil {
 		return fmt.Errorf("http.query_timeout: %w", err)
 	}
-	if len(config.Policies) == 0 || len(config.Bindings) == 0 {
+	if config.QueryDriver() != "disabled" && (len(config.Policies) == 0 || len(config.Bindings) == 0) {
 		return errors.New("at least one policy and binding route are required")
 	}
 	seenPolicies := make(map[string]struct{})

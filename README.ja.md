@@ -1,5 +1,7 @@
 <p align="center"><img src="docs/assets/metricspire-mark.svg" width="44" height="44" alt="MetricSpire"></p>
 
+PostgreSQL のみの起動とエンジン設定：[ランタイムエンジン](docs/runtime-engines.md)。
+
 <h1 align="center">MetricSpire</h1>
 
 <p align="center"><strong>指標カタログとデータサービスを、MCP で AI につなぐ。</strong></p>

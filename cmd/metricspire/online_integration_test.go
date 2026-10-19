@@ -36,20 +36,24 @@ import (
 // Exercise runServe itself, not just a manually assembled service. All identity,
 // Warehouse and business data fixtures are synthetic and loopback-only.
 func TestServeOnlinePostgresWithOIDCAndSeparateAnalyticalRoute(t *testing.T) {
-	testServeOnlinePostgres(t, "", false)
+	testServeOnlinePostgres(t, "", false, false)
+}
+
+func TestServeOnlinePostgresWithoutDatabricks(t *testing.T) {
+	testServeOnlinePostgres(t, "", false, true)
 }
 
 func TestServeOnlinePostgresRejectsWriteCredential(t *testing.T) {
 	for _, privilege := range []string{"UPDATE", "INSERT(revenue)", "UPDATE(revenue)", "REFERENCES(revenue)"} {
 		for _, inherited := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/inherited=%t", privilege, inherited), func(t *testing.T) {
-				testServeOnlinePostgres(t, privilege, inherited)
+				testServeOnlinePostgres(t, privilege, inherited, false)
 			})
 		}
 	}
 }
 
-func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited bool) {
+func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited, portable bool) {
 	t.Helper()
 	raw := os.Getenv("METRICSPIRE_ONLINE_TEST_DATABASE_URL")
 	if raw == "" {
@@ -197,6 +201,12 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited bool
 		Online:         &runtimeconfig.OnlineConfig{Tenant: "demo", Namespaces: []string{"demo"}, DataAccess: "tenant_shared", Resources: []model.ResourceRef{{Kind: model.ResourceTable, Schema: data, Table: "daily_sales"}}, MaxDataAge: "5m", Timeout: "1s", Bindings: []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: source.Metadata.Name, Path: "online.json"}}},
 	}
 	config.Online.Policies = []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: source.Metadata.Name, Tenant: "demo", Path: "reader-policy.json"}}
+	if portable {
+		config.QueryEngine.Driver = "disabled"
+		config.Policies, config.Bindings = nil, nil
+		config.Storage.DatabaseURLEnv = "SYNTHETIC_METADATA_URL"
+		config.Online.DatabaseURLEnv = "SYNTHETIC_RESULTS_URL"
+	}
 	configPath := filepath.Join(dir, "runtime.json")
 	if err := contractio.WriteJSON(configPath, config); err != nil {
 		t.Fatal(err)
@@ -211,6 +221,13 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited bool
 		"DATABRICKS_HOST": warehouse.URL, "DATABRICKS_SQL_WAREHOUSE_ID": "fixture", "DATABRICKS_TOKEN": "synthetic-local-token", "DATABRICKS_CLIENT_ID": "", "DATABRICKS_CLIENT_SECRET": "",
 	} {
 		t.Setenv(name, value)
+	}
+	if portable {
+		for _, name := range []string{"DATABRICKS_HOST", "DATABRICKS_SQL_WAREHOUSE_ID", "DATABRICKS_TOKEN", "DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET", "METRICSPIRE_DATABASE_URL", "METRICSPIRE_ONLINE_DATABASE_URL", "METRICSPIRE_LAKEBASE_ENDPOINT"} {
+			t.Setenv(name, "")
+		}
+		t.Setenv(config.Storage.DatabaseURLEnv, controlURL.String())
+		t.Setenv(config.Online.DatabaseURLEnv, readerURL.String())
 	}
 	if writePrivilege != "" {
 		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
@@ -293,17 +310,56 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited bool
 	if err := json.Unmarshal(body, &result); err != nil || len(result.Result.Rows) != 1 || result.Result.Columns[1].Name != "10001" || result.Snapshot.BatchID != "batch-1" {
 		t.Fatalf("invalid startup result: %s", body)
 	}
+	for col, want := range map[int]int64{1: 100, 3: 50} {
+		raw, ok := result.Result.Rows[0][col].(string)
+		amount, valid := new(big.Rat).SetString(raw)
+		if !ok || !valid || amount.Cmp(big.NewRat(want, 1)) != 0 {
+			t.Fatalf("wrong metric value in column %d", col)
+		}
+	}
+	if result.Result.Rows[0][0] != "2026-09-01" || result.Result.Rows[0][2] != float64(2) {
+		t.Fatal("wrong date or count")
+	}
 	nonReader := onlineFixtureToken(t, key, map[string]any{"iss": issuer.URL, "aud": "fixture-api", "sub": "another-analyst", "tenant": "demo", "roles": []string{"analyst"}, "permissions": []string{"query:execute"}, "exp": time.Now().Add(time.Minute).Unix()})
 	if status, body := call("/api/v1/namespaces/demo/online-query", query, nonReader); status != 403 {
 		t.Fatalf("analyst role bypassed the online reader policy: %d %s", status, body)
 	}
+	if portable {
+		for bearer, wantCount := range map[string]int{token: 3, nonReader: 0} {
+			req, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/catalog/search?namespace=demo", nil)
+			req.Header.Set("Authorization", "Bearer "+bearer)
+			res, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var entries []application.MetricCatalogEntry
+			err = json.NewDecoder(res.Body).Decode(&entries)
+			res.Body.Close()
+			if err != nil || res.StatusCode != 200 || len(entries) != wantCount {
+				t.Fatalf("portable catalog policy: status=%d count=%d want=%d error=%v", res.StatusCode, len(entries), wantCount, err)
+			}
+		}
+	}
 	analytical := model.SemanticQuery{APIVersion: model.APIVersion, Kind: model.KindSemanticQuery, Metrics: []string{"revenue"}, GroupBy: query.Dimensions, TimeRange: query.TimeRange, TimeGrouping: query.TimeGrouping, Limit: 10}
 	status, body = call("/api/v1/namespaces/demo/models/daily_sales/plan", analytical, token)
-	if status != 200 || !strings.Contains(string(body), `"engine":"`+databricks.EngineName+`"`) {
-		t.Fatalf("analytical route lost its binding: %d %s", status, body)
-	}
-	if status, body := call("/api/v1/namespaces/demo/models/daily_sales/plan", analytical, nonReader); status != 200 {
-		t.Fatalf("online reader restriction changed analytical permissions: %d %s", status, body)
+	if portable {
+		if status != 404 || !strings.Contains(string(body), "query_engine_disabled") {
+			t.Fatalf("disabled route: %d %s", status, body)
+		}
+		// Disabled execution still authenticates, including job endpoints.
+		if status, _ := call("/api/v1/jobs/not-a-job/cancel", nil, "invalid"); status != 401 {
+			t.Fatalf("disabled job auth: %d", status)
+		}
+		if status, body := call("/api/v1/jobs/not-a-job/cancel", nil, token); status != 404 || !strings.Contains(string(body), "query_engine_disabled") {
+			t.Fatalf("disabled job: %d %s", status, body)
+		}
+	} else {
+		if status != 200 || !strings.Contains(string(body), `"engine":"`+databricks.EngineName+`"`) {
+			t.Fatalf("analytical route lost its binding: %d %s", status, body)
+		}
+		if status, body := call("/api/v1/namespaces/demo/models/daily_sales/plan", analytical, nonReader); status != 200 {
+			t.Fatalf("online reader restriction changed analytical permissions: %d %s", status, body)
+		}
 	}
 	if status, _ := call("/api/v1/namespaces/demo/online-query", query, "invalid"); status != 401 {
 		t.Fatalf("invalid OIDC token: %d", status)

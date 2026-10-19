@@ -1,5 +1,7 @@
 <p align="center"><img src="docs/assets/metricspire-mark.svg" width="44" height="44" alt="MetricSpire"></p>
 
+PostgreSQL-only startup and engine configuration: [runtime engines](docs/runtime-engines.md).
+
 <h1 align="center">MetricSpire</h1>
 
 <p align="center"><strong>A metric catalog and data service with MCP access.</strong></p>

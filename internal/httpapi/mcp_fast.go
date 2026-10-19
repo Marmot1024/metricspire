@@ -41,7 +41,7 @@ func (b *remoteMCPBackend) DiscoverQueryRoutes(ctx context.Context, in mcpbridge
 	}
 	result := mcpbridge.QueryRoutes{
 		Namespace:        in.Namespace,
-		PublishedMetrics: mcpbridge.QueryRoute{Available: len(entries) > 0, Workflow: []string{"search_metrics", "get_metric_details", "prepare_query", "run_query"}},
+		PublishedMetrics: mcpbridge.QueryRoute{Available: len(entries) > 0 && b.server.deps.Queries != nil, Workflow: []string{"search_metrics", "get_metric_details", "prepare_query", "run_query"}},
 		Exploration:      mcpbridge.QueryRoute{Workflow: []string{"discover_analysis", "plan_analysis", "submit_analysis", "get_analysis", "cancel_analysis"}},
 		SelectionRules: []string{
 			"Use published_metrics when a maintained definition, population, denominator and time grain answer the question.",
@@ -50,6 +50,9 @@ func (b *remoteMCPBackend) DiscoverQueryRoutes(ctx context.Context, in mcpbridge
 			"Permission, connection and timeout failures never authorize switching query categories.",
 			"Availability is current-user catalog access, not business certification or proof that a data query succeeds.",
 		},
+	}
+	if b.server.deps.Queries == nil {
+		result.PublishedMetrics.Workflow = []string{}
 	}
 	if b.server.deps.AnalysisCatalogs != nil {
 		namespaces, err := b.server.deps.AnalysisCatalogs.Namespaces(ctx, b.requestContext())

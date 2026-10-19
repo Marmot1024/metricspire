@@ -67,7 +67,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	if err != nil {
 		return err
 	}
-	environment, err := loadServeEnvironment(os.Getenv, config.Authentication.Provider)
+	environment, err := loadServeEnvironment(os.Getenv, config)
 	if err != nil {
 		return err
 	}
@@ -122,36 +122,42 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	if err != nil {
 		return err
 	}
+	var queries httpapi.QueryService
+	var jobs *application.JobManager
 	clientConfig := databricks.ClientConfig{Host: environment.databricksHost, WarehouseID: environment.warehouseID}
-	if config.Authentication.Provider == runtimeconfig.AuthenticationDatabricksApps {
-		clientConfig.RequireRequestToken = true
-	} else {
-		clientConfig.TokenSource, err = databricksTokenSource(environment.databricksHost)
+	if config.QueryDriver() != "disabled" || config.Exploration != nil {
+		if config.Authentication.Provider == runtimeconfig.AuthenticationDatabricksApps {
+			clientConfig.RequireRequestToken = true
+		} else {
+			clientConfig.TokenSource, err = databricksTokenSource(environment.databricksHost)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if config.QueryDriver() != "disabled" {
+		databricksClient, err := databricks.NewClient(clientConfig)
 		if err != nil {
 			return err
 		}
+		engine, err := databricks.NewQueryEngine(databricksClient)
+		if err != nil {
+			return err
+		}
+		queryOptions := make([]application.QueryServiceOption, 0, 1)
+		if len(trialNamespaces) > 0 {
+			queryOptions = append(queryOptions, application.WithTrialReleaseNamespaces(trialNamespaces...))
+		}
+		queries, err = application.NewQueryService(store, policyResolver, bindingResolver, engine, store, queryOptions...)
+		if err != nil {
+			return err
+		}
+		jobs, err = application.NewJobManager(ctx, queries, queryTimeout, defaultQueryJobCapacity, nil)
+		if err != nil {
+			return err
+		}
+		defer jobs.Close()
 	}
-	databricksClient, err := databricks.NewClient(clientConfig)
-	if err != nil {
-		return err
-	}
-	engine, err := databricks.NewQueryEngine(databricksClient)
-	if err != nil {
-		return err
-	}
-	queryOptions := make([]application.QueryServiceOption, 0, 1)
-	if len(trialNamespaces) > 0 {
-		queryOptions = append(queryOptions, application.WithTrialReleaseNamespaces(trialNamespaces...))
-	}
-	queries, err := application.NewQueryService(store, policyResolver, bindingResolver, engine, store, queryOptions...)
-	if err != nil {
-		return err
-	}
-	jobs, err := application.NewJobManager(ctx, queries, queryTimeout, defaultQueryJobCapacity, nil)
-	if err != nil {
-		return err
-	}
-	defer jobs.Close()
 
 	analysis, analysisJobs, analysisCatalogs, err := buildServeExploration(filepath.Dir(*configPath), config.Exploration, clientConfig, store)
 	if err != nil {
@@ -183,9 +189,9 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		if err != nil {
 			return err
 		}
-		urlValue := strings.TrimSpace(os.Getenv("METRICSPIRE_ONLINE_DATABASE_URL"))
+		urlValue := strings.TrimSpace(os.Getenv(config.Online.DatabaseEnv()))
 		if urlValue == "" || urlValue == environment.databaseURL {
-			return errors.New("online serving requires a separate METRICSPIRE_ONLINE_DATABASE_URL read credential")
+			return fmt.Errorf("online serving requires a separate %s read credential", config.Online.DatabaseEnv())
 		}
 		poolConfig, err := pgxpool.ParseConfig(urlValue)
 		if err != nil {
@@ -248,6 +254,12 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		return err
 	}
 	logger := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	catalogPolicies, catalogBindings := config.CatalogRoutes()
+	// Keep a truly nil interface for the disabled job service.
+	var queryJobs httpapi.JobService
+	if jobs != nil {
+		queryJobs = jobs
+	}
 	handler, err := httpapi.NewServer(httpapi.Config{
 		BusinessDomains: config.Domains,
 		MaxBodyBytes:    config.HTTP.MaxBodyBytes, ControlTimeout: controlTimeout,
@@ -255,13 +267,13 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		MCPAuthorizationServer: mcpAuthorizationServer(config, environment),
 		AuthenticationProfile:  config.Authentication.Provider, MCPVersion: version,
 		TrialReleaseNamespaces: trialNamespaces,
-		UIModels:               configuredUIModels(config.Bindings, config.Policies),
+		UIModels:               configuredUIModels(catalogBindings, catalogPolicies),
 		UISourcePrefixes:       configuredUISourcePrefixes(bindings),
 	}, httpapi.Dependencies{
 		Authenticator: authenticator, AuthEndpoints: authEndpoints,
 		Readiness:  readiness,
 		Management: management, Catalog: store, CatalogSearch: catalogSearch, Governance: governanceService,
-		Bindings: bindingResolver, Queries: queries, Jobs: jobs, ExecutionCredential: executionCredential,
+		Bindings: bindingResolver, Queries: queries, Jobs: queryJobs, ExecutionCredential: executionCredential,
 		Online:   online,
 		Analysis: analysis, AnalysisJobs: analysisJobs, AnalysisCatalogs: analysisCatalogs,
 	}, logger)
@@ -436,8 +448,9 @@ func resolveHTTPAddress(configured, override string) (string, error) {
 	return address, nil
 }
 
-func loadServeEnvironment(getenv func(string) string, authenticationProvider string) (serveEnvironment, error) {
-	databaseURL := strings.TrimSpace(getenv("METRICSPIRE_DATABASE_URL"))
+func loadServeEnvironment(getenv func(string) string, config runtimeconfig.Config) (serveEnvironment, error) {
+	authenticationProvider := config.Authentication.Provider
+	databaseURL := strings.TrimSpace(getenv(config.DatabaseURLEnv()))
 	lakebaseEndpoint := strings.TrimSpace(getenv("METRICSPIRE_LAKEBASE_ENDPOINT"))
 	switch authenticationProvider {
 	case runtimeconfig.AuthenticationOIDC:
@@ -445,7 +458,7 @@ func loadServeEnvironment(getenv func(string) string, authenticationProvider str
 			return serveEnvironment{}, errors.New("METRICSPIRE_LAKEBASE_ENDPOINT is supported only by the Databricks Apps authentication profile")
 		}
 		if databaseURL == "" {
-			return serveEnvironment{}, errors.New("METRICSPIRE_DATABASE_URL is required")
+			return serveEnvironment{}, fmt.Errorf("%s is required", config.DatabaseURLEnv())
 		}
 	case runtimeconfig.AuthenticationDatabricksApps:
 		if (databaseURL == "") == (lakebaseEndpoint == "") {
@@ -456,8 +469,12 @@ func loadServeEnvironment(getenv func(string) string, authenticationProvider str
 	}
 	host := strings.TrimSpace(getenv("DATABRICKS_HOST"))
 	warehouseID := strings.TrimSpace(getenv("DATABRICKS_SQL_WAREHOUSE_ID"))
-	if host == "" || warehouseID == "" {
-		return serveEnvironment{}, errors.New("DATABRICKS_HOST and DATABRICKS_SQL_WAREHOUSE_ID are required")
+	needsDatabricks := config.QueryDriver() != "disabled" || config.Exploration != nil
+	if (needsDatabricks || authenticationProvider == runtimeconfig.AuthenticationDatabricksApps) && host == "" {
+		return serveEnvironment{}, errors.New("DATABRICKS_HOST is required by the selected engine or authentication provider")
+	}
+	if config.QueryDriver() != "disabled" && warehouseID == "" {
+		return serveEnvironment{}, errors.New("DATABRICKS_SQL_WAREHOUSE_ID is required by query_engine")
 	}
 	var sessionKey []byte
 	if authenticationProvider == runtimeconfig.AuthenticationOIDC {
@@ -466,6 +483,8 @@ func loadServeEnvironment(getenv func(string) string, authenticationProvider str
 		if err != nil {
 			return serveEnvironment{}, err
 		}
+	}
+	if authenticationProvider == runtimeconfig.AuthenticationOIDC && needsDatabricks {
 		clientID := strings.TrimSpace(getenv("DATABRICKS_CLIENT_ID"))
 		clientSecret := strings.TrimSpace(getenv("DATABRICKS_CLIENT_SECRET"))
 		staticToken := strings.TrimSpace(getenv("DATABRICKS_TOKEN"))
@@ -498,8 +517,9 @@ func decodeSessionKey(value string) ([]byte, error) {
 }
 
 func loadTrustedRoutes(baseDirectory string, config runtimeconfig.Config) ([]application.PolicyConfiguration, []application.BindingConfiguration, error) {
-	policies := make([]application.PolicyConfiguration, 0, len(config.Policies))
-	for _, route := range config.Policies {
+	policyRoutes, bindingRoutes := config.CatalogRoutes()
+	policies := make([]application.PolicyConfiguration, 0, len(policyRoutes))
+	for _, route := range policyRoutes {
 		var source model.PolicySource
 		if err := contractio.ReadFile(resolveConfigPath(baseDirectory, route.Path), &source); err != nil {
 			return nil, nil, err
@@ -508,13 +528,17 @@ func loadTrustedRoutes(baseDirectory string, config runtimeconfig.Config) ([]app
 			Namespace: route.Namespace, ModelName: route.ModelName, Tenant: route.Tenant, Policy: source,
 		})
 	}
-	bindings := make([]application.BindingConfiguration, 0, len(config.Bindings))
-	for _, route := range config.Bindings {
+	bindings := make([]application.BindingConfiguration, 0, len(bindingRoutes))
+	for _, route := range bindingRoutes {
 		var source model.SourceBinding
 		if err := contractio.ReadFile(resolveConfigPath(baseDirectory, route.Path), &source); err != nil {
 			return nil, nil, err
 		}
-		if source.Engine != databricks.EngineName {
+		expectedEngine := databricks.EngineName
+		if config.QueryDriver() == "disabled" {
+			expectedEngine = postgresquery.EngineName
+		}
+		if source.Engine != expectedEngine {
 			return nil, nil, fmt.Errorf("binding route %s/%s uses unsupported engine %q", route.Namespace, route.ModelName, source.Engine)
 		}
 		bindings = append(bindings, application.BindingConfiguration{

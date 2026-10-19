@@ -12,6 +12,7 @@ import (
 // Exploration is opt-in and has its own warehouse and execution capacity.
 // Host/authentication are shared with the authenticated Databricks deployment.
 type ExplorationConfig struct {
+	Driver           string                `json:"driver,omitempty" yaml:"driver,omitempty"`
 	ReviewedCatalogs []exploration.Catalog `json:"-" yaml:"-"`
 	CatalogPaths     []string              `json:"catalog_paths" yaml:"catalog_paths"`
 	WarehouseID      string                `json:"warehouse_id" yaml:"warehouse_id"`
@@ -21,6 +22,9 @@ type ExplorationConfig struct {
 }
 
 func (c ExplorationConfig) Validate() error {
+	if c.Driver != "" && c.Driver != "databricks_sql" {
+		return errors.New("exploration.driver is not implemented; supported: databricks_sql")
+	}
 	if len(c.CatalogPaths)+len(c.ReviewedCatalogs) == 0 || len(c.CatalogPaths)+len(c.ReviewedCatalogs) > 32 || !regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`).MatchString(c.WarehouseID) || c.Concurrency < 1 || c.Concurrency > 32 || c.Capacity < c.Concurrency || c.Capacity > 1000 {
 		return errors.New("exploration requires catalog_paths, warehouse_id, concurrency (1-32), and capacity (up to 1000)")
 	}
