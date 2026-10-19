@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" role="img" aria-labelledby="title desc">
+  <title id="title">データシステムにおける MetricSpire の接続構成</title>
+  <desc id="desc">Web、アプリ、AI が MetricSpire を利用します。指標定義は関係データベースに保存し、業務データは OLAP に問い合わせます。探索的分析には外部セマンティック層を接続できます。</desc>
+  <!-- Logical integration view. Concrete adapter availability: ../architecture.md#adapter-support -->
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9" fill="none" stroke="#53697e" stroke-width="1.5"/></marker></defs>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans', 'Noto Sans CJK SC', sans-serif; fill: #142b40; text-anchor: middle; }
+    .title { font-size: 23px; font-weight: 600; }
+    .body { font-size: 20px; fill: #42596c; }
+    .small { font-size: 18px; fill: #53697e; }
+    .line { fill: none; stroke: #53697e; stroke-width: 2; }
+    .box { fill: #fff; stroke: #c5d2dc; stroke-width: 1.5; }
+  </style>
+  <rect width="960" height="800" fill="#fff"/>
+
+  <rect class="box" x="24" y="24" width="280" height="88" rx="8"/>
+  <text class="title" x="164" y="60">Web ユーザー</text>
+  <text class="body" x="164" y="90">指標検索とクエリ</text>
+  <path class="line" d="M164 112V140"/>
+  <rect class="box" x="340" y="24" width="280" height="88" rx="8"/>
+  <text class="title" x="480" y="60">業務アプリ</text>
+  <text class="body" x="480" y="90">HTTP API</text>
+  <path class="line" d="M480 112V140"/>
+  <rect class="box" x="656" y="24" width="280" height="88" rx="8"/>
+  <text class="title" x="796" y="60">AI アシスタント</text>
+  <text class="body" x="796" y="90">MCP</text>
+  <path class="line" d="M796 112V140"/>
+  <path class="line" d="M164 140H796"/>
+  <path class="line" d="M480 140V178" marker-end="url(#arrow)"/>
+  <rect class="box" x="24" y="178" width="912" height="238" rx="8" style="fill:#f2f7fa;stroke:#7798ad" stroke="#7798ad"/>
+  <text class="title" x="48" y="217" style="text-anchor:start">MetricSpire</text>
+  <rect class="box" x="44" y="240" width="264" height="122" rx="8"/>
+  <text class="title" x="176" y="276">指標カタログ</text>
+  <text class="body" x="176" y="310">指標の意味と計算ルール</text>
+  <text class="body" x="176" y="340">レビュー・公開・版管理</text>
+  <rect class="box" x="348" y="240" width="264" height="122" rx="8"/>
+  <text class="title" x="480" y="276">データサービス</text>
+  <text class="body" x="480" y="310">指標と条件でクエリ</text>
+  <text class="body" x="480" y="340">結果テーブルを返す</text>
+  <rect class="box" x="652" y="240" width="264" height="122" rx="8" stroke-dasharray="6 5"/>
+  <text class="title" x="784" y="276">探索的分析・任意</text>
+  <text class="body" x="784" y="310">一時的な集計と計算</text>
+  <text class="body" x="784" y="340">外部の意味定義を利用</text>
+  <text class="body" x="480" y="396">共通の権限確認・クエリ制限・監査</text>
+  <path class="line" d="M164 416V484" marker-end="url(#arrow)"/>
+  <text class="small" x="164" y="456">管理データを保存</text>
+  <path class="line" d="M480 416V484" marker-end="url(#arrow)"/>
+  <path class="line" d="M796 484V416" marker-end="url(#arrow)" stroke-dasharray="6 5"/>
+  <rect class="box" x="24" y="484" width="280" height="110" rx="8"/>
+  <text class="title" x="164" y="518">指標ストア・関係 DB</text>
+  <text class="body" x="164" y="549">定義・版・監査</text>
+  <text class="small" x="164" y="579">設計: MySQL / PostgreSQL</text>
+  <rect class="box" x="340" y="484" width="280" height="110" rx="8"/>
+  <text class="title" x="480" y="529">OLAP アダプター</text>
+  <text class="body" x="480" y="565">データ接続とクエリ実行</text>
+  <rect class="box" x="656" y="484" width="280" height="110" rx="8" stroke-dasharray="6 5"/>
+  <text class="title" x="796" y="518">外部セマンティック層</text>
+  <text class="body" x="796" y="549">任意のリポジトリ</text>
+  <text class="small" x="796" y="579">フィールド・関連・ルール</text>
+  <path class="line" d="M480 594V652" marker-end="url(#arrow)"/>
+  <text class="small" x="560" y="630">クエリ実行</text>
+  <rect class="box" x="24" y="652" width="280" height="100" rx="8"/>
+  <text class="title" x="164" y="691">既存のデータ処理</text>
+  <text class="body" x="164" y="726">収集と加工</text>
+  <path class="line" d="M304 706H352" marker-end="url(#arrow)"/>
+  <rect class="box" x="352" y="652" width="584" height="100" rx="8"/>
+  <text class="title" x="644" y="680">OLAP / データウェアハウス</text>
+  <text class="body" x="644" y="711">業務データの保存と計算</text>
+  <text class="small" x="644" y="741">設計: ClickHouse / Doris / Databricks SQL</text>
+  <text class="small" x="480" y="787">論理的な接続構成。実装済みのデータベース対応範囲はドキュメントを参照。</text>
+</svg>

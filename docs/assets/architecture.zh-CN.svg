@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" role="img" aria-labelledby="title desc">
+  <title id="title">MetricSpire 在数据系统中的接入架构</title>
+  <desc id="desc">用户、应用和 AI 调用 MetricSpire。指标定义单独存入关系库，业务查询通过适配器在 OLAP 中执行，可选从外部语义层仓库加载探索性分析定义。</desc>
+  <!-- Logical integration view. Concrete adapter availability: ../architecture.md#adapter-support -->
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9" fill="none" stroke="#53697e" stroke-width="1.5"/></marker></defs>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans', 'Noto Sans CJK SC', sans-serif; fill: #142b40; text-anchor: middle; }
+    .title { font-size: 23px; font-weight: 600; }
+    .body { font-size: 20px; fill: #42596c; }
+    .small { font-size: 18px; fill: #53697e; }
+    .line { fill: none; stroke: #53697e; stroke-width: 2; }
+    .box { fill: #fff; stroke: #c5d2dc; stroke-width: 1.5; }
+  </style>
+  <rect width="960" height="800" fill="#fff"/>
+
+  <rect class="box" x="24" y="24" width="280" height="88" rx="8"/>
+  <text class="title" x="164" y="60">网页用户</text>
+  <text class="body" x="164" y="90">指标目录与查询</text>
+  <path class="line" d="M164 112V140"/>
+  <rect class="box" x="340" y="24" width="280" height="88" rx="8"/>
+  <text class="title" x="480" y="60">业务应用</text>
+  <text class="body" x="480" y="90">HTTP API</text>
+  <path class="line" d="M480 112V140"/>
+  <rect class="box" x="656" y="24" width="280" height="88" rx="8"/>
+  <text class="title" x="796" y="60">AI 助手</text>
+  <text class="body" x="796" y="90">MCP</text>
+  <path class="line" d="M796 112V140"/>
+  <path class="line" d="M164 140H796"/>
+  <path class="line" d="M480 140V178" marker-end="url(#arrow)"/>
+  <rect class="box" x="24" y="178" width="912" height="238" rx="8" style="fill:#f2f7fa;stroke:#7798ad" stroke="#7798ad"/>
+  <text class="title" x="48" y="217" style="text-anchor:start">MetricSpire</text>
+  <rect class="box" x="44" y="240" width="264" height="122" rx="8"/>
+  <text class="title" x="176" y="276">指标库</text>
+  <text class="body" x="176" y="310">指标含义与计算规则</text>
+  <text class="body" x="176" y="340">审核、发布与版本</text>
+  <rect class="box" x="348" y="240" width="264" height="122" rx="8"/>
+  <text class="title" x="480" y="276">数据服务</text>
+  <text class="body" x="480" y="310">按指标与条件查询</text>
+  <text class="body" x="480" y="340">返回结果表</text>
+  <rect class="box" x="652" y="240" width="264" height="122" rx="8" stroke-dasharray="6 5"/>
+  <text class="title" x="784" y="276">探索性分析 · 可选</text>
+  <text class="body" x="784" y="310">临时组合字段与计算</text>
+  <text class="body" x="784" y="340">使用外部语义定义</text>
+  <text class="body" x="480" y="396">统一权限检查 · 查询限制 · 审计</text>
+  <path class="line" d="M164 416V484" marker-end="url(#arrow)"/>
+  <text class="small" x="164" y="456">保存管理数据</text>
+  <path class="line" d="M480 416V484" marker-end="url(#arrow)"/>
+  <path class="line" d="M796 484V416" marker-end="url(#arrow)" stroke-dasharray="6 5"/>
+  <rect class="box" x="24" y="484" width="280" height="110" rx="8"/>
+  <text class="title" x="164" y="518">指标存储 · 关系库</text>
+  <text class="body" x="164" y="549">定义 · 版本 · 审计</text>
+  <text class="small" x="164" y="579">设计：MySQL / PostgreSQL</text>
+  <rect class="box" x="340" y="484" width="280" height="110" rx="8"/>
+  <text class="title" x="480" y="529">OLAP 适配器</text>
+  <text class="body" x="480" y="565">连接数据源并执行查询</text>
+  <rect class="box" x="656" y="484" width="280" height="110" rx="8" stroke-dasharray="6 5"/>
+  <text class="title" x="796" y="518">外部语义层仓库</text>
+  <text class="body" x="796" y="549">可选接入</text>
+  <text class="small" x="796" y="579">字段 · 关联 · 业务规则</text>
+  <path class="line" d="M480 594V652" marker-end="url(#arrow)"/>
+  <text class="small" x="560" y="630">执行查询</text>
+  <rect class="box" x="24" y="652" width="280" height="100" rx="8"/>
+  <text class="title" x="164" y="691">现有数据管道</text>
+  <text class="body" x="164" y="726">采集与加工</text>
+  <path class="line" d="M304 706H352" marker-end="url(#arrow)"/>
+  <rect class="box" x="352" y="652" width="584" height="100" rx="8"/>
+  <text class="title" x="644" y="680">OLAP 引擎 / 数仓</text>
+  <text class="body" x="644" y="711">业务数据的存储与计算</text>
+  <text class="small" x="644" y="741">接入设计：ClickHouse / Doris / Databricks SQL</text>
+  <text class="small" x="480" y="787">逻辑接入架构 · 当前已实现的数据库适配器见文档说明。</text>
+</svg>

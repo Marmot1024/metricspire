@@ -1,8 +1,10 @@
-# Governed temporary analysis
+# Exploratory analysis with an external semantic layer
 
-Exploration uses an approved external semantic catalog to query detail rows.
-It does not require registering each result formula as a metric. Existing
-`SemanticQuery` and the online metric service keep their own contracts.
+Use this optional path when a question needs fields or calculations that are not yet a published metric. For example, after querying paid order counts by region, ask what share had an order value above 500. The AI client can build a temporary query from the sources, fields and relationships declared in your external semantic layer. MetricSpire checks it and queries the OLAP engine; the result does not need to become a permanent metric.
+
+The semantic-layer repository describes what data means and how it may be combined. Business data stays in the OLAP engine. To connect the repository, a maintainer exports the reviewed definitions into an `AnalysisCatalog` file and configures MetricSpire to load it. Pointing at a Git URL or a folder of prose does not perform that export automatically. The current execution adapter is Databricks SQL; see [adapter support](architecture.md#adapter-support) for the distinction between the integration design and shipped implementations.
+
+Existing `SemanticQuery` and the online metric service keep their own contracts.
 
 See [team configuration](../config/README.md) for business aliases, private Git
 source provenance and checksum-verified exported catalogs.

@@ -6,55 +6,66 @@
 
 <p align="center"><a href="README.md">English</a> · <strong>简体中文</strong> · <a href="README.ja.md">日本語</a></p>
 
-MetricSpire 是一个开源的指标库与数据服务。它集中管理指标定义和版本，通过 HTTP API 提供数据查询，并通过 MCP 接入 AI 助手。
+MetricSpire 是一个开源的指标库与数据服务，连接你的分析数据库、业务应用和 AI 助手。团队在这里管理“一个指标是什么意思、怎么算”，应用和 AI 通过统一接口获取数据。
 
-你也可以按需接入外部语义知识库，以审核过的数据源、字段和关联定义支撑探索性分析，无需先将每个临时分析结果登记为固定指标。
+- **指标库**：集中维护指标说明、计算规则和版本，供团队查找、审核与发布。
+- **数据服务**：按指标、时间和分组条件查询 OLAP 引擎（用于分析的数据库），向应用返回结果表。
+- **MCP 接入**：让 AI 助手查找指标、了解定义，并调用数据服务回答问题。
+- **探索性分析（可选）**：外接语义层仓库，利用其中的字段含义、表关联和业务规则进行临时分析。
 
-> **开发预览版。** 查询自己的数据前，需要部署并配置服务，以及相应的数据权限。目前尚无生产就绪的正式版本。[查看当前状态](docs/development-status.md)（英文）。
+## 用一个订单场景说明
 
-## 一个例子：从问题到结果
+以下是虚构数据，用来说明使用过程。
 
-配置好公开的订单样例数据（TPCH）后，AI 助手可以把下面的问题转换成指标查询：
+**① 团队先定义指标。** 例如“已支付订单数”：只统计支付成功的订单，按订单编号去重，按支付日期统计。维护者把这个定义关联到现有 OLAP 表并发布。
 
-> 查询样例订单 1–5，按客户类型和订单状态分组，返回收入、订单数和平均订单金额。
+**② 用户提出问题。** 在已连接的 AI 助手中询问：
 
-MetricSpire 根据已发布的定义计算结果。下面是仓库[预期样例结果](testdata/acceptance/databricks-tpch/expected.json)的前两行：
+> 上周各地区有多少笔已支付订单？
 
-| 客户类型 | 订单状态 | 收入 | 订单数 | 平均订单金额 |
-| --- | --- | ---: | ---: | ---: |
-| BUILDING | F | 228570.52 | 1 | 228570.52 |
-| BUILDING | O | 203010.51 | 1 | 203010.51 |
+**③ 服务查询并返回结果。** AI 助手找到这个指标，将问题转换成查询请求；MetricSpire 检查权限，按已发布的定义查询 OLAP 引擎，返回结果供 AI 展示：
 
-这个样例将收入定义为所选订单总金额之和。你可以查看对应的[指标定义](testdata/acceptance/databricks-tpch/model.yaml)与[结构化请求](testdata/acceptance/databricks-tpch/query.json)。表格引用已保存的测试结果，并非实时演示。AI 客户端负责理解问题，MetricSpire 负责校验并执行结构化请求。
+| 地区 | 已支付订单数 |
+| --- | ---: |
+| 华东 | 120 |
+| 华南 | 80 |
 
-## 从哪里开始？
+业务应用也可以通过 HTTP API 查询同一个指标，复用它的计算规则。实际使用前，需要由团队接入数据并发布定义。
 
-| 你的目标 | 入口 | 需要准备 |
-| --- | --- | --- |
-| 在本地 Codex CLI 中使用团队服务 | [获取团队安装器](docs/mcp-installer.md#get-the-installer) | 已部署的实例、团队提供的安装器，以及你自己的 Databricks 访问权限。 |
-| 连接其他 MCP 客户端 | [MCP 连接指南](docs/mcp.md#connect) | 实例地址，以及该部署支持的身份认证配置。 |
-| 不连接数据，先理解指标定义 | [运行离线示例](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database) | Go；无需数据库或云账号。示例生成查询计划，不返回数据结果。 |
-| 为团队部署服务 | [服务配置指南](docs/getting-started.md#run-the-http-service) | PostgreSQL、身份认证配置和分析引擎。 |
-
-已有网页访问权限？打开团队实例，从**指标目录**开始。仓库不附带公开服务实例，也不包含公司的指标定义。上述详细指南目前为英文。
+**如果还想临时追问呢？** 比如“其中金额超过 500 元的订单占比是多少？”，但指标库里还没有这个指标。启用探索性分析后，AI 可以利用外接语义层中已配置的订单金额、地区和关联规则组织临时查询，无需先创建固定指标。语义层提供数据的含义和用法；实际数据仍由 OLAP 引擎查询。接入格式见[外部语义层配置](docs/exploration.md)。
 
 ## 它在数据系统里负责哪一部分？
 
-团队把审核过的指标定义连接到现有数仓表。MetricSpire 检查用户权限，选择当前生效的定义，执行查询并返回带类型的结果表。网页、HTTP API 和 MCP 工具使用同一套服务。维护者可以审核和发布定义变更，保留历史，需要时回滚到之前的版本。
+**现有数据链路负责采集和加工，OLAP 引擎保存并计算业务数据，MetricSpire 负责管理指标和提供查询服务。** 指标定义与版本保存在单独的关系型数据库中；外接语义层为可选的探索性分析提供依据。
 
-**Databricks SQL 是首个分析引擎。** PostgreSQL 保存指标定义、版本和审计记录。数据采集与加工仍需由上游完成；MetricSpire 不替代这条链路，也不提供图表看板。它不托管 AI 模型，不接受调用方提交任意 SQL。
+![MetricSpire 接入架构：网页、应用和 AI 调用指标库与数据服务；服务通过适配器查询 OLAP 引擎，另用关系型数据库保存指标定义，可选接入外部语义层仓库。](docs/assets/architecture.zh-CN.svg)
 
-探索性分析使用经过审核的结构化语义目录，接入方式见[外部语义与配置](docs/exploration.md)。另外可以单独启用[在线 HTTP 查询](docs/online-query.md)，读取 PostgreSQL 中的预计算汇总数据。这两条路径需要分别配置和验收。
+图中实线表示服务调用或数据写入，虚线表示可选的语义配置输入。**OLAP 引擎、指标存储、外部语义层是三个不同的角色。**
+
+接入设计面向 ClickHouse、Doris 等 OLAP 引擎，以及 MySQL、PostgreSQL 等指标存储。**当前仓库已实现 Databricks SQL 分析适配器和 PostgreSQL 指标存储**，另有可选的 PostgreSQL 预计算汇总查询；ClickHouse、Doris 和 MySQL 适配器尚未随仓库提供。各路径的实现范围见[架构与适配器](docs/architecture.md#adapter-support)。
+
+## 从哪里开始？
+
+> **开发预览版。** 查询自己的数据前，需要部署并配置服务，以及相应的数据权限。目前尚无生产就绪的正式版本。[查看当前状态](docs/development-status.md)（英文）。
+
+| 你的目标 | 入口 | 需要准备 |
+| --- | --- | --- |
+| 在本地 Codex CLI 中使用团队服务 | [获取团队安装器](docs/mcp-installer.md#get-the-installer) | 已部署的实例、团队提供的安装器，以及该部署所需的 Databricks 访问权限。 |
+| 连接其他 MCP 客户端 | [MCP 连接指南](docs/mcp.md#connect) | 实例地址，以及该部署支持的身份认证配置。 |
+| 不连接数据，先理解指标定义 | [运行离线示例](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database) | Go；无需数据库或云账号。示例生成查询计划，不返回数据结果。 |
+| 为团队部署服务 | [服务配置指南](docs/getting-started.md#run-the-http-service) | 当前实现需要 PostgreSQL、身份认证配置和 Databricks SQL。 |
+
+已有网页访问权限？打开团队实例，从**指标目录**开始。仓库不附带公开服务实例，也不包含公司的指标定义。上述详细指南目前为英文。
 
 ## 文档与项目状态
 
 - [快速上手](docs/getting-started.md) — 离线示例、本地指标目录与服务配置。
 - [MCP 接入](docs/mcp.md) · [HTTP API](docs/http-api.md) — 连接客户端或应用。
-- [团队配置](config/README.md) — 私有运行配置、业务别名和已审核的语义导出文件。
-- [架构](docs/architecture.md) — 指标定义、权限与执行边界。
+- [架构与适配器](docs/architecture.md) — 系统分工、查询路径与当前数据库支持范围。
+- [团队配置](config/README.md) · [外部语义层](docs/exploration.md) — 维护私有配置与探索性分析所需的定义。
 - [开发状态](docs/development-status.md) — 已实现能力、验证证据和待完成项。
 - [贡献指南](CONTRIBUTING.md) · [全部文档](docs/README.md)。
 
-以上文档目前为英文。当前尚未确立生产就绪、通用多引擎分析或生产延迟与可用性保证。试用指标始终保留未验证标识。语义契约 [`metricspire.io/v1alpha1`](contracts/metricspire.schema.json) 与计划中的产品 `v0.1.0` 分别管理版本。
+详细文档目前为英文。上面的订单场景用于产品说明；可复现的技术请求与预期结果见 [TPCH 验证样例](testdata/acceptance/databricks-tpch)。语义契约 [`metricspire.io/v1alpha1`](contracts/metricspire.schema.json) 与计划中的产品 `v0.1.0` 分别管理版本。
 
 采用 [Apache 2.0](LICENSE) 许可。公开示例使用中立数据；公司定义、凭据和生产数据应保留在仓库之外。
