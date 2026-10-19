@@ -415,3 +415,89 @@ func TestExternalCodeSurvivesRollbackAndDeactivation(t *testing.T) {
 		})
 	}
 }
+
+func TestPublishedStructuredDefinitionCannotChangeOrDisappear(t *testing.T) {
+	for _, change := range []string{"change", "remove", "deactivated remove"} {
+		t.Run(change, func(t *testing.T) {
+			repo := catalog.NewMemoryRepository()
+			service, _ := catalog.NewService(repo)
+			source := loadSource(t)
+			for i := range source.Spec.Metrics {
+				source.Spec.Metrics[i].Definition = &model.MetricDefinition{Family: "orders", Variant: source.Spec.Metrics[i].Name, Population: "Synthetic orders", Exclusions: []string{}, Numerator: "Reviewed aggregate", Denominator: "Reviewed formula", CountingUnit: "Order", TimeBasis: "Creation date"}
+			}
+			draft, err := service.SaveDraft(t.Context(), catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "test"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.Publish(t.Context(), "demo", source.Metadata.Name, draft.Revision, "test", "structured"); err != nil {
+				t.Fatal(err)
+			}
+			if change == "deactivated remove" {
+				if _, err := service.Deactivate(t.Context(), "demo", source.Metadata.Name, "test", "synthetic lifecycle"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if change == "change" {
+				source.Spec.Metrics[0].Definition.Population = "Different population"
+			} else {
+				for i := range source.Spec.Metrics {
+					source.Spec.Metrics[i].Definition = nil
+				}
+			}
+			draft, err = service.SaveDraft(t.Context(), catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "test", ExpectedRevision: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.Publish(t.Context(), "demo", source.Metadata.Name, draft.Revision, "test", "unsafe replacement"); !errors.Is(err, catalog.ErrNotPublishable) {
+				t.Fatalf("published scope changed: %v", err)
+			}
+		})
+	}
+}
+
+func TestStructuredDefinitionSurvivesRollbackAndDeactivation(t *testing.T) {
+	for _, deactivate := range []bool{false, true} {
+		t.Run(map[bool]string{false: "rollback", true: "deactivate"}[deactivate], func(t *testing.T) {
+			ctx := context.Background()
+			repository := catalog.NewMemoryRepository()
+			service, _ := catalog.NewService(repository)
+			source := loadSource(t)
+			draft, err := service.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "owner"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := service.Publish(ctx, "demo", source.Metadata.Name, draft.Revision, "owner", "initial")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range source.Spec.Metrics {
+				source.Spec.Metrics[i].Definition = &model.MetricDefinition{Family: "orders", Variant: source.Spec.Metrics[i].Name, Population: "Synthetic orders", Exclusions: []string{}, Numerator: "Reviewed aggregate", Denominator: "Reviewed formula", CountingUnit: "Order", TimeBasis: "Creation date"}
+			}
+			draft, err = service.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "owner", ExpectedRevision: draft.Revision})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.Publish(ctx, "demo", source.Metadata.Name, draft.Revision, "owner", "assign"); err != nil {
+				t.Fatal(err)
+			}
+			if deactivate {
+				_, err = service.Deactivate(ctx, "demo", source.Metadata.Name, "owner", "test")
+			} else {
+				_, err = service.Rollback(ctx, "demo", source.Metadata.Name, first.ID, "owner", "test")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range source.Spec.Metrics {
+				source.Spec.Metrics[i].Definition = nil
+			}
+			draft, err = service.SaveDraft(ctx, catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "owner", ExpectedRevision: draft.Revision})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.Publish(ctx, "demo", source.Metadata.Name, draft.Revision, "owner", "replace"); !errors.Is(err, catalog.ErrNotPublishable) {
+				t.Fatalf("historical structured definition removed: %v", err)
+			}
+		})
+	}
+}

@@ -20,6 +20,7 @@ const state = {
   metricDetailRequests: new Map(),
   selectedCatalogIndex: -1,
   queryMetricKeys: new Set(),
+  definitionChoices: new Map(),
   filters: [],
   activeJobID: null,
   queryBusy: false,
@@ -391,6 +392,7 @@ async function switchNamespace(namespace) {
   state.metricDetailRequests.clear();
   state.queryMetricKeys.clear();
   state.queryCatalog.clear();
+  state.definitionChoices.clear();
   byID("query-metric-search").value = "";
   state.filters = [];
   resetQueryFeedback();
@@ -600,7 +602,10 @@ function renderMetricDetail(metric) {
   byID("detail-query-button").textContent = draft ? "带入草稿试查" : pending ? "暂不可查询" : "带入查询验证";
   byID("detail-query-button").disabled = pending || metric.deprecated || !hasPermission("query:execute") || (draft && !hasPermission("model:manage"));
   byID("detail-query-button").onclick = () => addMetricToQuery(metric);
-  if (!pending && (hasPermission("query:execute") || (draft && hasPermission("model:manage")))) loadMetricLineage(metric, sequence);
+  if (metric.definition) {
+    byID("detail-source-state").textContent = "先确认口径";
+    byID("detail-physical-source").textContent = "带入查询并选择口径后可查看执行计划。";
+  } else if (!pending && (hasPermission("query:execute") || (draft && hasPermission("model:manage")))) loadMetricLineage(metric, sequence);
 }
 
 function catalogDetailKey(metric) {
@@ -884,11 +889,71 @@ function configureTimeControls(time) {
   byID("custom-time-range").hidden = preset.value !== "custom";
 }
 
+function definitionChoiceKey(metric) {
+  return [metric.namespace, metric.semantic_model_name, metric.name].join("\u0000");
+}
+
+function metricDefinitionRows(metric) {
+  const d = metric.definition;
+  if (!d) return [];
+  return [["口径", `${d.family} / ${d.variant}`], ["统计人群", d.population],
+    ["排除项", d.exclusions.length ? d.exclusions.join("；") : "无"], ["分子", d.numerator],
+    ["分母", d.denominator], ["计数 / 去重单位", d.counting_unit], ["时间依据", d.time_basis]];
+}
+
+function selectedDefinitionVersions(metrics, choices) {
+  const selections = {};
+  for (const metric of metrics) {
+    if (!metric.definition && !metric.requires_metric_selection) continue;
+    if (!metric.definition || !metric.manifest_fingerprint) throw new Error("请先在指标目录打开完整口径定义，再带入查询。");
+    if (choices.get(definitionChoiceKey(metric)) !== metric.manifest_fingerprint) throw new Error("请确认所选指标的统计人群、排除项和计算口径。定义更新后需要重新选择。");
+    selections[metric.name] = metric.manifest_fingerprint;
+  }
+  return selections;
+}
+
+function renderDefinitionChoices(metrics) {
+  const container = byID("query-definition-choices");
+  container.replaceChildren();
+  for (const metric of metrics) {
+    if (!metric.definition && !metric.requires_metric_selection) continue;
+    const section = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = metric.display_name || metric.name;
+    section.append(title);
+    if (!metric.definition || !metric.manifest_fingerprint) {
+      const notice = document.createElement("p");
+      notice.textContent = "请先在指标目录打开完整口径定义，再带入查询。";
+      section.append(notice);
+    } else {
+      for (const [label, value] of metricDefinitionRows(metric)) {
+        const row = document.createElement("p");
+        row.textContent = `${label}：${value}`;
+        section.append(row);
+      }
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = state.definitionChoices.get(definitionChoiceKey(metric)) === metric.manifest_fingerprint;
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) state.definitionChoices.set(definitionChoiceKey(metric), metric.manifest_fingerprint);
+        else state.definitionChoices.delete(definitionChoiceKey(metric));
+        resetQueryFeedback();
+        updateQueryPreview();
+      });
+      label.append(checkbox, document.createTextNode(" 我选择上述口径"));
+      section.append(label);
+    }
+    container.append(section);
+  }
+}
+
 function updateQueryBuilder() {
   const metrics = selectedQueryMetrics();
   const dimensions = sharedDimensions(metrics);
   const time = sharedTimeMetadata(metrics);
   renderMetricOptions();
+  renderDefinitionChoices(metrics);
   renderDimensionOptions(dimensions, time);
   renderFilterDimensionOptions(dimensions);
   configureTimeControls(time);
@@ -1001,6 +1066,8 @@ function buildQuery() {
     filters: state.filters,
     limit,
   };
+  const selections = selectedDefinitionVersions(metrics, state.definitionChoices);
+  if (Object.keys(selections).length) query.metric_selections = selections;
   const time = sharedTimeMetadata(metrics);
   if (time.incompatible) throw new Error("所选时间指标使用不同时间口径，请拆成两次查询。");
   const selectedPreset = byID("time-preset").value;
@@ -1310,7 +1377,7 @@ function metricRegistryStatus(metric) {
 }
 
 function metricExecutionLocked(metric) {
-  return Boolean(metric && (metric.kind !== "aggregate" || metricIsPublished(metric)));
+  return Boolean(metric && (metric.definition || metric.kind !== "aggregate" || metricIsPublished(metric)));
 }
 
 function renderMetricInventory() {
@@ -1514,9 +1581,11 @@ function renderMetricEditor(metric) {
   const executionLocked = metricExecutionLocked(metric);
   byID("metric-editor-kicker").textContent = state.creatingMetric ? "新建草稿" : metricIsPublished(metric) ? "已发布指标" : "未发布草稿";
   byID("metric-editor-title").textContent = state.creatingMetric ? "新增基础指标" : (metric?.display_name || metric?.name || "选择一条指标");
-  byID("duplicate-metric-button").hidden = !metric || metric.kind !== "aggregate" || !metricIsPublished(metric);
+  byID("duplicate-metric-button").hidden = Boolean(metric?.definition) || !metric || metric.kind !== "aggregate" || !metricIsPublished(metric);
   byID("editor-mode-note").textContent = state.creatingMetric
     ? "这是一条新指标。保存后只进入草稿，发布前仍可修改口径。"
+    : metric?.definition
+      ? "结构化口径由版本化源文件维护；此处仅编辑名称和说明。新口径需要新增指标和 variant 并审核发布。"
     : executionLocked && aggregate
       ? "这条指标已经发布。名称和说明可以继续维护；编号和计算口径已锁定。如需改口径，请复制为新指标。"
       : aggregate
@@ -1574,6 +1643,7 @@ function newMetric() {
 function duplicateMetric() {
   const metric = governanceMetrics()[state.metricIndex];
   if (!metric) return;
+  if (metric.definition) { setStatus("editor-status", "结构化口径请在版本化源文件中新增指标和 variant，经审核后发布。简化复制不会移除原口径。", "error"); return; }
   if (state.editorDirty && !window.confirm("当前修改尚未保存。放弃修改并复制线上口径？")) return;
   state.creatingMetric = true;
   state.metricIndex = -1;
@@ -2070,6 +2140,6 @@ async function initialize() {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = {catalogStatusCounts, catalogVisibleTotal, catalogStatusLabel, catalogStatusShortLabel, compactDimensions, compactSourceName, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, groupPublicationIssues, humanOwner, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricCalculationNote, metricDetailQuery, metricExpressionLabel, metricFilterLabel, metricFormulaLabel, metricTimeDetail, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, sharedTimeMetadata, shiftDate, timezoneParts, verificationLabel, zonedMidnightISO, shellQuote};
+  module.exports = {selectedDefinitionVersions, definitionChoiceKey, metricDefinitionRows, catalogStatusCounts, catalogVisibleTotal, catalogStatusLabel, catalogStatusShortLabel, compactDimensions, compactSourceName, draftCatalogEntries, errorMessage, filterCatalogEntries, governanceCatalogEntries, groupPublicationIssues, humanOwner, humanTag, matchingQueryMetrics, matchesCatalogSearch, mergeCatalogEntries, metricCalculationNote, metricDetailQuery, metricExpressionLabel, metricFilterLabel, metricFormulaLabel, metricTimeDetail, planSummaryRows, preferredTimeGranularity, querySummaryRows, resolvePresetRange, sharedTimeMetadata, shiftDate, timezoneParts, verificationLabel, zonedMidnightISO, shellQuote};
 }
 if (typeof document !== "undefined") initialize();

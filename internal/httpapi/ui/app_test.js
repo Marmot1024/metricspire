@@ -625,3 +625,30 @@ test("catalog failure after a domain switch clears the old detail and recovers o
   assert.match(list.children[0].textContent, /没有找到/);
   assert.match(context.document.getElementById("metric-detail-empty").textContent, /请选择/);
 });
+
+test("structured metric choices are explicit, version-bound and namespace-bound", () => {
+  const {selectedDefinitionVersions, definitionChoiceKey, metricDefinitionRows} = require("./app.js");
+  const metric = {name:"orders_all",namespace:"demo",semantic_model_name:"commerce",manifest_fingerprint:"sha256:v1",definition:{family:"orders",variant:"all",population:"All synthetic orders",exclusions:[],numerator:"Count",denominator:"Not applicable",counting_unit:"Order",time_basis:"Creation date"}};
+  const choices = new Map();
+  assert.throws(() => selectedDefinitionVersions([metric],choices), /请确认/);
+  choices.set(definitionChoiceKey(metric),metric.manifest_fingerprint);
+  assert.deepEqual(selectedDefinitionVersions([metric],choices),{orders_all:"sha256:v1"});
+  assert.throws(() => selectedDefinitionVersions([{...metric,manifest_fingerprint:"sha256:v2"}],choices), /重新选择/);
+  assert.throws(() => selectedDefinitionVersions([{...metric,namespace:"other"}],choices), /请确认/);
+  assert.throws(() => selectedDefinitionVersions([{name:"orders_all",requires_metric_selection:true}],choices), /完整口径/);
+  assert.deepEqual(selectedDefinitionVersions([{name:"legacy"}],choices),{});
+  assert.deepEqual(metricDefinitionRows(metric)[2],["排除项","无"]);
+});
+
+test("editing and copying never silently remove a structured definition", () => {
+  const {context, run} = editorContext();
+  run(`state.creatingMetric=false; state.metricIndex=0; state.review={metric_changes:[]};
+    state.draft.source.spec.metrics=[{name:'orders_all',display_name:'Orders',description:'Synthetic count',owner:'data-team',entity:'orders',kind:'aggregate',value_type:'integer',expression:{op:'count',field:'orders.id'},allowed_dimensions:[],verification:{status:'unverified'},definition:{family:'orders',variant:'all',population:'All synthetic orders',exclusions:[],numerator:'Count',denominator:'Not applicable',counting_unit:'Order',time_basis:'Creation date'}}];
+    renderMetricEditor(state.draft.source.spec.metrics[0]);`);
+  context.document.getElementById("metric-description").value="Updated wording";
+  assert.equal(run("metricFromEditor().definition.variant"),"all");
+  assert.equal(context.document.getElementById("metric-operation").disabled,true);
+  run("duplicateMetric()");
+  assert.equal(run("state.creatingMetric"),false);
+  assert.match(context.document.getElementById("editor-status").textContent,/版本化源文件/);
+});

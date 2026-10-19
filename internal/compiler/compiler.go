@@ -43,6 +43,11 @@ func Compile(source model.SemanticSource) (model.SemanticManifest, error) {
 		return model.SemanticManifest{}, err
 	}
 	normalizeSpec(&spec)
+	for i := range spec.Metrics {
+		if d := spec.Metrics[i].Definition; d != nil {
+			slices.Sort(d.Exclusions)
+		}
+	}
 	index, err := validateSpec(spec)
 	if err != nil {
 		return model.SemanticManifest{}, err
@@ -372,6 +377,7 @@ func validateSpec(spec model.SemanticSpec) (catalog, error) {
 	}
 
 	externalCodes := make(map[string]string, len(spec.Metrics))
+	definitionVariants := make(map[string]bool)
 	for i, metric := range spec.Metrics {
 		path := fmt.Sprintf("spec.metrics[%d]", i)
 		if err := validateName(metric.Name, path+".name"); err != nil {
@@ -422,6 +428,16 @@ func validateSpec(spec model.SemanticSpec) (catalog, error) {
 		}
 		if err := rejectDuplicates(metric.AllowedDimensions, path+".allowed_dimensions"); err != nil {
 			return result, err
+		}
+		if err := validateDefinition(metric.Definition, path+".definition"); err != nil {
+			return result, err
+		}
+		if d := metric.Definition; d != nil {
+			key := d.Family + "\x00" + d.Variant
+			if definitionVariants[key] {
+				return result, problem("invalid_definition", path+".definition", "family/variant must be unique within a model")
+			}
+			definitionVariants[key] = true
 		}
 		result.metrics[metric.Name] = metric
 	}
@@ -481,6 +497,9 @@ func validateSpec(spec model.SemanticSpec) (catalog, error) {
 			}
 			for dependencyName := range dependencies {
 				dependency := result.metrics[dependencyName]
+				if dependency.Definition != nil && metric.Definition == nil {
+					return result, problem("invalid_definition", path+".definition", "derived metrics referencing structured definitions must declare their own definition")
+				}
 				for _, dimension := range metric.AllowedDimensions {
 					if !slices.Contains(dependency.AllowedDimensions, dimension) {
 						return result, problem("invalid_metric", path+".allowed_dimensions", "dimension %q is not valid for dependency %q", dimension, dependencyName)

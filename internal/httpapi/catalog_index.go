@@ -63,32 +63,34 @@ type CatalogIndexResponse struct {
 // construct a bounded query. Full definitions and evidence are fetched when
 // a row is selected.
 type CatalogIndexSummary struct {
-	Namespace          string                             `json:"namespace"`
-	ModelName          string                             `json:"semantic_model_name"`
-	Name               string                             `json:"name"`
-	ExternalCode       string                             `json:"external_code,omitempty"`
-	DisplayName        string                             `json:"display_name"`
-	Owner              string                             `json:"owner"`
-	CatalogStatus      string                             `json:"catalog_status"`
-	VerificationStatus model.VerificationStatus           `json:"verification_status"`
-	Deprecated         bool                               `json:"deprecated"`
-	Tags               []string                           `json:"tags,omitempty"`
-	ReleaseID          string                             `json:"release_id,omitempty"`
-	ValueType          model.DataType                     `json:"value_type"`
-	Unit               string                             `json:"unit,omitempty"`
-	AllowedDimensions  []string                           `json:"allowed_dimensions"`
-	DimensionDetails   []application.MetricDimensionEntry `json:"dimension_details,omitempty"`
-	TimeDimension      string                             `json:"time_dimension,omitempty"`
-	TimeGranularities  []model.TimeGranularity            `json:"time_granularities,omitempty"`
-	Expression         model.Expression                   `json:"expression,omitempty"`
-	FormulaSummary     string                             `json:"formula_summary,omitempty"`
-	SourceResource     string                             `json:"source_resource,omitempty"`
-	Summary            bool                               `json:"summary"`
+	RequiresMetricSelection bool                               `json:"requires_metric_selection,omitempty"`
+	Namespace               string                             `json:"namespace"`
+	ModelName               string                             `json:"semantic_model_name"`
+	Name                    string                             `json:"name"`
+	ExternalCode            string                             `json:"external_code,omitempty"`
+	DisplayName             string                             `json:"display_name"`
+	Owner                   string                             `json:"owner"`
+	CatalogStatus           string                             `json:"catalog_status"`
+	VerificationStatus      model.VerificationStatus           `json:"verification_status"`
+	Deprecated              bool                               `json:"deprecated"`
+	Tags                    []string                           `json:"tags,omitempty"`
+	ReleaseID               string                             `json:"release_id,omitempty"`
+	ValueType               model.DataType                     `json:"value_type"`
+	Unit                    string                             `json:"unit,omitempty"`
+	AllowedDimensions       []string                           `json:"allowed_dimensions"`
+	DimensionDetails        []application.MetricDimensionEntry `json:"dimension_details,omitempty"`
+	TimeDimension           string                             `json:"time_dimension,omitempty"`
+	TimeGranularities       []model.TimeGranularity            `json:"time_granularities,omitempty"`
+	Expression              model.Expression                   `json:"expression,omitempty"`
+	FormulaSummary          string                             `json:"formula_summary,omitempty"`
+	SourceResource          string                             `json:"source_resource,omitempty"`
+	Summary                 bool                               `json:"summary"`
 }
 
 func summarizeCatalogIndex(entry CatalogIndexEntry) CatalogIndexSummary {
 	summary := CatalogIndexSummary{
-		Namespace: entry.Namespace, ModelName: entry.ModelName, Name: entry.Name,
+		RequiresMetricSelection: entry.Definition != nil,
+		Namespace:               entry.Namespace, ModelName: entry.ModelName, Name: entry.Name,
 		ExternalCode: entry.ExternalCode, DisplayName: entry.DisplayName, Owner: entry.Owner,
 		CatalogStatus: entry.CatalogStatus, VerificationStatus: entry.VerificationStatus,
 		Deprecated: entry.Deprecated, Tags: entry.Tags, ReleaseID: entry.ReleaseID,
@@ -374,7 +376,7 @@ func (server *Server) composeCatalogIndex(ctx context.Context, request *http.Req
 				}
 			}
 			entry := application.MetricCatalogEntry{
-				Namespace: namespace, ModelName: draft.Name, Name: metric.Name, ExternalCode: metric.ExternalCode,
+				Definition: metric.Definition, ManifestFingerprint: manifest.Fingerprint, Namespace: namespace, ModelName: draft.Name, Name: metric.Name, ExternalCode: metric.ExternalCode,
 				DisplayName: metric.DisplayName, Description: metric.Description, Owner: metric.Owner,
 				VerificationStatus: metric.Verification.Status, Tags: metric.Tags, UsageExamples: metric.UsageExamples,
 				Deprecated: metric.Deprecated, Entity: metric.Entity, Kind: metric.Kind, ValueType: metric.ValueType,

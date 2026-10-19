@@ -111,22 +111,23 @@ type Cardinality string
 const CardinalityManyToOne Cardinality = "many_to_one"
 
 type Metric struct {
-	Name              string       `json:"name" yaml:"name"`
-	ExternalCode      string       `json:"external_code,omitempty" yaml:"external_code,omitempty"`
-	DisplayName       string       `json:"display_name,omitempty" yaml:"display_name,omitempty"`
-	Description       string       `json:"description,omitempty" yaml:"description,omitempty"`
-	Owner             string       `json:"owner,omitempty" yaml:"owner,omitempty"`
-	Tags              []string     `json:"tags,omitempty" yaml:"tags,omitempty"`
-	UsageExamples     []string     `json:"usage_examples,omitempty" yaml:"usage_examples,omitempty"`
-	Deprecated        bool         `json:"deprecated,omitempty" yaml:"deprecated,omitempty"`
-	Entity            string       `json:"entity" yaml:"entity"`
-	Kind              MetricKind   `json:"kind" yaml:"kind"`
-	ValueType         DataType     `json:"value_type" yaml:"value_type"`
-	Unit              string       `json:"unit,omitempty" yaml:"unit,omitempty"`
-	Expression        Expression   `json:"expression" yaml:"expression"`
-	AllowedDimensions []string     `json:"allowed_dimensions" yaml:"allowed_dimensions"`
-	TimeDimension     string       `json:"time_dimension,omitempty" yaml:"time_dimension,omitempty"`
-	Verification      Verification `json:"verification" yaml:"verification"`
+	Definition        *MetricDefinition `json:"definition,omitempty" yaml:"definition,omitempty"`
+	Name              string            `json:"name" yaml:"name"`
+	ExternalCode      string            `json:"external_code,omitempty" yaml:"external_code,omitempty"`
+	DisplayName       string            `json:"display_name,omitempty" yaml:"display_name,omitempty"`
+	Description       string            `json:"description,omitempty" yaml:"description,omitempty"`
+	Owner             string            `json:"owner,omitempty" yaml:"owner,omitempty"`
+	Tags              []string          `json:"tags,omitempty" yaml:"tags,omitempty"`
+	UsageExamples     []string          `json:"usage_examples,omitempty" yaml:"usage_examples,omitempty"`
+	Deprecated        bool              `json:"deprecated,omitempty" yaml:"deprecated,omitempty"`
+	Entity            string            `json:"entity" yaml:"entity"`
+	Kind              MetricKind        `json:"kind" yaml:"kind"`
+	ValueType         DataType          `json:"value_type" yaml:"value_type"`
+	Unit              string            `json:"unit,omitempty" yaml:"unit,omitempty"`
+	Expression        Expression        `json:"expression" yaml:"expression"`
+	AllowedDimensions []string          `json:"allowed_dimensions" yaml:"allowed_dimensions"`
+	TimeDimension     string            `json:"time_dimension,omitempty" yaml:"time_dimension,omitempty"`
+	Verification      Verification      `json:"verification" yaml:"verification"`
 }
 
 type MetricKind string
@@ -276,15 +277,16 @@ type RequestContext struct {
 }
 
 type SemanticQuery struct {
-	APIVersion   string        `json:"api_version" yaml:"api_version"`
-	Kind         string        `json:"kind" yaml:"kind"`
-	Metrics      []string      `json:"metrics" yaml:"metrics"`
-	GroupBy      []string      `json:"group_by,omitempty" yaml:"group_by,omitempty"`
-	TimeRange    *TimeRange    `json:"time_range,omitempty" yaml:"time_range,omitempty"`
-	TimeGrouping *TimeGrouping `json:"time_grouping,omitempty" yaml:"time_grouping,omitempty"`
-	Filters      []Filter      `json:"filters,omitempty" yaml:"filters,omitempty"`
-	OrderBy      []OrderBy     `json:"order_by,omitempty" yaml:"order_by,omitempty"`
-	Limit        int           `json:"limit,omitempty" yaml:"limit,omitempty"`
+	MetricSelections map[string]string `json:"metric_selections,omitempty" yaml:"metric_selections,omitempty" jsonschema:"Exact metric names mapped to the manifest fingerprint reviewed in get_metric_details; resolve scope before choosing"`
+	APIVersion       string            `json:"api_version" yaml:"api_version"`
+	Kind             string            `json:"kind" yaml:"kind"`
+	Metrics          []string          `json:"metrics" yaml:"metrics"`
+	GroupBy          []string          `json:"group_by,omitempty" yaml:"group_by,omitempty"`
+	TimeRange        *TimeRange        `json:"time_range,omitempty" yaml:"time_range,omitempty"`
+	TimeGrouping     *TimeGrouping     `json:"time_grouping,omitempty" yaml:"time_grouping,omitempty"`
+	Filters          []Filter          `json:"filters,omitempty" yaml:"filters,omitempty"`
+	OrderBy          []OrderBy         `json:"order_by,omitempty" yaml:"order_by,omitempty"`
+	Limit            int               `json:"limit,omitempty" yaml:"limit,omitempty"`
 }
 
 type TimeRange struct {

@@ -225,3 +225,41 @@ func TestOnlineCompletionAuditFailureDoesNotDeliverResult(t *testing.T) {
 		t.Fatalf("result delivered without audit: %v %#v", err, out)
 	}
 }
+
+func TestOnlineStructuredChoiceUsesExternalCodesAndNeverFallsBack(t *testing.T) {
+	service, repo, engine, source, scope, query := onlineFixture(t, nil)
+	management, _ := catalog.NewService(repo)
+	for i := range source.Spec.Metrics {
+		source.Spec.Metrics[i].Definition = &model.MetricDefinition{Family: "sales", Variant: source.Spec.Metrics[i].Name, Population: "Synthetic sales", Exclusions: []string{}, Numerator: "Reviewed aggregate", Denominator: "Reviewed formula", CountingUnit: "Order", TimeBasis: "Sales date"}
+	}
+	draft, err := management.SaveDraft(t.Context(), catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "test", ExpectedRevision: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := management.Publish(t.Context(), "demo", source.Metadata.Name, draft.Revision, "test", "structured fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expect := func(want string) {
+		t.Helper()
+		before := engine.calls
+		_, err := service.Execute(t.Context(), scope, query)
+		var p *model.Problem
+		if !errors.As(err, &p) || p.Code != want || engine.calls != before {
+			t.Fatalf("error=%v want=%s calls=%d", err, want, engine.calls)
+		}
+	}
+	expect("metric_selection_required")
+	query.MetricSelections = map[string]string{}
+	for _, code := range query.MetricCodes {
+		query.MetricSelections[code] = release.ManifestFingerprint
+	}
+	if _, err := service.Execute(t.Context(), scope, query); err != nil {
+		t.Fatal(err)
+	}
+	query.MetricSelections[query.MetricCodes[0]] = "sha256:stale"
+	expect("metric_selection_changed")
+	query.MetricSelections[query.MetricCodes[0]] = release.ManifestFingerprint
+	query.MetricSelections["revenue"] = release.ManifestFingerprint
+	expect("metric_selection_changed")
+}

@@ -17,13 +17,14 @@ var numericMetricCode = regexp.MustCompile(`^[0-9]+$`)
 // OnlineQuery is deliberately separate from the existing name-based
 // SemanticQuery contract. Identity, release and physical sources are trusted.
 type OnlineQuery struct {
-	MetricCodes  []string            `json:"metric_codes"`
-	Dimensions   []string            `json:"dimensions,omitempty"`
-	TimeRange    *model.TimeRange    `json:"time_range"`
-	TimeGrouping *model.TimeGrouping `json:"time_grouping,omitempty"`
-	Filters      []model.Filter      `json:"filters,omitempty"`
-	OrderBy      []model.OrderBy     `json:"order_by,omitempty"`
-	Limit        int                 `json:"limit,omitempty"`
+	MetricSelections map[string]string   `json:"metric_selections,omitempty"`
+	MetricCodes      []string            `json:"metric_codes"`
+	Dimensions       []string            `json:"dimensions,omitempty"`
+	TimeRange        *model.TimeRange    `json:"time_range"`
+	TimeGrouping     *model.TimeGrouping `json:"time_grouping,omitempty"`
+	Filters          []model.Filter      `json:"filters,omitempty"`
+	OrderBy          []model.OrderBy     `json:"order_by,omitempty"`
+	Limit            int                 `json:"limit,omitempty"`
 }
 
 type OnlineResult struct {
@@ -119,7 +120,18 @@ func (s *OnlineService) Execute(ctx context.Context, scope QueryScope, request O
 	if limit == 0 {
 		limit = 1000
 	}
-	query := model.SemanticQuery{APIVersion: model.APIVersion, Kind: model.KindSemanticQuery, Metrics: names, GroupBy: request.Dimensions, TimeRange: request.TimeRange, TimeGrouping: request.TimeGrouping, Filters: request.Filters, Limit: limit, OrderBy: append([]model.OrderBy(nil), request.OrderBy...)}
+	selections := make(map[string]string, len(request.MetricSelections))
+	for code, fingerprint := range request.MetricSelections {
+		if !seen[code] {
+			return OnlineResult{}, &model.Problem{Code: "metric_selection_changed", Path: "metric_selections", Message: "selection keys must be requested external metric codes"}
+		}
+		for name, external := range codes {
+			if external == code {
+				selections[name] = fingerprint
+			}
+		}
+	}
+	query := model.SemanticQuery{MetricSelections: selections, APIVersion: model.APIVersion, Kind: model.KindSemanticQuery, Metrics: names, GroupBy: request.Dimensions, TimeRange: request.TimeRange, TimeGrouping: request.TimeGrouping, Filters: request.Filters, Limit: limit, OrderBy: append([]model.OrderBy(nil), request.OrderBy...)}
 	for i := range query.OrderBy {
 		for name, code := range codes {
 			if query.OrderBy[i].Field == code {

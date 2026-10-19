@@ -1,0 +1,62 @@
+api_version: metricspire.io/v1alpha1
+kind: SemanticModel
+metadata: {name: synthetic_order_scopes, version: 1.0.0}
+spec:
+  datasets:
+    - name: order_rows
+      fields:
+        - {name: id, data_type: integer}
+        - {name: day, data_type: date}
+        - {name: is_test, data_type: boolean}
+  entities:
+    - {name: orders, dataset: order_rows, key: id}
+  dimensions:
+    - {name: date, entity: orders, field: day, type: time, time_granularities: [day]}
+  metrics:
+    - name: orders_all
+      external_code: "20001"
+      display_name: All orders
+      description: Count all synthetic orders, including test orders.
+      owner: example-owner
+      entity: orders
+      kind: aggregate
+      value_type: integer
+      unit: orders
+      expression: {op: count, field: orders.id}
+      allowed_dimensions: [date]
+      time_dimension: date
+      verification: {status: unverified, evidence: []}
+      definition:
+        family: orders
+        variant: including_tests
+        population: All synthetic orders
+        exclusions: []
+        numerator: Number of order IDs
+        denominator: Not applicable; this is a count
+        counting_unit: One row per unique order ID; no additional deduplication
+        time_basis: Source day in the configured date calendar
+    - name: orders_production
+      external_code: "20002"
+      display_name: Orders excluding tests
+      description: Count synthetic orders whose non-null is_test flag is false.
+      owner: example-owner
+      entity: orders
+      kind: aggregate
+      value_type: integer
+      unit: orders
+      expression:
+        op: count
+        field: orders.id
+        filters: [{field: orders.is_test, operator: eq, values: ["false"]}]
+      allowed_dimensions: [date]
+      time_dimension: date
+      verification: {status: unverified, evidence: []}
+      definition:
+        family: orders
+        variant: excluding_tests
+        population: Synthetic orders with is_test false
+        exclusions: [Orders marked as tests]
+        numerator: Number of eligible order IDs
+        denominator: Not applicable; this is a count
+        counting_unit: One row per unique order ID; no additional deduplication
+        time_basis: Source day in the configured date calendar

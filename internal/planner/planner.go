@@ -80,6 +80,9 @@ func buildLogical(manifest model.SemanticManifest, bundle model.PolicyBundle, co
 	}
 
 	index := indexManifest(manifest)
+	if err := validateMetricSelections(manifest, query, index); err != nil {
+		return model.LogicalPlan{}, err
+	}
 	rootEntity := ""
 	for i, name := range query.Metrics {
 		metric, exists := index.metrics[name]
@@ -168,6 +171,9 @@ func buildLogical(manifest model.SemanticManifest, bundle model.PolicyBundle, co
 }
 
 func validateRequestBudget(query model.SemanticQuery) error {
+	if len(query.MetricSelections) > MaximumMetrics {
+		return problem("budget_exceeded", "metric_selections", "at most %d selections", MaximumMetrics)
+	}
 	if len(query.Metrics) > MaximumMetrics {
 		return problem("budget_exceeded", "metrics", "must contain at most %d metrics", MaximumMetrics)
 	}
