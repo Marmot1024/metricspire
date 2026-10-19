@@ -1,5 +1,10 @@
 api_version: metricspire.io/v1alpha1
 kind: RuntimeConfig
+# Omitted values retain these backwards-compatible defaults.
+storage:
+  driver: postgres
+query_engine:
+  driver: databricks_sql
 http:
   address: 0.0.0.0:8000
   public_url: https://metricspire-staging.example.databricksapps.com

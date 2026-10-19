@@ -125,6 +125,9 @@ func (backend *remoteMCPBackend) SubmitQuery(ctx context.Context, input mcpbridg
 }
 
 func (backend *remoteMCPBackend) GetQuery(_ context.Context, input mcpbridge.JobInput) (json.RawMessage, error) {
+	if backend.server.deps.Jobs == nil {
+		return nil, backend.safeError(queryEngineDisabled())
+	}
 	result, err := backend.server.deps.Jobs.Get(backend.principal.Tenant, backend.principal.Subject, input.JobID)
 	if err != nil {
 		return nil, backend.safeError(err)
@@ -133,6 +136,9 @@ func (backend *remoteMCPBackend) GetQuery(_ context.Context, input mcpbridge.Job
 }
 
 func (backend *remoteMCPBackend) CancelQuery(_ context.Context, input mcpbridge.JobInput) (json.RawMessage, error) {
+	if backend.server.deps.Jobs == nil {
+		return nil, backend.safeError(queryEngineDisabled())
+	}
 	result, err := backend.server.deps.Jobs.Cancel(backend.principal.Tenant, backend.principal.Subject, input.JobID)
 	if err != nil && !errors.Is(err, application.ErrJobFinished) {
 		return nil, backend.safeError(err)
@@ -141,6 +147,9 @@ func (backend *remoteMCPBackend) CancelQuery(_ context.Context, input mcpbridge.
 }
 
 func (backend *remoteMCPBackend) activeQueryInput(ctx context.Context, input mcpbridge.QueryInput) (application.QueryInput, error) {
+	if backend.server.deps.Queries == nil {
+		return application.QueryInput{}, backend.safeError(queryEngineDisabled())
+	}
 	ctx, cancel := context.WithTimeout(ctx, backend.server.config.ControlTimeout)
 	defer cancel()
 	scope := application.QueryScope{Namespace: input.Namespace, Context: backend.requestContext()}

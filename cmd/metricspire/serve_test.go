@@ -24,7 +24,7 @@ import (
 func TestLoadServeEnvironmentRejectsMissingAndPartialSecrets(t *testing.T) {
 	values := map[string]string{}
 	getenv := func(name string) string { return values[name] }
-	if _, err := loadServeEnvironment(getenv, runtimeconfig.AuthenticationOIDC); err == nil || !strings.Contains(err.Error(), "METRICSPIRE_DATABASE_URL") {
+	if _, err := loadServeEnvironment(getenv, runtimeconfig.Config{Authentication: runtimeconfig.AuthenticationConfig{Provider: runtimeconfig.AuthenticationOIDC}}); err == nil || !strings.Contains(err.Error(), "METRICSPIRE_DATABASE_URL") {
 		t.Fatalf("missing database URL error = %v", err)
 	}
 	values["METRICSPIRE_DATABASE_URL"] = "postgres://localhost/metricspire"
@@ -32,11 +32,11 @@ func TestLoadServeEnvironmentRejectsMissingAndPartialSecrets(t *testing.T) {
 	values["DATABRICKS_HOST"] = "https://workspace.example"
 	values["DATABRICKS_SQL_WAREHOUSE_ID"] = "warehouse"
 	values["DATABRICKS_CLIENT_ID"] = "client"
-	if _, err := loadServeEnvironment(getenv, runtimeconfig.AuthenticationOIDC); err == nil || !strings.Contains(err.Error(), "must both be set") {
+	if _, err := loadServeEnvironment(getenv, runtimeconfig.Config{Authentication: runtimeconfig.AuthenticationConfig{Provider: runtimeconfig.AuthenticationOIDC}}); err == nil || !strings.Contains(err.Error(), "must both be set") {
 		t.Fatalf("partial Databricks OAuth error = %v", err)
 	}
 	values["DATABRICKS_CLIENT_SECRET"] = "secret"
-	environment, err := loadServeEnvironment(getenv, runtimeconfig.AuthenticationOIDC)
+	environment, err := loadServeEnvironment(getenv, runtimeconfig.Config{Authentication: runtimeconfig.AuthenticationConfig{Provider: runtimeconfig.AuthenticationOIDC}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestLoadServeEnvironmentForAppsDoesNotAcceptOrRequireServiceCredentialFallb
 		"METRICSPIRE_DATABASE_URL": "postgres://localhost/metricspire",
 		"DATABRICKS_HOST":          "https://workspace.example", "DATABRICKS_SQL_WAREHOUSE_ID": "warehouse",
 	}
-	environment, err := loadServeEnvironment(func(name string) string { return values[name] }, runtimeconfig.AuthenticationDatabricksApps)
+	environment, err := loadServeEnvironment(func(name string) string { return values[name] }, runtimeconfig.Config{Authentication: runtimeconfig.AuthenticationConfig{Provider: runtimeconfig.AuthenticationDatabricksApps}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestLoadServeEnvironmentForAppsAcceptsExactlyOneLakebaseConfiguration(t *te
 		"DATABRICKS_SQL_WAREHOUSE_ID":   "warehouse",
 	}
 	getenv := func(name string) string { return values[name] }
-	environment, err := loadServeEnvironment(getenv, runtimeconfig.AuthenticationDatabricksApps)
+	environment, err := loadServeEnvironment(getenv, runtimeconfig.Config{Authentication: runtimeconfig.AuthenticationConfig{Provider: runtimeconfig.AuthenticationDatabricksApps}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,12 +74,12 @@ func TestLoadServeEnvironmentForAppsAcceptsExactlyOneLakebaseConfiguration(t *te
 		t.Fatalf("Apps Lakebase environment = %#v", environment)
 	}
 	values["METRICSPIRE_DATABASE_URL"] = "postgres://localhost/metricspire"
-	if _, err := loadServeEnvironment(getenv, runtimeconfig.AuthenticationDatabricksApps); err == nil || !strings.Contains(err.Error(), "exactly one") {
+	if _, err := loadServeEnvironment(getenv, runtimeconfig.Config{Authentication: runtimeconfig.AuthenticationConfig{Provider: runtimeconfig.AuthenticationDatabricksApps}}); err == nil || !strings.Contains(err.Error(), "exactly one") {
 		t.Fatalf("ambiguous Apps database configuration error = %v", err)
 	}
 	delete(values, "METRICSPIRE_DATABASE_URL")
 	delete(values, "METRICSPIRE_LAKEBASE_ENDPOINT")
-	if _, err := loadServeEnvironment(getenv, runtimeconfig.AuthenticationDatabricksApps); err == nil || !strings.Contains(err.Error(), "exactly one") {
+	if _, err := loadServeEnvironment(getenv, runtimeconfig.Config{Authentication: runtimeconfig.AuthenticationConfig{Provider: runtimeconfig.AuthenticationDatabricksApps}}); err == nil || !strings.Contains(err.Error(), "exactly one") {
 		t.Fatalf("missing Apps database configuration error = %v", err)
 	}
 }
@@ -382,5 +382,28 @@ func TestServeStartsOIDCLoginAndStopsGracefullyWithPostgres(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve did not stop")
+	}
+}
+
+func TestPortableEnvironmentOnlyRequiresSelectedDependencies(t *testing.T) {
+	c := runtimeconfig.Config{Authentication: runtimeconfig.AuthenticationConfig{Provider: runtimeconfig.AuthenticationOIDC}, QueryEngine: runtimeconfig.QueryEngineConfig{Driver: "disabled"}, Storage: runtimeconfig.StorageConfig{DatabaseURLEnv: "CUSTOM_METADATA"}}
+	values := map[string]string{"CUSTOM_METADATA": "postgres://localhost/test", "METRICSPIRE_SESSION_KEY": base64.StdEncoding.EncodeToString(make([]byte, 32))}
+	get := func(k string) string { return values[k] }
+	if _, err := loadServeEnvironment(get, c); err != nil {
+		t.Fatal(err)
+	}
+	c.Exploration = &runtimeconfig.ExplorationConfig{WarehouseID: "analysis"}
+	if _, err := loadServeEnvironment(get, c); err == nil {
+		t.Fatal("exploration accepted missing Databricks host/auth")
+	}
+	values["DATABRICKS_HOST"], values["DATABRICKS_TOKEN"] = "https://workspace.example", "synthetic-token"
+	if _, err := loadServeEnvironment(get, c); err != nil {
+		t.Fatalf("exploration-only incorrectly requires metric warehouse: %v", err)
+	}
+	c.Exploration = nil
+	c.Authentication.Provider = runtimeconfig.AuthenticationDatabricksApps
+	delete(values, "DATABRICKS_HOST")
+	if _, err := loadServeEnvironment(get, c); err == nil {
+		t.Fatal("Apps authentication accepted missing workspace host")
 	}
 }

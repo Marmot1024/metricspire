@@ -49,11 +49,14 @@ type Server struct {
 }
 
 func NewServer(config Config, dependencies Dependencies, logger *slog.Logger) (*Server, error) {
+	if (dependencies.Queries == nil) != (dependencies.Jobs == nil) {
+		return nil, errors.New("query service and job service must be configured together")
+	}
 	if (dependencies.Analysis != nil || dependencies.AnalysisJobs != nil || dependencies.AnalysisCatalogs != nil) && (dependencies.Analysis == nil || dependencies.AnalysisJobs == nil || dependencies.AnalysisCatalogs == nil) {
 		return nil, errors.New("analysis service, jobs and catalogs must be configured together")
 	}
-	if dependencies.Authenticator == nil || dependencies.Readiness == nil || dependencies.Management == nil || dependencies.Catalog == nil || dependencies.CatalogSearch == nil || dependencies.Governance == nil || dependencies.Bindings == nil || dependencies.Queries == nil || dependencies.Jobs == nil {
-		return nil, errors.New("authenticator, readiness checker, management service, catalog reader, catalog searcher, governance service, binding resolver, query service, and job service are required")
+	if dependencies.Authenticator == nil || dependencies.Readiness == nil || dependencies.Management == nil || dependencies.Catalog == nil || dependencies.CatalogSearch == nil || dependencies.Governance == nil || dependencies.Bindings == nil {
+		return nil, errors.New("authenticator, readiness checker, management service, catalog reader, catalog searcher, governance service, binding resolver are required")
 	}
 	if config.MaxBodyBytes == 0 {
 		config.MaxBodyBytes = DefaultMaxBodyBytes
@@ -107,29 +110,46 @@ func (server *Server) routes() {
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/releases", server.handleReleases)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/rollback", server.handleRollback)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/deactivate", server.handleDeactivate)
-	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/explain", server.handleExplain)
-	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/plan", server.handlePlan)
-	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/query", server.handleQuery)
-	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/draft-explain", server.handleDraftExplain)
-	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/draft-plan", server.handleDraftPlan)
-	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/draft-query", server.handleDraftQuery)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/explain", server.queryRoute(server.handleExplain))
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/plan", server.queryRoute(server.handlePlan))
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/query", server.queryRoute(server.handleQuery))
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/draft-explain", server.queryRoute(server.handleDraftExplain))
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/draft-plan", server.queryRoute(server.handleDraftPlan))
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/models/{model}/draft-query", server.queryRoute(server.handleDraftQuery))
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/governance/metrics", server.handleGovernanceMetrics)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/governance/imports", server.handleGovernanceImports)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/governance/imports/{import}", server.handleGovernanceImport)
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/governance/imports/{import}/rollback", server.handleGovernanceImportRollback)
-	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/explain", server.handleMetricExplain)
-	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/plan", server.handleMetricPlan)
-	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/query", server.handleMetricQuery)
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/explain", server.queryRoute(server.handleMetricExplain))
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/plan", server.queryRoute(server.handleMetricPlan))
+	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/query", server.queryRoute(server.handleMetricQuery))
 	server.mux.HandleFunc(APIPrefix+"/namespaces/{namespace}/online-query", server.handleOnlineQuery)
 	server.mux.HandleFunc(APIPrefix+"/catalog/index", server.handleCatalogIndex)
 	server.mux.HandleFunc(APIPrefix+"/catalog/detail", server.handleCatalogDetail)
 	server.mux.HandleFunc(APIPrefix+"/catalog/search", server.handleCatalogSearch)
 	server.mux.HandleFunc(APIPrefix+"/ui/context", server.handleUIContext)
-	server.mux.HandleFunc(APIPrefix+"/jobs/{job}", server.handleJob)
-	server.mux.HandleFunc(APIPrefix+"/jobs/{job}/cancel", server.handleJobCancel)
+	server.mux.HandleFunc(APIPrefix+"/jobs/{job}", server.queryRoute(server.handleJob))
+	server.mux.HandleFunc(APIPrefix+"/jobs/{job}/cancel", server.queryRoute(server.handleJobCancel))
 	server.mux.HandleFunc("/assets/app.js", server.handleUIAsset)
 	server.mux.HandleFunc("/assets/app.css", server.handleUIAsset)
 	server.mux.HandleFunc("/", server.handleRoot)
+}
+
+// Disabled engines do not construct clients, jobs or execution credentials.
+func (server *Server) queryRoute(handler http.HandlerFunc) http.HandlerFunc {
+	if server.deps.Queries != nil {
+		return handler
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := server.authorize(w, r, PermissionQuery); !ok {
+			return
+		}
+		server.handleError(w, r, queryEngineDisabled())
+	}
+}
+
+func queryEngineDisabled() error {
+	return &model.Problem{Code: "query_engine_disabled", Message: "the analytical query engine is disabled; online serving uses its separately configured HTTP endpoint"}
 }
 
 func (server *Server) handleUIContext(response http.ResponseWriter, request *http.Request) {
@@ -1023,7 +1043,7 @@ func (server *Server) handleError(response http.ResponseWriter, request *http.Re
 		case "online_overloaded":
 			status = http.StatusTooManyRequests
 			response.Header().Set("Retry-After", "1")
-		case "online_not_enabled":
+		case "online_not_enabled", "query_engine_disabled":
 			status = http.StatusNotFound
 		case "online_data_unavailable", "online_data_stale", "online_engine_unavailable":
 			status = http.StatusServiceUnavailable

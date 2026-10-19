@@ -1,5 +1,10 @@
 api_version: metricspire.io/v1alpha1
 kind: RuntimeConfig
+# Omitted values retain these backwards-compatible defaults.
+storage:
+  driver: postgres
+query_engine:
+  driver: databricks_sql
 # Optional: business names and reviewed external catalog artifacts.
 # domains_path: ../config/local/domains.yaml
 http:

@@ -1,5 +1,7 @@
 <p align="center"><img src="docs/assets/metricspire-mark.svg" width="44" height="44" alt="MetricSpire"></p>
 
+仅使用 PostgreSQL 启动与引擎配置：[运行时引擎](docs/runtime-engines.md)。
+
 <h1 align="center">MetricSpire</h1>
 
 <p align="center"><strong>指标库与数据服务，通过 MCP 连接 AI。</strong></p>
