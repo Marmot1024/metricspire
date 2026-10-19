@@ -58,6 +58,9 @@ func setupOnlinePostgresWithApps(t *testing.T, apps bool) *onlineIntegrationFixt
 	t.Helper()
 	raw := os.Getenv("METRICSPIRE_ONLINE_TEST_DATABASE_URL")
 	if raw == "" {
+		if os.Getenv("METRICSPIRE_REQUIRE_POSTGRES_TESTS") == "1" {
+			t.Fatal("PostgreSQL integration tests are required but METRICSPIRE_ONLINE_TEST_DATABASE_URL is unset")
+		}
 		t.Skip("set METRICSPIRE_ONLINE_TEST_DATABASE_URL to a disposable loopback PostgreSQL database")
 	}
 	parsed, err := url.Parse(raw)

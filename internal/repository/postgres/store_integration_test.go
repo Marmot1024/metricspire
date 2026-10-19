@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -19,17 +18,9 @@ import (
 )
 
 func TestPostgresCatalogLifecycleAndOptimisticConcurrency(t *testing.T) {
-	databaseURL := os.Getenv("METRICSPIRE_TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("METRICSPIRE_TEST_DATABASE_URL is not set")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	store, err := postgres.Open(ctx, databaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
+	store := isolatedPostgres(t)
 	if err := postgres.Migrate(ctx, store.Pool()); err != nil {
 		t.Fatal(err)
 	}

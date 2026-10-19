@@ -16,6 +16,20 @@ jobs:
       fail-fast: false
       matrix:
         go: ['1.26.x', '1.27.x']
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: metricspire_test
+          POSTGRES_PASSWORD: ci-only-disposable
+          POSTGRES_DB: metricspire_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U metricspire_test -d metricspire_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -32,7 +46,12 @@ jobs:
       - run: python3 -m unittest tools/test_deploy_staging.py
       - run: python3 -m unittest discover -s deploy/databricks-apps -p test_render.py
       - run: go mod verify
-      - run: go test -race ./...
+      - name: Test with real PostgreSQL (catalog and online HTTP)
+        env:
+          METRICSPIRE_REQUIRE_POSTGRES_TESTS: '1'
+          METRICSPIRE_TEST_DATABASE_URL: postgres://metricspire_test:ci-only-disposable@127.0.0.1:5432/metricspire_test?sslmode=disable
+          METRICSPIRE_ONLINE_TEST_DATABASE_URL: postgres://metricspire_test:ci-only-disposable@127.0.0.1:5432/metricspire_test?sslmode=disable
+        run: go test -race -count=1 -v ./...
       - run: go vet ./...
       - run: CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' ./cmd/metricspire
       - name: Build and smoke-test the restricted Docker context
