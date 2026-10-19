@@ -157,13 +157,14 @@ type Config struct {
 	MCPVersion             string
 	TrialReleaseNamespaces []string // explicit deployment opt-in; business verification stays unverified
 	UIModels               []UIModelRoute
-	UISourcePrefixes       map[string]string // non-secret default catalog.schema per namespace, if unambiguous
+	UISourcePrefixes       map[string]string // manager-only catalog.schema defaults, scoped to tenant model routes
 	RequestID              func() string
 }
 
 // UIModelRoute is the small, non-secret route list required by the embedded
 // product UI. Physical bindings and policy contents are never exposed here.
 type UIModelRoute struct {
+	Tenant    string `json:"-"` // trusted policy route; never supplied by the client
 	Namespace string `json:"namespace"`
 	ModelName string `json:"model_name"`
 }

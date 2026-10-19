@@ -16,7 +16,9 @@ When configured on hosted MCP, `list_namespaces` adds `business_domains`: author
 names and aliases mapped to canonical namespaces. Use these instead of asking
 users for repository URLs; source provenance, artifact paths and physical
 bindings are not included. Operators configure them in [team configuration](../config/README.md).
-The legacy local `mcp --api-url` bridge returns canonical namespaces only.
+Hosted namespace discovery uses the authenticated tenant and roles to find accessible active metrics or exploration sources; a configured route alone is not an access grant. It does not query the data engine.
+
+The legacy local `mcp --api-url` bridge returns canonical namespaces from the same filtered UI context (including tenant-scoped authoring routes for managers).
 
 Search returns `selection.candidate_count`, `at_limit` and next-step guidance.
 A full result page can omit candidates; even one lexical match is not proof of

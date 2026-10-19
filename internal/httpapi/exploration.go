@@ -14,27 +14,6 @@ import (
 
 type analysisMCPBackend struct{ *remoteMCPBackend }
 
-func (b *analysisMCPBackend) ListNamespaces(ctx context.Context) ([]string, error) {
-	namespaces, err := b.remoteMCPBackend.ListNamespaces(ctx)
-	if err != nil {
-		return nil, err
-	}
-	extra, err := b.server.deps.AnalysisCatalogs.Namespaces(ctx, b.requestContext())
-	if err != nil {
-		return nil, b.analysisSafeError(err)
-	}
-	for _, name := range extra {
-		found := false
-		for _, existing := range namespaces {
-			found = found || existing == name
-		}
-		if !found {
-			namespaces = append(namespaces, name)
-		}
-	}
-	return namespaces, nil
-}
-
 func (s *Server) analysisRoutes() {
 	if s.deps.Analysis == nil {
 		return

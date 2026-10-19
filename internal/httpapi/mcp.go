@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/marmot1024/metricspire/internal/application"
@@ -24,6 +25,12 @@ type remoteMCPBackend struct {
 	server    *Server
 	request   *http.Request
 	principal Principal
+
+	// This backend belongs to one authenticated HTTP request. Reuse discovery
+	// for namespaces and aliases only within that request, never across users.
+	namespaceOnce sync.Once
+	namespaces    []string
+	namespaceErr  error
 }
 
 func (server *Server) handleMCP(response http.ResponseWriter, request *http.Request) {
@@ -46,8 +53,11 @@ func (backend *remoteMCPBackend) requestContext() model.RequestContext {
 	}
 }
 
-func (backend *remoteMCPBackend) ListNamespaces(context.Context) ([]string, error) {
-	return configuredUINamespaces(backend.server.config.UIModels), nil
+func (backend *remoteMCPBackend) ListNamespaces(ctx context.Context) ([]string, error) {
+	backend.namespaceOnce.Do(func() {
+		backend.namespaces, backend.namespaceErr = backend.server.queryNamespaces(ctx, backend.principal, backend.requestContext())
+	})
+	return append([]string{}, backend.namespaces...), backend.safeError(backend.namespaceErr)
 }
 
 func (backend *remoteMCPBackend) SearchMetrics(ctx context.Context, input mcpbridge.SearchInput) ([]application.MetricCatalogEntry, error) {

@@ -966,8 +966,8 @@ func TestHTTPUIContextUsesAuthenticatedIdentityAndConfiguredModels(t *testing.T)
 	handler, _, _ := newTestServer(t, httpapi.Config{
 		AuthenticationProfile: "databricks_apps",
 		UIModels: []httpapi.UIModelRoute{
-			{Namespace: "acceptance", ModelName: "tpch_orders"},
-			{Namespace: "demo", ModelName: "commerce"},
+			{Tenant: "demo", Namespace: "acceptance", ModelName: "tpch_orders"},
+			{Tenant: "demo", Namespace: "demo", ModelName: "commerce"},
 		},
 		RequestID: func() string { return "req_ui_context" },
 	})
@@ -984,7 +984,7 @@ func TestHTTPUIContextUsesAuthenticatedIdentityAndConfiguredModels(t *testing.T)
 	decodeResponse(t, response, &context)
 	if context.AuthenticationProfile != "databricks_apps" || context.DisplayName != "Analyst" ||
 		len(context.Permissions) != 1 || context.Permissions[0] != httpapi.PermissionQuery ||
-		len(context.Namespaces) != 2 || context.Namespaces[0] != "acceptance" || len(context.Models) != 0 {
+		len(context.Namespaces) != 1 || context.Namespaces[0] != "demo" || len(context.Models) != 0 {
 		t.Fatalf("UI context = %#v", context)
 	}
 
