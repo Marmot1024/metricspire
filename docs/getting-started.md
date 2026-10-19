@@ -1,13 +1,24 @@
 # Getting started
 
-MetricSpire is a Go service backed by PostgreSQL for catalog state and an analytical engine for data queries. The steps below separate an **offline semantic-plan demo** from a **local catalog workflow**; neither is a production deployment.
+Choose the path that matches your goal:
 
-## Prerequisites
+- **Use an existing team service:** start with the [Codex installer](mcp-installer.md#get-the-installer), [other MCP clients](mcp.md#connect), or your team's web metric catalog. You do not need Go, Docker or this repository.
+- **Learn how metric definitions work:** follow the offline example below. You will generate a query plan without connecting to data.
+- **Operate a service:** read [service setup](#run-the-http-service) for the required database, identity provider and warehouse configuration. The offline example alone does not set these up.
+
+## Prerequisites for the local examples
 
 - Go 1.26 or 1.27
 - Docker with Compose, only for the PostgreSQL workflow
 
-All commands run from the repository root. The `dist/` directory contains generated local artifacts.
+Clone the repository if you have not already done so:
+
+```bash
+git clone https://github.com/Marmot1024/metricspire.git
+cd metricspire
+```
+
+Run the following commands from the repository root. The `dist/` directory contains generated local artifacts.
 
 ## Compile and inspect a plan without a database
 
@@ -36,7 +47,9 @@ go run ./cmd/metricspire plan \
   --physical-out dist/demo/physical-plan.json
 ```
 
-Open `dist/demo/logical-plan.json` to inspect semantic resolution and `dist/demo/physical-plan.json` to see the reviewed binding and capability checks. The example's `context.json` is trusted **only** in this offline CLI path. HTTP and MCP callers cannot submit their own tenant, identity, policy, binding, release, engine, or SQL.
+On success, the commands create four JSON files in `dist/demo/`: the compiled definition (`manifest.json`), access rules (`policy-bundle.json`), metric calculation plan (`logical-plan.json`) and data-access plan (`physical-plan.json`).
+
+This example requests average order value and refund rate, grouped by day and customer segment, filtered to the east and south regions. Open `logical-plan.json` to inspect the selected metrics, grouping and time range, then `physical-plan.json` to inspect the approved table mappings. **There are no revenue rows or other data results:** the example plans the query but does not execute it. The example's `context.json` is trusted **only** in this offline CLI path. HTTP and MCP callers cannot submit their own tenant, identity, policy, binding, release, engine, or SQL.
 
 ## Try the catalog lifecycle locally
 
@@ -66,15 +79,20 @@ file, business names/aliases and checksum-verified semantic exports. The
 
 ## Run the HTTP service
 
+Before starting, prepare a PostgreSQL database for catalog state, an identity provider and an analytical engine with reviewed bindings and user access. Databricks SQL is the current analytical adapter. The [Databricks Apps package](../deploy/databricks-apps/README.md) is a dedicated staging path; portable OIDC hosting is configurable but still needs deployment acceptance.
+
 `metricspire serve --config <runtime.yaml>` assembles the catalog, identity, query, audit, job, UI, and engine adapters. Start from the non-secret [portable OIDC example](../examples/runtime.example.yaml) or the [Databricks Apps example](../examples/runtime.databricks-apps.example.yaml); supply secrets through the environment or deployment platform, not the config file.
 
-Run `metricspire migrate` as a separate operation before serving. The server never migrates PostgreSQL or creates analytical tables on startup. `GET /health/live` checks only the process; `GET /health/ready` checks only PostgreSQL. Neither proves a warehouse query succeeded.
+Run `metricspire migrate` as a separate operation before serving. The server never migrates PostgreSQL or creates analytical tables on startup. `GET /health/live` checks only the process; `GET /health/ready` checks the control PostgreSQL pool and, when online queries are enabled, their separate PostgreSQL pool. Neither proves warehouse access or snapshot freshness.
+
+After starting, open the configured service URL and sign in. A query user starts in the metric catalog; a maintainer can manage definitions. Verify one published metric through a successful bounded query using the intended user before considering that environment usable.
 
 The [Dockerfile](../Dockerfile) builds a non-root static-binary image. It is the self-hosted packaging path; the Databricks Apps staging package has a separate bootstrap and resource contract in [`deploy/databricks-apps`](../deploy/databricks-apps/README.md).
 
 ## Verify a change
 
 ```bash
+python3 tools/check_docs.py
 node --test internal/httpapi/ui/app_test.js
 go test ./...
 go test -race ./...

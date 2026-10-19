@@ -36,7 +36,27 @@ Model-scoped explain, plan, and query routes exist for existing clients; new cli
 
 Catalog search returns the semantic model name, entity, typed metric expression, dimensions, time contract, ownership, and verification metadata that an authorized user needs to understand a metric. It deliberately omits the trusted source binding and physical resource. A client that needs table and column lineage should send a bounded semantic query to `POST /namespaces/{namespace}/plan`; planning resolves the authorized binding and returns the physical plan without executing SQL or contacting the analytical engine.
 
-Catalog search returns the semantic model name, entity, typed metric expression, dimensions, time contract, ownership, and verification metadata that an authorized user needs to understand a metric. It deliberately omits the trusted source binding and physical resource. A client that needs table and column lineage should send a bounded semantic query to `POST /namespaces/{namespace}/plan`; planning resolves the authorized binding and returns the physical plan without executing SQL or contacting the analytical engine.
+## Example: query a published metric
+
+An authenticated client sends a `SemanticQuery` directly as the JSON body. For an instance with the public TPCH model published in `acceptance`, send the following to `POST /api/v1/namespaces/acceptance/query`:
+
+```json
+{
+  "api_version": "metricspire.io/v1alpha1",
+  "kind": "SemanticQuery",
+  "metrics": ["gross_revenue", "order_count", "average_order_value"],
+  "group_by": ["customer_segment", "order_status"],
+  "filters": [
+    {"dimension": "order_id", "operator": "in", "values": ["1", "2", "3", "4", "5"]}
+  ],
+  "order_by": [{"field": "average_order_value", "direction": "desc"}],
+  "limit": 10
+}
+```
+
+This is the repository's [sample query](../testdata/acceptance/databricks-tpch/query.json). It requires the matching published [model](../testdata/acceptance/databricks-tpch/model.yaml), binding and permissions; copying the request does not install that fixture. Use the authentication method configured for your deployment.
+
+Submission returns `202` with a job ID, not result rows. Keep that ID and use `GET /api/v1/jobs/{job}` until the job succeeds or fails. The successful result includes column types and row values; see the [expected fixture result](../testdata/acceptance/databricks-tpch/expected.json). Do not resubmit a query to wait for an existing job. To inspect meaning or planning without executing, send the same body to the namespace's `/explain` or `/plan` endpoint instead.
 
 ## Request, result, and audit limits
 
