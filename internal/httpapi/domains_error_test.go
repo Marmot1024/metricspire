@@ -33,13 +33,17 @@ func TestBusinessDomainDiscoveryPreservesSearchErrorClassification(t *testing.T)
 	} {
 		t.Run(test.code, func(t *testing.T) {
 			backend := &remoteMCPBackend{
-				principal: Principal{Tenant: "demo"},
+				principal: Principal{Tenant: "demo", Permissions: []Permission{PermissionQuery}},
 				request:   httptest.NewRequest("POST", "/api/v1/mcp", nil),
 				server: &Server{
 					config: Config{ControlTimeout: time.Second, BusinessDomains: []runtimeconfig.BusinessDomain{{Tenant: "demo", Namespace: "demo", DisplayName: "Demo"}}},
 					deps:   Dependencies{CatalogSearch: failingDomainSearch{err: test.err}},
 					logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 				},
+			}
+			names, err := backend.ListNamespaces(t.Context())
+			if err == nil || !strings.Contains(err.Error(), test.code) || strings.Contains(err.Error(), "private upstream detail") || len(names) != 0 {
+				t.Fatalf("expected classified namespace failure; names=%v error=%v", names, err)
 			}
 			views, err := backend.ListBusinessDomains(t.Context())
 			if err == nil || !strings.Contains(err.Error(), test.code) || strings.Contains(err.Error(), "private upstream detail") || len(views) != 0 {

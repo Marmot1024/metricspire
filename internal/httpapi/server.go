@@ -145,27 +145,26 @@ func (server *Server) handleUIContext(response http.ResponseWriter, request *htt
 	if displayName == "" {
 		displayName = principal.Subject
 	}
-	models := []UIModelRoute(nil)
-	namespaces := configuredUINamespaces(server.config.UIModels)
-	if principal.Has(PermissionQuery) && server.deps.AnalysisCatalogs != nil {
-		rc := model.RequestContext{Tenant: principal.Tenant, Principal: principal.Subject, Roles: principal.Roles, RequestID: requestID(request)}
-		extra, err := server.deps.AnalysisCatalogs.Namespaces(request.Context(), rc)
-		if err != nil {
-			server.analysisError(response, request, err)
-			return
-		}
-		for _, name := range extra {
-			found := false
-			for _, existing := range namespaces {
-				found = found || existing == name
-			}
-			if !found {
-				namespaces = append(namespaces, name)
-			}
-		}
+	rc := model.RequestContext{Tenant: principal.Tenant, Principal: principal.Subject, Roles: principal.Roles, RequestID: requestID(request)}
+	namespaces, err := server.queryNamespaces(request.Context(), principal, rc)
+	if err != nil {
+		server.handleError(response, request, err)
+		return
 	}
+	models := []UIModelRoute(nil)
+	prefixes := map[string]string{}
 	if principal.Has(PermissionManage) {
-		models = append(models, server.config.UIModels...)
+		// Management discovery includes draft/empty routes, but only for the
+		// authenticated tenant. Query authorization is checked separately above.
+		for _, route := range server.config.UIModels {
+			if route.Tenant != "" && route.Tenant == principal.Tenant {
+				models = append(models, route)
+				if prefix := server.config.UISourcePrefixes[route.Namespace]; prefix != "" {
+					prefixes[route.Namespace] = prefix
+				}
+			}
+		}
+		namespaces = appendUniqueNamespaces(namespaces, configuredUINamespaces(models)...)
 	}
 	_ = writeJSON(response, http.StatusOK, UIContext{
 		AuthenticationProfile: server.config.AuthenticationProfile,
@@ -173,7 +172,7 @@ func (server *Server) handleUIContext(response http.ResponseWriter, request *htt
 		Permissions:           append([]Permission(nil), principal.Permissions...),
 		Namespaces:            namespaces,
 		Models:                models,
-		SourcePrefixes:        server.config.UISourcePrefixes,
+		SourcePrefixes:        prefixes,
 	})
 }
 

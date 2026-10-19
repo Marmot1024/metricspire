@@ -160,17 +160,23 @@ func TestDatabricksAppsRuntimeExampleLoadsFailClosedProfile(t *testing.T) {
 	}
 }
 
-func TestConfiguredUIModelsKeepsRouteOrderAndRemovesDuplicates(t *testing.T) {
-	routes := []runtimeconfig.BindingRoute{
-		{Namespace: "acceptance", ModelName: "tpch_orders"},
+func TestConfiguredUIModelsRequiresMatchingBindingAndTenantPolicy(t *testing.T) {
+	bindings := []runtimeconfig.BindingRoute{
 		{Namespace: "demo", ModelName: "commerce"},
-		{Namespace: "acceptance", ModelName: "tpch_orders"},
+		{Namespace: "unscoped", ModelName: "commerce"},
+	}
+	policies := []runtimeconfig.PolicyRoute{
+		{Tenant: "demo", Namespace: "demo", ModelName: "commerce"},
+		{Tenant: "other", Namespace: "demo", ModelName: "commerce"},
+		{Tenant: "demo", Namespace: "demo", ModelName: "commerce"},
+		{Tenant: "demo", Namespace: "unbound", ModelName: "commerce"},
+		{Namespace: "unscoped", ModelName: "commerce"},
 	}
 	want := []httpapi.UIModelRoute{
-		{Namespace: "acceptance", ModelName: "tpch_orders"},
-		{Namespace: "demo", ModelName: "commerce"},
+		{Tenant: "demo", Namespace: "demo", ModelName: "commerce"},
+		{Tenant: "other", Namespace: "demo", ModelName: "commerce"},
 	}
-	got := configuredUIModels(routes)
+	got := configuredUIModels(bindings, policies)
 	if len(got) != len(want) {
 		t.Fatalf("configuredUIModels() = %#v", got)
 	}

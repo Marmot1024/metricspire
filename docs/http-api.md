@@ -32,6 +32,8 @@ metrics. They require `query:execute` and have separate execution budgets.
 | `query:execute` | `GET /jobs/{job}` | Read a job owned by the same tenant and principal. |
 | `query:execute` | `POST /jobs/{job}/cancel` | Cancel an owned job. |
 
+`GET /ui/context` lists query namespaces only when the authenticated tenant and roles can discover at least one active metric or exploration source. Configured aliases and routes do not grant access. Managers additionally see configured model routes (including unpublished models) matched to their tenant's policy and binding routes. Physical `source_prefixes` are returned only for those management routes; query-only callers receive no physical defaults. This discovery filtering does not introduce model-scoped authorization for the management endpoints, whose permission remains `model:manage`.
+
 Model-scoped explain, plan, and query routes exist for existing clients; new clients should use the metric-first namespace routes. `GET /health/live` and `GET /health/ready` are unauthenticated probes outside `/api/v1`; readiness checks the control PostgreSQL pool and the online pool if enabled, not warehouse access or snapshot freshness.
 
 Catalog search returns the semantic model name, entity, typed metric expression, dimensions, time contract, ownership, and verification metadata that an authorized user needs to understand a metric. It deliberately omits the trusted source binding and physical resource. A client that needs table and column lineage should send a bounded semantic query to `POST /namespaces/{namespace}/plan`; planning resolves the authorized binding and returns the physical plan without executing SQL or contacting the analytical engine.
