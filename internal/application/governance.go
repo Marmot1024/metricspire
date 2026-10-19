@@ -151,7 +151,9 @@ func changedMetricFields(before, after model.Metric) ([]string, bool) {
 	add("deprecated", before.Deprecated != after.Deprecated)
 	add("verification", !reflect.DeepEqual(before.Verification, after.Verification))
 
-	breaking := before.ExternalCode != "" && externalCodeChanged
+	definitionChanged := !reflect.DeepEqual(before.Definition, after.Definition)
+	add("definition", definitionChanged)
+	breaking := (before.ExternalCode != "" && externalCodeChanged) || (before.Definition != nil && definitionChanged)
 	addExecution := func(name string, changed bool) {
 		add(name, changed)
 		breaking = breaking || changed

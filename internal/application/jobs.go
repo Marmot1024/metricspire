@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -81,6 +82,7 @@ func (manager *JobManager) Submit(submissionContext context.Context, input Query
 		expected := *input.ExpectedPlan
 		input.ExpectedPlan = &expected
 	}
+	input.Query.MetricSelections = maps.Clone(input.Query.MetricSelections)
 	now := time.Now().UTC()
 	id := manager.newID()
 	jobParent := executionauth.PropagateAccessToken(manager.parent, submissionContext)

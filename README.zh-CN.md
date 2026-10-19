@@ -2,6 +2,8 @@
 
 仅使用 PostgreSQL 启动与引擎配置：[运行时引擎](docs/runtime-engines.md)。
 
+结构化口径选择：[指标定义](docs/metric-definitions.md)。
+
 <h1 align="center">MetricSpire</h1>
 
 <p align="center"><strong>指标库与数据服务，通过 MCP 连接 AI。</strong></p>

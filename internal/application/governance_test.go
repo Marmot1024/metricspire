@@ -129,3 +129,46 @@ func readGovernanceContract[T any](t *testing.T, name string) T {
 	}
 	return value
 }
+
+func TestGovernanceReviewIncludesDefinitionAddChangeAndRemoval(t *testing.T) {
+	for _, operation := range []string{"add", "change", "remove"} {
+		t.Run(operation, func(t *testing.T) {
+			source := readGovernanceContract[model.SemanticSource](t, "model.yaml")
+			define := func() {
+				for i := range source.Spec.Metrics {
+					source.Spec.Metrics[i].Definition = &model.MetricDefinition{Family: "orders", Variant: source.Spec.Metrics[i].Name, Population: "Synthetic orders", Exclusions: []string{}, Numerator: "Reviewed aggregate", Denominator: "Reviewed formula", CountingUnit: "Order", TimeBasis: "Creation date"}
+				}
+			}
+			if operation != "add" {
+				define()
+			}
+			manifest, err := compiler.Compile(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			active := &catalog.Release{Manifest: manifest, ManifestFingerprint: manifest.Fingerprint}
+			switch operation {
+			case "add":
+				define()
+			case "change":
+				source.Spec.Metrics[0].Definition.Population = "Different population"
+			case "remove":
+				for i := range source.Spec.Metrics {
+					source.Spec.Metrics[i].Definition = nil
+				}
+			}
+			review, err := application.ReviewGovernance(source, active, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(review.MetricChanges) == 0 {
+				t.Fatal("definition-only change hidden from review")
+			}
+			for _, c := range review.MetricChanges {
+				if len(c.Fields) != 1 || c.Fields[0] != "definition" || c.Breaking != (operation != "add") {
+					t.Fatalf("wrong definition review: %+v", c)
+				}
+			}
+		})
+	}
+}

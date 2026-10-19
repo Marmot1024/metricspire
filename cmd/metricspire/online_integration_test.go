@@ -36,24 +36,28 @@ import (
 // Exercise runServe itself, not just a manually assembled service. All identity,
 // Warehouse and business data fixtures are synthetic and loopback-only.
 func TestServeOnlinePostgresWithOIDCAndSeparateAnalyticalRoute(t *testing.T) {
-	testServeOnlinePostgres(t, "", false, false)
+	testServeOnlinePostgres(t, "", false, false, false)
 }
 
 func TestServeOnlinePostgresWithoutDatabricks(t *testing.T) {
-	testServeOnlinePostgres(t, "", false, true)
+	testServeOnlinePostgres(t, "", false, true, false)
+}
+
+func TestServeOnlinePostgresStructuredChoices(t *testing.T) {
+	testServeOnlinePostgres(t, "", false, true, true)
 }
 
 func TestServeOnlinePostgresRejectsWriteCredential(t *testing.T) {
 	for _, privilege := range []string{"UPDATE", "INSERT(revenue)", "UPDATE(revenue)", "REFERENCES(revenue)"} {
 		for _, inherited := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/inherited=%t", privilege, inherited), func(t *testing.T) {
-				testServeOnlinePostgres(t, privilege, inherited, false)
+				testServeOnlinePostgres(t, privilege, inherited, false, false)
 			})
 		}
 	}
 }
 
-func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited, portable bool) {
+func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited, portable, structured bool) {
 	t.Helper()
 	raw := os.Getenv("METRICSPIRE_ONLINE_TEST_DATABASE_URL")
 	if raw == "" {
@@ -119,6 +123,11 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited, por
 	for name, target := range map[string]any{"model.yaml": &source, "binding.yaml": &binding, "query.json": &query} {
 		if err := contractio.ReadFile(filepath.Join(base, name), target); err != nil {
 			t.Fatal(err)
+		}
+	}
+	if structured {
+		for i := range source.Spec.Metrics {
+			source.Spec.Metrics[i].Definition = &model.MetricDefinition{Family: "sales", Variant: source.Spec.Metrics[i].Name, Population: "Synthetic sales", Exclusions: []string{}, Numerator: "Reviewed aggregate", Denominator: "Reviewed formula", CountingUnit: "Order", TimeBasis: "Sales date"}
 		}
 	}
 	binding.Datasets[0].Resource.Schema = data
@@ -301,6 +310,23 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited, por
 			t.Fatal(err)
 		}
 		return response.StatusCode, content
+	}
+	if structured {
+		status, body := call("/api/v1/namespaces/demo/online-query", query, token)
+		if status != 422 || !strings.Contains(string(body), "metric_selection_required") {
+			t.Fatalf("missing choice: %d %s", status, body)
+		}
+		query.MetricSelections = map[string]string{}
+		for _, code := range query.MetricCodes {
+			query.MetricSelections[code] = "sha256:stale"
+		}
+		status, body = call("/api/v1/namespaces/demo/online-query", query, token)
+		if status != 422 || !strings.Contains(string(body), "metric_selection_changed") {
+			t.Fatalf("stale choice: %d %s", status, body)
+		}
+		for _, code := range query.MetricCodes {
+			query.MetricSelections[code] = release.ManifestFingerprint
+		}
 	}
 	status, body := call("/api/v1/namespaces/demo/online-query", query, token)
 	if status != 200 {

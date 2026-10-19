@@ -158,11 +158,27 @@
         "open_questions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
       }
     },
+    "MetricDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["population", "numerator", "denominator", "counting_unit", "time_basis", "family", "variant", "exclusions"],
+      "properties": {
+        "population": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "numerator": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "denominator": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "counting_unit": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "time_basis": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "family": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 128},
+        "variant": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 128},
+        "exclusions": {"type": "array", "maxItems": 20, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 512}}
+      }
+    },
     "Metric": {
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "entity", "kind", "value_type", "expression", "allowed_dimensions", "verification"],
       "properties": {
+        "definition": {"$ref": "#/$defs/MetricDefinition"},
         "name": {"$ref": "#/$defs/Name"},
         "display_name": {"type": "string"},
         "description": {"type": "string"},
@@ -380,6 +396,7 @@
       "additionalProperties": false,
       "required": ["api_version", "kind", "metrics"],
       "properties": {
+        "metric_selections": {"type": "object", "maxProperties": 32, "propertyNames": {"$ref": "#/$defs/Name"}, "additionalProperties": {"$ref": "#/$defs/Fingerprint"}},
         "api_version": {"$ref": "#/$defs/APIVersion"},
         "kind": {"const": "SemanticQuery"},
         "metrics": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/Name"}},

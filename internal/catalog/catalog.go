@@ -202,11 +202,16 @@ func (s *Service) publish(ctx context.Context, namespace, name string, expectedR
 		return Release{}, fmt.Errorf("list releases for external-code compatibility: %w", err)
 	}
 	codes := make(map[string]string, len(manifest.Definitions.Metrics))
+	definitions := make(map[string]*model.MetricDefinition, len(manifest.Definitions.Metrics))
 	for _, metric := range manifest.Definitions.Metrics {
 		codes[metric.Name] = metric.ExternalCode
+		definitions[metric.Name] = metric.Definition
 	}
 	for _, release := range history {
 		for _, previous := range release.Manifest.Definitions.Metrics {
+			if previous.Definition != nil && !reflect.DeepEqual(previous.Definition, definitions[previous.Name]) {
+				return Release{}, fmt.Errorf("%w: published metric %q cannot change or remove its structured definition", ErrNotPublishable, previous.Name)
+			}
 			if previous.ExternalCode != "" && codes[previous.Name] != previous.ExternalCode {
 				return Release{}, fmt.Errorf("%w: published metric %q cannot change its external code", ErrNotPublishable, previous.Name)
 			}
@@ -322,6 +327,11 @@ func validateCompatibleRelease(active, candidate model.SemanticManifest) error {
 }
 
 func sameMetricExecutionContract(left, right model.Metric) bool {
+	// Adding a reviewed definition is explicit opt-in; an established scope cannot
+	// be changed or removed under the same published metric code.
+	if left.Definition != nil && !reflect.DeepEqual(left.Definition, right.Definition) {
+		return false
+	}
 	type executionContract struct {
 		Entity            string
 		Kind              model.MetricKind

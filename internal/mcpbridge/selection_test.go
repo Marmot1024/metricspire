@@ -40,3 +40,23 @@ func TestSearchDoesNotInferUniquenessOrAbsence(t *testing.T) {
 		t.Fatalf("limited result interpreted as unique semantic match: %+v", got)
 	}
 }
+
+func TestStructuredComparisonDoesNotInferScopeFromIdenticalLabels(t *testing.T) {
+	a := MetricDetail{MetricSummary: MetricSummary{Name: "orders_all", Description: "Orders"}, Definition: &model.MetricDefinition{Family: "orders", Variant: "all", Population: "All synthetic orders", Exclusions: []string{}, Numerator: "Count", Denominator: "Not applicable", CountingUnit: "Order", TimeBasis: "Creation date"}}
+	b := a
+	copy := *a.Definition
+	b.Definition = &copy
+	b.Name = "orders_production"
+	b.Definition.Variant = "production"
+	b.Definition.Population = "Production orders"
+	b.Definition.Exclusions = []string{"Test orders"}
+	got := compareMetrics([]MetricDetail{a, b})
+	if !reflect.DeepEqual(got.DifferingFields, []string{"definition.population", "definition.exclusions"}) {
+		t.Fatalf("lost structured distinction: %+v", got)
+	}
+	b.Definition = nil
+	got = compareMetrics([]MetricDetail{a, b})
+	if !reflect.DeepEqual(got.MissingStructuredDefinitions, []string{"orders_production"}) {
+		t.Fatal(got)
+	}
+}

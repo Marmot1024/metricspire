@@ -98,7 +98,7 @@ func preparedQuery(in mcpbridge.QueryInput, plan application.PlanOutput, elapsed
 		}
 		for _, m := range plan.Release.Manifest.Definitions.Metrics {
 			if m.Name == logical.Name {
-				metrics = append(metrics, mcpbridge.DetailMetric(application.MetricCatalogEntry{Name: m.Name, ExternalCode: m.ExternalCode, DisplayName: m.DisplayName, Description: m.Description, ValueType: m.ValueType, Unit: m.Unit, VerificationStatus: m.Verification.Status, ReleaseChannel: plan.Release.Channel, Deprecated: m.Deprecated, TimeDimension: m.TimeDimension}).MetricSummary)
+				metrics = append(metrics, mcpbridge.DetailMetric(application.MetricCatalogEntry{Definition: m.Definition, Name: m.Name, ExternalCode: m.ExternalCode, DisplayName: m.DisplayName, Description: m.Description, ValueType: m.ValueType, Unit: m.Unit, VerificationStatus: m.Verification.Status, ReleaseChannel: plan.Release.Channel, Deprecated: m.Deprecated, TimeDimension: m.TimeDimension}).MetricSummary)
 			}
 		}
 	}

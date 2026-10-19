@@ -89,6 +89,7 @@ func (service *CatalogService) ResolveActiveModel(ctx context.Context, scope Que
 }
 
 type MetricCatalogEntry struct {
+	Definition          *model.MetricDefinition  `json:"definition,omitempty"`
 	Namespace           string                   `json:"namespace"`
 	ModelName           string                   `json:"semantic_model_name"`
 	ReleaseID           string                   `json:"release_id"`
@@ -254,7 +255,7 @@ func (service *CatalogService) searchActive(ctx context.Context, scope QueryScop
 				return nil, err
 			}
 			entry := MetricCatalogEntry{
-				Namespace: release.Namespace, ModelName: release.Name, ReleaseID: release.ID,
+				Definition: metric.Definition, Namespace: release.Namespace, ModelName: release.Name, ReleaseID: release.ID,
 				ReleaseChannel: release.Channel, ManifestFingerprint: release.ManifestFingerprint, Name: metric.Name,
 				ExternalCode: metric.ExternalCode, DisplayName: metric.DisplayName, Description: metric.Description, Owner: metric.Owner,
 				VerificationStatus: metric.Verification.Status, Tags: append([]string(nil), metric.Tags...), UsageExamples: append([]string(nil), metric.UsageExamples...), Deprecated: metric.Deprecated,
@@ -396,6 +397,9 @@ func matchesMetricCatalogQuery(query string, metric model.Metric) bool {
 		return true
 	}
 	values := []string{metric.ExternalCode, metric.Name, metric.DisplayName, metric.Description, metric.Owner, strings.Join(metric.Tags, " ")}
+	if metric.Definition != nil {
+		values = append(values, metric.Definition.Family, metric.Definition.Variant)
+	}
 	for _, value := range values {
 		if strings.Contains(strings.ToLower(value), query) {
 			return true

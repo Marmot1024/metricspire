@@ -114,3 +114,5 @@ Databricks Apps is an environment-specific profile with managed ingress, platfor
 ## Current exclusions
 
 MCP exposes the same query application services, without management, identity override, raw SQL, or internal-model selection tools. The stdio-to-HTTP bridge exists for development compatibility. Shared result cache, streaming export, arbitrary SQL, cross-engine joins, and multi-engine routing are not implemented. Additional engine adapters must independently prove contract conformance before being advertised.
+
+Structured business scope and version-bound query choices are described in [metric definitions](metric-definitions.md). Definitions are reviewed model metadata; choices are equality guards, not identity or proof of human confirmation.

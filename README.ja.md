@@ -2,6 +2,8 @@
 
 PostgreSQL のみの起動とエンジン設定：[ランタイムエンジン](docs/runtime-engines.md)。
 
+構造化された指標定義の選択：[指標定義](docs/metric-definitions.md)。
+
 <h1 align="center">MetricSpire</h1>
 
 <p align="center"><strong>指標カタログとデータサービスを、MCP で AI につなぐ。</strong></p>

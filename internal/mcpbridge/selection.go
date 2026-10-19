@@ -23,9 +23,10 @@ func searchSelection(count, limit int) selectionGuidance {
 }
 
 type metricComparison struct {
-	DifferingFields    []string `json:"differing_fields"`
-	MissingDefinitions []string `json:"missing_definitions"`
-	NextStep           string   `json:"next_step"`
+	DifferingFields              []string `json:"differing_fields"`
+	MissingDefinitions           []string `json:"missing_definitions"`
+	MissingStructuredDefinitions []string `json:"missing_structured_definitions"`
+	NextStep                     string   `json:"next_step"`
 }
 
 // Compare only published, authorized metadata. Never derive an exclusion,
@@ -36,6 +37,42 @@ func compareMetrics(metrics []MetricDetail) metricComparison {
 		name  string
 		value func(MetricDetail) any
 	}{
+		{"definition.population", func(m MetricDetail) any {
+			if m.Definition == nil {
+				return nil
+			}
+			return m.Definition.Population
+		}},
+		{"definition.exclusions", func(m MetricDetail) any {
+			if m.Definition == nil {
+				return nil
+			}
+			return m.Definition.Exclusions
+		}},
+		{"definition.numerator", func(m MetricDetail) any {
+			if m.Definition == nil {
+				return nil
+			}
+			return m.Definition.Numerator
+		}},
+		{"definition.denominator", func(m MetricDetail) any {
+			if m.Definition == nil {
+				return nil
+			}
+			return m.Definition.Denominator
+		}},
+		{"definition.counting_unit", func(m MetricDetail) any {
+			if m.Definition == nil {
+				return nil
+			}
+			return m.Definition.CountingUnit
+		}},
+		{"definition.time_basis", func(m MetricDetail) any {
+			if m.Definition == nil {
+				return nil
+			}
+			return m.Definition.TimeBasis
+		}},
 		{"description", func(m MetricDetail) any { return m.Description }},
 		{"unit", func(m MetricDetail) any { return m.Unit }},
 		{"value_type", func(m MetricDetail) any { return m.ValueType }},
@@ -50,6 +87,9 @@ func compareMetrics(metrics []MetricDetail) metricComparison {
 		{"release_channel", func(m MetricDetail) any { return m.ReleaseChannel }},
 	}
 	for _, m := range metrics {
+		if m.Definition == nil {
+			out.MissingStructuredDefinitions = append(out.MissingStructuredDefinitions, m.Name)
+		}
 		if strings.TrimSpace(m.Description) == "" {
 			out.MissingDefinitions = append(out.MissingDefinitions, m.Name)
 		}

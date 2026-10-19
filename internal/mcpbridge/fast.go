@@ -29,9 +29,12 @@ type MetricSummary struct {
 	ReleaseChannel     catalog.ReleaseChannel   `json:"release_channel"`
 	Deprecated         bool                     `json:"deprecated"`
 	TimeDimension      string                   `json:"time_dimension,omitempty"`
+	DefinitionFamily   string                   `json:"definition_family,omitempty"`
+	DefinitionVariant  string                   `json:"definition_variant,omitempty"`
 }
 
 type MetricDetail struct {
+	Definition *model.MetricDefinition `json:"definition,omitempty"`
 	MetricSummary
 	ReleaseID           string                             `json:"release_id"`
 	ManifestFingerprint string                             `json:"manifest_fingerprint"`
@@ -40,11 +43,15 @@ type MetricDetail struct {
 }
 
 func summarizeMetric(m application.MetricCatalogEntry) MetricSummary {
-	return MetricSummary{Name: m.Name, ExternalCode: m.ExternalCode, DisplayName: m.DisplayName, Description: m.Description, ValueType: m.ValueType, Unit: m.Unit, VerificationStatus: m.VerificationStatus, ReleaseChannel: m.ReleaseChannel, Deprecated: m.Deprecated, TimeDimension: m.TimeDimension}
+	out := MetricSummary{Name: m.Name, ExternalCode: m.ExternalCode, DisplayName: m.DisplayName, Description: m.Description, ValueType: m.ValueType, Unit: m.Unit, VerificationStatus: m.VerificationStatus, ReleaseChannel: m.ReleaseChannel, Deprecated: m.Deprecated, TimeDimension: m.TimeDimension}
+	if m.Definition != nil {
+		out.DefinitionFamily, out.DefinitionVariant = m.Definition.Family, m.Definition.Variant
+	}
+	return out
 }
 
 func DetailMetric(m application.MetricCatalogEntry) MetricDetail {
-	return MetricDetail{summarizeMetric(m), m.ReleaseID, m.ManifestFingerprint, m.AllowedDimensions, m.DimensionDetails}
+	return MetricDetail{Definition: m.Definition, MetricSummary: summarizeMetric(m), ReleaseID: m.ReleaseID, ManifestFingerprint: m.ManifestFingerprint, AllowedDimensions: m.AllowedDimensions, DimensionDetails: m.DimensionDetails}
 }
 
 type MetricDetailsInput struct {
@@ -90,7 +97,7 @@ type RunQueryOutput struct {
 }
 
 func addFastTools(s *mcp.Server, b FastBackend) {
-	add(s, "get_metric_details", "Compare definitions, units, authorized dimensions and calendars for 1-20 exact metric names. Review comparison gaps/differences before prepare_query; differences alone do not prove ambiguity.", true, func(ctx context.Context, in MetricDetailsInput) (any, error) {
+	add(s, "get_metric_details", "Compare scope definitions, units and calendars for 1-20 exact names. Resolve material differences before prepare_query. For structured definitions, pass chosen name-to-manifest_fingerprint pairs in query.metric_selections.", true, func(ctx context.Context, in MetricDetailsInput) (any, error) {
 		if _, err := namespacePath(in.Namespace); err != nil {
 			return nil, err
 		}

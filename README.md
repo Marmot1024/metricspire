@@ -2,6 +2,8 @@
 
 PostgreSQL-only startup and engine configuration: [runtime engines](docs/runtime-engines.md).
 
+Structured scope selection: [metric definitions](docs/metric-definitions.md).
+
 <h1 align="center">MetricSpire</h1>
 
 <p align="center"><strong>A metric catalog and data service with MCP access.</strong></p>
