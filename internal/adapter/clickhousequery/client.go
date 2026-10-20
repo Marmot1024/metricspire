@@ -22,6 +22,10 @@ import (
 const EngineName = "clickhouse_online"
 const maxWireBytes = 8 << 20
 
+// HTTP query parameters use ClickHouse's escaped text format, including in
+// multipart bodies. Preserve literal backslashes and control characters.
+var escapeParameter = strings.NewReplacer("\\", "\\\\", "\t", "\\t", "\n", "\\n", "\r", "\\r", "\x00", "\\0")
+
 type client struct {
 	endpoint, user, password string
 	http                     *http.Client
@@ -66,7 +70,7 @@ func (c *client) query(ctx context.Context, sql string, params map[string]string
 	}
 	fields := map[string]string{"query": sql}
 	for k, v := range params {
-		fields["param_"+k] = v
+		fields["param_"+k] = escapeParameter.Replace(v)
 	}
 	options := url.Values{}
 	for k, v := range settings {

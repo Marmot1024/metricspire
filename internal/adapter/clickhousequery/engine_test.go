@@ -75,7 +75,7 @@ func TestClickHouseTransportRejectsRedirectsLateErrorsAndLeaks(t *testing.T) {
 				if err := r.ParseMultipartForm(1 << 20); err != nil {
 					t.Fatal(err)
 				}
-				if r.FormValue("param_value") != "quote'\\\n" {
+				if r.FormValue("param_value") != `quote'\\\n` {
 					t.Error("parameter lost")
 				}
 				w.Header().Set("Location", "http://invalid.example")
@@ -157,6 +157,13 @@ func TestClickHouseRealSnapshotAndCredentialBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer engine.Close()
+
+	for _, value := range []string{"quote'\\\n", "east\twest", `foo\Nbar`, `back\slash`, "null\x00byte", "line\rreturn", "control\b\f", "中文"} {
+		rows, err := engine.client.query(t.Context(), "SELECT {value:String}", map[string]string{"value": value}, true)
+		if err != nil || len(rows) != 1 || len(rows[0]) != 1 || rows[0][0] == nil || *rows[0][0] != value {
+			t.Fatalf("escaped parameter roundtrip failed: %v", err)
+		}
+	}
 	params := map[string]string{"hash": hash}
 	insert := func(values string) { exec("INSERT INTO "+table+" SELECT "+values, params) }
 	insert("'one',toDate('2026-09-01'),'east',toDecimal64(100,6),toInt64(2),'demo','batch',toDateTime64('2026-10-20 00:00:00',3,'UTC'),{hash:String}")
