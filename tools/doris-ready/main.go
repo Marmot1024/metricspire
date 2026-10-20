@@ -60,7 +60,7 @@ func main() {
 				}
 				rows.Close()
 			}
-			if alive {
+			if alive && storageReady(db) {
 				if _, err = db.Exec("SET PASSWORD FOR 'root' = PASSWORD(?)", pw); err != nil {
 					panic("lab password bootstrap failed")
 				}
@@ -73,4 +73,28 @@ func main() {
 		time.Sleep(2 * time.Second)
 	}
 	panic("disposable FE/BE not ready")
+}
+
+// Alive can precede the first disk report; require real disposable storage.
+func storageReady(db *sql.DB) bool {
+	name := fmt.Sprintf("metricspire_readiness_%d", time.Now().UnixNano())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := db.ExecContext(ctx, "CREATE DATABASE `"+name+"`"); err != nil {
+		return false
+	}
+	defer func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 3*time.Second)
+		defer stop()
+		_, _ = db.ExecContext(cleanup, "DROP DATABASE IF EXISTS `"+name+"`")
+	}()
+	table := "`" + name + "`.probe"
+	if _, err := db.ExecContext(ctx, "CREATE TABLE "+table+"(id BIGINT NOT NULL) ENGINE=OLAP DUPLICATE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 1 PROPERTIES('replication_num'='1')"); err != nil {
+		return false
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO "+table+" VALUES(1)"); err != nil {
+		return false
+	}
+	var count int64
+	return db.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&count) == nil && count == 1
 }

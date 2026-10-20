@@ -61,7 +61,9 @@ For disposable FE/BE testing, see `deploy/testing/doris-compose.yaml`. It expose
 only a loopback SQL port and uses generated/public fixtures, no host networking,
 privileged container or warehouse mount. `tools/doris-ready` requires explicit
 `METRICSPIRE_DORIS_DISPOSABLE=1` and the private lab password environment variable;
-it waits for the backend before installing the disposable root password.
+it waits for the backend and a successful disposable table write/read before
+installing the disposable root password. Backend `Alive` alone can precede its
+first disk-capacity report.
 
 The opt-in `METRICSPIRE_DORIS_LARGE_TEST=1` acceptance generates ten million
 rows inside a disposable Doris database and checks exact sums, counts and the
