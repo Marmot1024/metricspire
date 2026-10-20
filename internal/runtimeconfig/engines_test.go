@@ -17,7 +17,7 @@ func TestPortableProfileAndUnsupportedDrivers(t *testing.T) {
 	}{
 		{"metadata sqlite", func(c *runtimeconfig.Config) { c.Storage.Driver = "sqlite" }},
 		{"clickhouse", func(c *runtimeconfig.Config) { c.QueryEngine.Driver = "clickhouse" }},
-		{"doris", func(c *runtimeconfig.Config) { c.QueryEngine.Driver = "doris" }},
+		{"doris", func(c *runtimeconfig.Config) { c.QueryEngine.Driver = "unknown" }},
 		{"online mysql", func(c *runtimeconfig.Config) { c.Online.Driver = "mysql" }},
 		{"trino", func(c *runtimeconfig.Config) { c.Exploration = &runtimeconfig.ExplorationConfig{Driver: "trino"} }},
 		{"embedded URL", func(c *runtimeconfig.Config) { c.Storage.DatabaseURLEnv = "postgres://localhost/db" }},
@@ -45,7 +45,7 @@ func TestClickHouseServingKeepsMetadataAndAnalyticalRolesSeparate(t *testing.T) 
 	if c.Storage.Driver != "postgres" || c.QueryEngine.Driver != "disabled" || c.Online.EngineDriver() != "clickhouse_online" {
 		t.Fatal("runtime roles conflated")
 	}
-	c.Online.Driver = "doris"
+	c.Online.Driver = "unknown"
 	if err := c.Validate(); err == nil {
 		t.Fatal("unimplemented result driver accepted")
 	}

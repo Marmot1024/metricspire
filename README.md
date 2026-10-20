@@ -46,7 +46,7 @@ An application can query the same metric through the HTTP API and reuse its calc
 
 Solid arrows show service calls or data writes; the dashed arrow supplies optional semantic configuration. **The OLAP engine, metric store and external semantic layer have distinct responsibilities.**
 
-The adapter design targets OLAP engines such as ClickHouse and Doris, and metric stores such as MySQL and PostgreSQL. **This repository currently ships a Databricks SQL analytical adapter and a PostgreSQL metric store**, plus optional HTTP/MCP queries over precomputed PostgreSQL or ClickHouse aggregates and bounded [Trino/Presto exploration](docs/trino-presto.md). MySQL 8.4 metadata storage is also available. Doris is not shipped yet; ClickHouse exploration and analytical MCP queries are not supported. See [architecture and adapter support](docs/architecture.md#adapter-support) for the scope of each path.
+The adapter design targets OLAP engines such as ClickHouse and Doris, and metric stores such as MySQL and PostgreSQL. **This repository currently ships a Databricks SQL analytical adapter and a PostgreSQL metric store**, plus optional HTTP/MCP queries over precomputed PostgreSQL, ClickHouse or Doris aggregates and bounded [Trino/Presto exploration](docs/trino-presto.md). MySQL 8.4 metadata storage is also available. ClickHouse/Doris exploration and analytical MCP queries are not supported. See [architecture and adapter support](docs/architecture.md#adapter-support) for the scope of each path.
 
 ## Choose where to start
 
@@ -67,6 +67,7 @@ Already have web access? Open your team's instance and start in the **metric cat
 - [MCP integration](docs/mcp.md) · [HTTP API](docs/http-api.md) — connect a client or application.
 - [Architecture and adapters](docs/architecture.md) — system responsibilities, query paths and current database support.
 - [Operator refresh](docs/online-refresh.md): PostgreSQL typed batch export, reconciliation and atomic tenant refresh.
+- [Doris aggregate serving](docs/doris-online.md) · [runtime.doris.example.yaml](examples/runtime.doris.example.yaml).
 - [ClickHouse aggregate serving](docs/clickhouse-online.md) · [runtime.clickhouse.example.yaml](examples/runtime.clickhouse.example.yaml).
 - [Team configuration](config/README.md) · [External semantic layer](docs/exploration.md) — maintain private settings and definitions for exploration.
 - [Development status](docs/development-status.md) — implemented features, verification evidence and remaining gaps.

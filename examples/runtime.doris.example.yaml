@@ -1,0 +1,35 @@
+api_version: metricspire.io/v1alpha1
+kind: RuntimeConfig
+# Metric definitions, revisions and audits; NOT the DWS/ADS data store.
+storage:
+  driver: postgres
+  database_url_env: METRICSPIRE_DATABASE_URL
+# No Databricks client, warehouse or credential is loaded for this profile.
+query_engine:
+  driver: disabled
+http:
+  address: 127.0.0.1:8080
+  public_url: https://metrics.example.com
+authentication:
+  provider: oidc
+  oidc:
+    issuer_url: https://identity.example.com
+    client_id: metricspire
+    bearer_audience: metricspire-api
+# Optional: domains_path points to an ignored private domain/semantic registry.
+# Runtime does not clone GitHub repositories or accept semantic sources in chat.
+online:
+  driver: doris_online
+  database_url_env: METRICSPIRE_DORIS_URL
+  tenant: demo
+  namespaces: [demo]
+  data_access: tenant_shared
+  resources:
+    - {kind: table, schema: serving, table: daily_sales}
+  max_data_age: 5m
+  timeout: 2s
+  max_concurrency: 4
+  policies:
+    - {namespace: demo, model_name: daily_sales, tenant: demo, path: online/reader-policy.yaml}
+  bindings:
+    - {namespace: demo, model_name: daily_sales, path: online/doris-binding.yaml}
