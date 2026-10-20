@@ -4,6 +4,8 @@ MetricSpire serves stateless Streamable HTTP MCP at `/api/v1/mcp` on Databricks 
 
 ## Connect
 
+Self-hosted teams using a standard OIDC issuer can use [native OAuth onboarding](oidc-mcp.md) without Databricks accounts or CLI profiles. Use its independent `metricspire-oidc` connection and operator-registered public client.
+
 For teams using local Codex CLI, use the [single-file installer](mcp-installer.md) with an existing Databricks CLI user profile. Databricks CLI handles OAuth token acquisition and refresh; Codex calls the remote MCP through a local HTTP-header helper. The connection is named `metricspire-cli`. Users retain their own App and data permissions. No custom OAuth client registration is required for this route.
 
 After installation, reopen or reconnect Codex and call `list_namespaces`. An authenticated CLI profile does not itself prove MCP access. Never mix stored native OAuth or static bearer headers into this connection. Keep the profile and workspace stable, and do not place credentials in prompts, configuration, Git or issue reports.

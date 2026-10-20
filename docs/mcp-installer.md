@@ -1,5 +1,7 @@
 # Codex CLI installer
 
+For a standard OIDC self-hosted deployment, use the [OIDC installer](oidc-mcp.md). This guide covers the Databricks CLI helper route.
+
 Use local **Codex CLI 0.162.0+** and an existing **Databricks CLI U2M profile** for the App workspace. The user still needs App, warehouse and data permissions. No repository checkout, Go, Python, PAT or custom OAuth client is needed on the user's machine.
 
 ## Get the installer
