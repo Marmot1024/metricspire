@@ -116,6 +116,7 @@ type PlanOutput struct {
 }
 
 type QueryOutput struct {
+	Timings   *QueryTimings           `json:"timings,omitempty"`
 	Release   catalog.Release         `json:"release"`
 	Logical   model.LogicalPlan       `json:"logical_plan"`
 	Physical  model.PhysicalPlan      `json:"physical_plan"`
@@ -236,12 +237,23 @@ func (s *QueryService) planExplained(ctx context.Context, input QueryInput, expl
 // ExecuteActive resolves the active release and all trusted server-side inputs.
 // The caller cannot select an unpublished release, policy, binding, engine, or
 // stale manifest fingerprint through SemanticQuery.
-func (s *QueryService) ExecuteActive(ctx context.Context, input QueryInput) (QueryOutput, error) {
+func (s *QueryService) ExecuteActive(ctx context.Context, input QueryInput) (output QueryOutput, resultErr error) {
+	started := time.Now()
+	planning := 0.0
+	defer func() {
+		if output.Timings == nil {
+			output.Timings = &QueryTimings{}
+		}
+		output.Timings.PlanningMS = planning
+		output.Timings.ServiceMS = elapsedMS(started)
+	}()
+
 	// The user-authorized engine token must reach only the analytical engine.
 	// Control-plane, policy, planning, and audit dependencies receive an
 	// explicitly masked context that retains cancellation and deadlines.
 	controlContext := executionauth.WithoutAccessToken(ctx)
 	planned, err := s.PlanActive(controlContext, input)
+	planning = elapsedMS(started)
 	if err != nil {
 		return QueryOutput{}, err
 	}
@@ -253,9 +265,20 @@ func (s *QueryService) ExecuteActive(ctx context.Context, input QueryInput) (Que
 
 // ExecuteDraft runs a bounded preview against the latest draft without
 // creating or activating a release. Callers must enforce maintainer access.
-func (s *QueryService) ExecuteDraft(ctx context.Context, input QueryInput) (QueryOutput, error) {
+func (s *QueryService) ExecuteDraft(ctx context.Context, input QueryInput) (output QueryOutput, resultErr error) {
+	started := time.Now()
+	planning := 0.0
+	defer func() {
+		if output.Timings == nil {
+			output.Timings = &QueryTimings{}
+		}
+		output.Timings.PlanningMS = planning
+		output.Timings.ServiceMS = elapsedMS(started)
+	}()
+
 	controlContext := executionauth.WithoutAccessToken(ctx)
 	planned, err := s.PlanDraft(controlContext, input)
+	planning = elapsedMS(started)
 	if err != nil {
 		return QueryOutput{}, err
 	}
@@ -266,7 +289,11 @@ func (s *QueryService) executePlanned(ctx, controlContext context.Context, input
 	return s.executePlannedWithAudit(ctx, controlContext, input, planned, true)
 }
 
-func (s *QueryService) executePlannedWithAudit(ctx, controlContext context.Context, input QueryInput, planned PlanOutput, detachedAudit bool) (QueryOutput, error) {
+func (s *QueryService) executePlannedWithAudit(ctx, controlContext context.Context, input QueryInput, planned PlanOutput, detachedAudit bool) (output QueryOutput, resultErr error) {
+	timings := &QueryTimings{}
+	serviceStart := time.Now()
+	defer func() { timings.ServiceMS = elapsedMS(serviceStart); output.Timings = timings }()
+
 	baseEvent := audit.QueryEvent{
 		RequestID: input.Context.RequestID, Tenant: input.Context.Tenant, Principal: input.Context.Principal,
 		Namespace: input.Namespace, ModelName: input.ModelName, ReleaseID: planned.Release.ID,
@@ -276,7 +303,10 @@ func (s *QueryService) executePlannedWithAudit(ctx, controlContext context.Conte
 	started := baseEvent
 	started.Kind = audit.EventQueryStarted
 	started.OccurredAt = s.now().UTC()
-	if err := s.audit.Record(controlContext, started); err != nil {
+	auditStart := time.Now()
+	startErr := s.audit.Record(controlContext, started)
+	timings.AuditMS += elapsedMS(auditStart)
+	if err := startErr; err != nil {
 		if controlContext.Err() != nil {
 			return QueryOutput{}, controlContext.Err()
 		}
@@ -287,11 +317,13 @@ func (s *QueryService) executePlannedWithAudit(ctx, controlContext context.Conte
 	}
 	var execution model.ExecutionSnapshot
 	var err error
+	engineStart := time.Now()
 	if bound, ok := s.engine.(BoundQueryEngine); ok {
 		execution, err = bound.ExecuteBound(ctx, planned.Release.Manifest, planned.binding, planned.Physical)
 	} else {
 		execution, err = s.engine.Execute(ctx, planned.Physical)
 	}
+	timings.EngineMS = elapsedMS(engineStart)
 	finished := baseEvent
 	finished.OccurredAt = s.now().UTC()
 	if execution.Result != nil {
@@ -313,7 +345,10 @@ func (s *QueryService) executePlannedWithAudit(ctx, controlContext context.Conte
 		auditContext, cancelAudit = context.WithTimeout(context.WithoutCancel(controlContext), auditCompletionTimeout)
 		defer cancelAudit()
 	}
-	if auditErr := s.audit.Record(auditContext, finished); auditErr != nil {
+	auditStart = time.Now()
+	auditErr := s.audit.Record(auditContext, finished)
+	timings.AuditMS += elapsedMS(auditStart)
+	if auditErr != nil {
 		if !detachedAudit && controlContext.Err() != nil {
 			return QueryOutput{}, controlContext.Err()
 		}

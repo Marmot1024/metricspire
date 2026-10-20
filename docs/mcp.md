@@ -98,6 +98,21 @@ Requests and responses are capped at 1 MiB and 8 MiB; query results are bounded,
 
 `run_query` submits once per call; separate calls are not deduplicated. Its wait only polls the same tenant/principal-owned job. Process-local job storage and restart/multi-instance limitations are unchanged. Tool responses include server duration in `_meta["metricspire/elapsed_ms"]`; prepare/run also expose `elapsed_ms`, and catalog logs record request ID, duration and match count without search text. These measure service time, not client discovery, network transport, model thinking or answer writing; compare those separately when diagnosing latency.
 
+Successful online results and terminal query jobs include `timings`: `planning_ms`
+(metadata, policy and planning), `engine_ms` (connection wait, engine execution,
+network and decoding), `audit_ms` (durable audit writes) and `service_ms` (total
+query-service wall time). These are monotonic durations, not database CPU time.
+Job admission/queueing and HTTP/MCP transport are outside `service_ms`; job
+`submitted_at`/`started_at` timestamps provide queue context. Tool `_meta` duration
+measures its handler and waiting/polling, so it is not the sum of query timings.
+
+For a fresh-session latency comparison, record client request start, every tool
+start/end, final answer end and these server timings. Keep the same question,
+model, settings, dataset and authorization; report initialization separately and
+compare correct answers. Client time outside tools includes orchestration,
+network and generation. It cannot be labeled hidden model reasoning from these
+measurements. This release adds attribution, not a claimed end-to-end speedup.
+
 The local `metricspire mcp --api-url <origin>` bridge is for development compatibility. See [verification status](development-status.md) for acceptance gaps.
 
 Optional [exploration](exploration.md) adds `discover_analysis`, `plan_analysis`,

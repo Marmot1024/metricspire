@@ -89,6 +89,27 @@ def configure_exploration(package, namespace, catalog_path, warehouse, has_accep
     runtime_path.write_text(json.dumps(runtime, indent=2) + "\n")
 
 
+def deploy_with_acceptance(deploy, accept, active, restore, verify_restore, destination):
+    """Restore only our failed deployment; never undo a concurrent release."""
+    deployed_id = None
+    try:
+        deployed_id = deploy()["deployment_id"]
+        accept()
+        if active().get("deployment_id") != deployed_id:
+            raise RuntimeError("App changed during acceptance")
+    except Exception:
+        current = active()
+        if current.get("source_code_path") == destination and (deployed_id is None or current.get("deployment_id") == deployed_id):
+            print("ACCEPTANCE FAILED; restoring frozen previous deployment", flush=True)
+            restore()
+            verify_restore()
+            print("ROLLBACK VERIFIED", flush=True)
+        else:
+            print("No rollback attempted: this release is not the active deployment", flush=True)
+        raise
+    return deployed_id
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     for key in ("app", "profile", "auth-profile", "commit", "mcp-url", "issuer", "workspace-parent"):
@@ -138,26 +159,18 @@ def main():
             raise RuntimeError("App changed during preflight; stop without deploying")
         destination = a.workspace_parent.rstrip("/") + "/metricspire-" + commit[:12] + "-" + uuid.uuid4().hex[:8]
         run(db("workspace", "import-dir", str(package), destination))
-        deployed_id = None
-        try:
-            deployed = json.loads(run(db("apps", "deploy", a.app, "--source-code-path", destination,
-                                         "--mode", "SNAPSHOT", "--output", "json"), timeout=600))
-            deployed_id = deployed["deployment_id"]
+        def accept():
             run(gate + fixture, stream=True)
             if a.analysis_query:
                 run(gate + ["--query", str(a.analysis_query.resolve()), "--expected", str(a.analysis_expected.resolve())], stream=True)
-            if get_app()["active_deployment"]["deployment_id"] != deployed_id:
-                raise RuntimeError("App changed during acceptance")
-        except Exception:
-            current = get_app()["active_deployment"]
-            if current.get("source_code_path") == destination and (deployed_id is None or current["deployment_id"] == deployed_id):
-                print("ACCEPTANCE FAILED; restoring frozen previous deployment", flush=True)
-                run(db("apps", "deploy", a.app, "--source-code-path", frozen_path, "--mode", "SNAPSHOT", "--output", "json"), timeout=600)
-                run(gate + fixture + ["--preflight"], stream=True)
-                print("ROLLBACK VERIFIED", flush=True)
-            else:
-                print("No rollback attempted: this release is not the active deployment", flush=True)
-            raise
+
+        deployed_id = deploy_with_acceptance(
+            lambda: json.loads(run(db("apps", "deploy", a.app, "--source-code-path", destination,
+                                      "--mode", "SNAPSHOT", "--output", "json"), timeout=600)),
+            accept, lambda: get_app()["active_deployment"],
+            lambda: run(db("apps", "deploy", a.app, "--source-code-path", frozen_path,
+                           "--mode", "SNAPSHOT", "--output", "json"), timeout=600),
+            lambda: run(gate + fixture + ["--preflight"], stream=True), destination)
         print("DEPLOYMENT AND ACCEPTANCE PASSED", commit, deployed_id, flush=True)
 
 
