@@ -12,7 +12,7 @@ As of **2026-10-20**, MetricSpire is a development preview. A bounded pilot need
 | Independent exploration | Trino/Presto adapters support reviewed single-table DATE catalogs, bounded asynchronous jobs and existing HTTP/MCP authorization. Public TPCH fixtures and protocol failure tests are supplied. | Real connector permissions, timestamp and relationship support, company catalogs and production load. See [engine contract](trino-presto.md). |
 | MySQL metadata | Disposable MySQL 8.4 covers migration install/upgrade/repeat and dirty/checksum rejection, optimistic concurrency, transactional publication failures and governance rollback. OIDC native MCP serving uses separate PostgreSQL result data and durable MySQL audit. | Enterprise deployment, operational backup/restore and intended-user acceptance. PostgreSQL-to-MySQL data migration is not supplied. |
 | Portable ClickHouse serving | Disposable ClickHouse 25.8 + PostgreSQL 17 passed full service startup, OIDC/JWT, exact aggregates, structured selections, denial and persisted audit. Adapter checks covered least-privilege grants, enforced server budgets, numeric extremes and NULLs. A ten-million-row synthetic batch produced exact sums/counts/ratios within the fixed read budget after producer merges settled. | Enterprise IdP, intended-user onboarding, production snapshots and deployed concurrency/SLA. ClickHouse exploration remains unsupported; native MCP online serving uses the same bounded query service. |
-| Installer and release gate | Installer checks native initialization, seven core tools and an actual namespace call. Release tooling checks scopes/metadata, native MCP version, fixture queries and exact results; it preserves frozen config and has a rollback path. | Second-user and cross-platform runtime acceptance; real failure-triggered release rollback. Saved authorization alone is not success. |
+| Installer and release gate | Installer checks native initialization, seven core tools and an actual namespace call. Release tooling checks scopes/metadata, native MCP version, fixture queries and exact results; it preserves frozen config and has a rollback path. | Second-user and cross-platform runtime acceptance; cloud deployment version rollback. Disposable service acceptance forces a freshness failure, restores frozen configuration and checks the same typed result/release/batch after restart; deployment orchestration also tests lost responses and concurrent releases. Saved authorization alone is not success. |
 | Authentication migration | Native OAuth is preserved on a backup branch after repeated loss of tool access. The installed local Codex CLI helper reused existing Databricks U2M authorization, loaded 12 tools and returned exact TPCH/calendar results without login. Real Codex recovered from synthetic 401/403 responses on the same connection. | Second-user onboarding, revoked-grant recovery and cross-platform runtime. Each environment must retain its own serving-version and natural-expiry receipts; account scope or TTL causes are not inferred from symptoms. |
 
 The [TPCH](../testdata/acceptance/databricks-tpch) and [calendar](../testdata/acceptance/exploration-calendar) fixtures are neutral acceptance data. Trial metrics remain unverified; matching a previous business result is regression evidence, not certification. Current staging health, UI assets and authenticated catalog/context routes responded successfully; browser interaction and rendering performance remain untested. Historical UI measurements are not fresh results for the current deployment.
@@ -33,3 +33,15 @@ population, choosing a role default or treating search rank as semantic fit.
 
 These local changes do not establish deployed-client latency, production
 acceptance, automatic Git export, additional engines or data refresh pipelines.
+
+## Query attribution and catalog scale
+
+Terminal query jobs and successful online HTTP/MCP results expose separate
+planning, engine, audit and total service wall times; see [timing boundaries](mcp.md#limits).
+They cannot measure hidden model reasoning or prove an end-to-end improvement.
+Generated catalogs of 50, 500 and 1000 metrics are checked page by page for exact
+counts, unique entries, cursor progress and representative detail completeness,
+using memory and real PostgreSQL metadata over loopback HTTP. Logged page/detail
+durations include response-body reading and decoding. The 1000-entry service cap
+still conservatively reports possible truncation; these fixtures are not browser
+rendering, concurrent-load or production SLA acceptance.

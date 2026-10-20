@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -76,8 +77,12 @@ func TestServeOnlineClickHouseWithPostgresMetadata(t *testing.T) {
 }
 
 func testServeOnlineEngine(t *testing.T, writePrivilege string, inherited, portable, structured bool, driver string, metadataDriver ...string) {
-	testServeOnlineExplorationEngine(t, writePrivilege, inherited, portable, structured, driver, "", metadataDriver...)
+	testServeOnlineExplorationEngine(t, writePrivilege, inherited, portable, structured, driver, "", false, metadataDriver...)
 }
+func TestServeOnlinePostgresFailureRollback(t *testing.T) {
+	testServeOnlineExplorationEngine(t, "", false, true, true, postgresquery.EngineName, "", true)
+}
+
 func TestServeTrinoPrestoWithoutDatabricks(t *testing.T) {
 	for _, engine := range []string{"trino", "presto"} {
 		t.Run(engine, func(t *testing.T) {
@@ -87,11 +92,11 @@ func TestServeTrinoPrestoWithoutDatabricks(t *testing.T) {
 				}
 				t.Skip("requires disposable external engine")
 			}
-			testServeOnlineExplorationEngine(t, "", false, true, true, postgresquery.EngineName, engine)
+			testServeOnlineExplorationEngine(t, "", false, true, true, postgresquery.EngineName, engine, false)
 		})
 	}
 }
-func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inherited, portable, structured bool, driver, explorationDriver string, metadataDriver ...string) {
+func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inherited, portable, structured bool, driver, explorationDriver string, rollback bool, metadataDriver ...string) {
 	t.Helper()
 	raw := os.Getenv("METRICSPIRE_ONLINE_TEST_DATABASE_URL")
 	if raw == "" {
@@ -324,47 +329,7 @@ func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inher
 		}
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	r, w := io.Pipe()
-	statuses := make(chan map[string]string, 2)
-	decodeErrors := make(chan error, 1)
-	go func() {
-		decoder := json.NewDecoder(r)
-		for range 2 {
-			var s map[string]string
-			if err := decoder.Decode(&s); err != nil {
-				decodeErrors <- err
-				return
-			}
-			statuses <- s
-		}
-	}()
-	done := make(chan error, 1)
-	go func() { done <- runServe(ctx, []string{"--config", configPath}, w, io.Discard); _ = w.Close() }()
-	t.Cleanup(func() {
-		cancel()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Errorf("serve exit: %v", err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("serve did not stop")
-		}
-		_ = r.Close()
-	})
-	var started map[string]string
-	select {
-	case started = <-statuses:
-	case err := <-decodeErrors:
-		t.Fatal(err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("serve did not start")
-	}
-	if started["status"] != "listening" {
-		t.Fatalf("startup status: %#v", started)
-	}
-	baseURL := "http://" + started["address"]
+	baseURL, stopServe := startOnlineFixtureService(t, configPath)
 	token := onlineFixtureToken(t, key, map[string]any{"iss": issuer.URL, "aud": "fixture-api", "sub": "synthetic-online-reader", "tenant": "demo", "roles": []string{"analyst"}, "permissions": []string{"query:execute"}, "exp": time.Now().Add(time.Minute).Unix()})
 	call := func(path string, body any, bearer string) (int, []byte) {
 		t.Helper()
@@ -408,6 +373,9 @@ func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inher
 	var result application.OnlineResult
 	if err := json.Unmarshal(body, &result); err != nil || len(result.Result.Rows) != 1 || result.Result.Columns[1].Name != "10001" || result.Snapshot.BatchID != "batch-1" {
 		t.Fatalf("invalid startup result: %s", body)
+	}
+	if result.Timings == nil || result.Timings.ServiceMS <= 0 || result.Timings.EngineMS <= 0 || result.Timings.AuditMS <= 0 {
+		t.Fatal("online HTTP lost query timings")
 	}
 	for col, want := range map[int]int64{1: 100, 3: 50} {
 		raw, ok := result.Result.Rows[0][col].(string)
@@ -488,6 +456,9 @@ func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inher
 	mcpCall(t, session, "query_online_metrics", onlineInput, &native)
 	if native.ReleaseID != result.ReleaseID || native.ManifestFingerprint != result.ManifestFingerprint || native.Snapshot.BatchID != result.Snapshot.BatchID || len(native.Result.Rows) != len(result.Result.Rows) {
 		t.Fatal("MCP and HTTP serving evidence differ")
+	}
+	if native.Timings == nil || native.Timings.ServiceMS <= 0 || native.Timings.EngineMS <= 0 || native.Timings.AuditMS <= 0 {
+		t.Fatal("online MCP lost query timings")
 	}
 	for col, want := range map[int]int64{1: 100, 3: 50} {
 		raw, ok := native.Result.Rows[0][col].(string)
@@ -577,6 +548,99 @@ func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inher
 			}
 		}
 	}
+
+	if rollback {
+		frozen, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stopServe()
+		config.Online.MaxDataAge = "1ns"
+		if err := contractio.WriteJSON(configPath, config); err != nil {
+			t.Fatal(err)
+		}
+		candidateURL, stopCandidate := startOnlineFixtureService(t, configPath)
+		baseURL = candidateURL
+		status, body := call("/api/v1/namespaces/demo/online-query", query, token)
+		if status == 200 || !strings.Contains(string(body), "online_data_stale") {
+			t.Fatalf("candidate did not fail acceptance: %d %s", status, body)
+		}
+		stopCandidate()
+		if err := os.WriteFile(configPath, frozen, 0600); err != nil {
+			t.Fatal(err)
+		}
+		restoredURL, _ := startOnlineFixtureService(t, configPath)
+		baseURL = restoredURL
+		status, body = call("/api/v1/namespaces/demo/online-query", query, token)
+		var restored application.OnlineResult
+		if status != 200 || json.Unmarshal(body, &restored) != nil || restored.ReleaseID != result.ReleaseID || restored.ManifestFingerprint != result.ManifestFingerprint || restored.Snapshot.BatchID != result.Snapshot.BatchID || !bytes.Equal(mustJSON(t, restored.Result), mustJSON(t, result.Result)) {
+			t.Fatal("restored service changed reviewed result")
+		}
+		current, err := os.ReadFile(configPath)
+		if err != nil || !bytes.Equal(current, frozen) {
+			t.Fatal("rollback did not restore frozen config")
+		}
+		t.Log("forced candidate freshness failure; frozen service restarted; exact typed result, release and batch restored")
+	}
+
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func startOnlineFixtureService(t *testing.T, configPath string) (string, func()) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	r, w := io.Pipe()
+	statuses := make(chan map[string]string, 2)
+	decodeErrors := make(chan error, 1)
+	go func() {
+		decoder := json.NewDecoder(r)
+		for range 2 {
+			var s map[string]string
+			if err := decoder.Decode(&s); err != nil {
+				decodeErrors <- err
+				return
+			}
+			statuses <- s
+		}
+	}()
+	done := make(chan error, 1)
+	go func() { done <- runServe(ctx, []string{"--config", configPath}, w, io.Discard); _ = w.Close() }()
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			cancel()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Errorf("serve exit: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Error("serve did not stop")
+			}
+			_ = r.Close()
+		})
+	}
+	t.Cleanup(stop)
+	var started map[string]string
+	select {
+	case started = <-statuses:
+	case err := <-decodeErrors:
+		t.Fatal(err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not start")
+	}
+	if started["status"] != "listening" {
+		t.Fatalf("startup status: %#v", started)
+	}
+	return "http://" + started["address"], stop
 
 }
 

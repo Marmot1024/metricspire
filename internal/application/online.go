@@ -28,6 +28,7 @@ type OnlineQuery struct {
 }
 
 type OnlineResult struct {
+	Timings             *QueryTimings       `json:"timings,omitempty"`
 	ReleaseID           string              `json:"release_id"`
 	ManifestFingerprint string              `json:"manifest_fingerprint"`
 	Snapshot            *model.DataSnapshot `json:"data_snapshot"`
@@ -57,7 +58,17 @@ func (s *OnlineService) Available(scope QueryScope) bool {
 	return ok && scope.Context.Tenant == s.tenant && scope.Context.Principal != ""
 }
 
-func (s *OnlineService) Execute(ctx context.Context, scope QueryScope, request OnlineQuery) (OnlineResult, error) {
+func (s *OnlineService) Execute(ctx context.Context, scope QueryScope, request OnlineQuery) (result OnlineResult, resultErr error) {
+	serviceStart := time.Now()
+	planning := 0.0
+	defer func() {
+		if result.Timings == nil {
+			result.Timings = &QueryTimings{}
+		}
+		result.Timings.PlanningMS = planning
+		result.Timings.ServiceMS = elapsedMS(serviceStart)
+	}()
+
 	if scope.Context.Tenant != s.tenant || scope.Context.Principal == "" || scope.Context.RequestID == "" {
 		return OnlineResult{}, &model.Problem{Code: "permission_denied", Message: "online scope is not authorized"}
 	}
@@ -168,6 +179,7 @@ func (s *OnlineService) Execute(ctx context.Context, scope QueryScope, request O
 	if end.Sub(start) > 31*24*time.Hour {
 		return OnlineResult{}, &model.Problem{Code: "budget_exceeded", Path: "time_range", Message: "online time range must not exceed 31 days"}
 	}
+	planning = elapsedMS(serviceStart)
 	output, err := s.queries.executePlannedWithAudit(ctx, ctx, input, planned, false)
 	if err != nil {
 		return OnlineResult{}, err
@@ -175,12 +187,12 @@ func (s *OnlineService) Execute(ctx context.Context, scope QueryScope, request O
 	if output.Execution.Result == nil || output.Execution.DataSnapshot == nil {
 		return OnlineResult{}, &model.Problem{Code: "online_data_unavailable", Message: "online engine did not provide a complete snapshot"}
 	}
-	result := *output.Execution.Result
-	result.Columns = append([]model.ResultColumn(nil), result.Columns...)
-	for i := range result.Columns {
-		if code, ok := codes[result.Columns[i].Name]; ok {
-			result.Columns[i].Name = code
+	typed := *output.Execution.Result
+	typed.Columns = append([]model.ResultColumn(nil), typed.Columns...)
+	for i := range typed.Columns {
+		if code, ok := codes[typed.Columns[i].Name]; ok {
+			typed.Columns[i].Name = code
 		}
 	}
-	return OnlineResult{ReleaseID: release.ID, ManifestFingerprint: release.ManifestFingerprint, Snapshot: output.Execution.DataSnapshot, Result: &result}, nil
+	return OnlineResult{Timings: output.Timings, ReleaseID: release.ID, ManifestFingerprint: release.ManifestFingerprint, Snapshot: output.Execution.DataSnapshot, Result: &typed}, nil
 }

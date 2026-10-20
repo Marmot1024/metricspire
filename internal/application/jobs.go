@@ -27,6 +27,7 @@ type ActiveQueryExecutor interface {
 }
 
 type QueryJobSnapshot struct {
+	Timings              *QueryTimings       `json:"timings,omitempty"`
 	Job                  model.ExecutionJob  `json:"job"`
 	ReleaseID            string              `json:"release_id,omitempty"`
 	ManifestFingerprint  string              `json:"manifest_fingerprint,omitempty"`
@@ -190,6 +191,7 @@ func (manager *JobManager) run(ctx context.Context, id string, input QueryInput)
 		return
 	}
 	job.snapshot.Job.FinishedAt = &finished
+	job.snapshot.Timings = output.Timings
 	// Release the cancel closure once the job is terminal. In Apps user-
 	// authorization mode it closes over the short-lived execution token.
 	job.cancel = nil
@@ -280,6 +282,10 @@ func publicJobProblem(problem model.Problem) model.Problem {
 
 func cloneJob(value QueryJobSnapshot) QueryJobSnapshot {
 	result := value
+	if value.Timings != nil {
+		timings := *value.Timings
+		result.Timings = &timings
+	}
 	if value.ResolvedTimeRange != nil {
 		timeRange := *value.ResolvedTimeRange
 		result.ResolvedTimeRange = &timeRange

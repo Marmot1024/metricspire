@@ -1,11 +1,12 @@
 import json
+import contextlib
 import io
 from pathlib import Path
 import tempfile
 import tarfile
 import unittest
 
-from tools.deploy_staging import preserve_config, extract_source, configure_exploration
+from tools.deploy_staging import preserve_config, extract_source, configure_exploration, deploy_with_acceptance
 
 
 class PreserveConfigTest(unittest.TestCase):
@@ -61,6 +62,43 @@ class PreserveConfigTest(unittest.TestCase):
             (frozen/'config/runtime.json').write_text('{}')
             (frozen/'config/secret.json').symlink_to('/etc/passwd')
             with self.assertRaises(RuntimeError): preserve_config(frozen,package)
+
+
+class RollbackTest(unittest.TestCase):
+    def test_failure_restores_then_verifies_and_still_fails_release(self):
+        for lost_response in (False, True):
+            state = {"deployment_id":"old", "source_code_path":"frozen"}
+            events = []
+            def deploy():
+                state.update(deployment_id="new",source_code_path="candidate")
+                if lost_response: raise RuntimeError("lost response")
+                return dict(state)
+            def accept(): raise RuntimeError("forced acceptance failure")
+            def restore():
+                events.append("restore")
+                state.update(deployment_id="restored",source_code_path="frozen")
+            def verify():
+                self.assertEqual(state["source_code_path"],"frozen")
+                events.append("verified")
+            with contextlib.redirect_stdout(io.StringIO()) as log, self.assertRaises(RuntimeError):
+                deploy_with_acceptance(deploy,accept,lambda:dict(state),restore,verify,"candidate")
+            self.assertEqual(events,["restore","verified"])
+            self.assertIn("ROLLBACK VERIFIED",log.getvalue())
+
+    def test_concurrent_release_is_never_undone(self):
+        for current in ({"deployment_id":"other","source_code_path":"different"},
+                        {"deployment_id":"other","source_code_path":"candidate"}):
+            with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+                deploy_with_acceptance(lambda:{"deployment_id":"new"},lambda:None,lambda:current,
+                    lambda:self.fail("overwrote concurrent release"),lambda:self.fail("unexpected verify"),"candidate")
+
+    def test_failed_rollback_is_not_reported_as_verified(self):
+        def fail(): raise RuntimeError("failure")
+        for restore,verify in ((fail,lambda:None),(lambda:None,fail)):
+            with contextlib.redirect_stdout(io.StringIO()) as log, self.assertRaises(RuntimeError):
+                deploy_with_acceptance(lambda:{"deployment_id":"new"},fail,
+                    lambda:{"deployment_id":"new","source_code_path":"candidate"},restore,verify,"candidate")
+            self.assertNotIn("ROLLBACK VERIFIED",log.getvalue())
 
 
 if __name__ == '__main__': unittest.main()
