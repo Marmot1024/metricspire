@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/marmot1024/metricspire/internal/adapter/clickhousequery"
+	"github.com/marmot1024/metricspire/internal/adapter/dorisquery"
 	"github.com/marmot1024/metricspire/internal/adapter/postgresquery"
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/runtimeconfig"
@@ -18,6 +19,14 @@ func openOnlineEngine(ctx context.Context, urlValue string, config runtimeconfig
 	if config.EngineDriver() == clickhousequery.EngineName {
 		age, _ := runtimeconfig.ParseDuration(config.MaxDataAge, time.Minute)
 		engine, err := clickhousequery.NewQueryEngine(ctx, urlValue, clickhousequery.Config{Tenant: config.Tenant, Resources: config.Resources, MaxDataAge: age, MaxBytes: 4 << 20})
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return engine, engine.Ready, engine.Close, nil
+	}
+	if config.EngineDriver() == dorisquery.EngineName {
+		age, _ := runtimeconfig.ParseDuration(config.MaxDataAge, time.Minute)
+		engine, err := dorisquery.NewQueryEngine(ctx, urlValue, dorisquery.Config{Tenant: config.Tenant, Resources: config.Resources, MaxDataAge: age, MaxBytes: 4 << 20})
 		if err != nil {
 			return nil, nil, nil, err
 		}

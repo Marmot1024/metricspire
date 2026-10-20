@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/marmot1024/metricspire/internal/adapter/clickhousequery"
+	"github.com/marmot1024/metricspire/internal/adapter/dorisquery"
 	"github.com/marmot1024/metricspire/internal/adapter/postgresquery"
 	"github.com/marmot1024/metricspire/internal/compiler"
 	"github.com/marmot1024/metricspire/internal/contractio"
@@ -43,6 +44,8 @@ func runOnlineContract(args []string, stdout, stderr io.Writer) error {
 		fingerprint, err = postgresquery.DataContractFingerprint(manifest, binding)
 	case clickhousequery.EngineName:
 		fingerprint, err = clickhousequery.DataContractFingerprint(manifest, binding)
+	case dorisquery.EngineName:
+		fingerprint, err = dorisquery.DataContractFingerprint(manifest, binding)
 	default:
 		return errors.New("online-contract requires a supported online engine")
 	}

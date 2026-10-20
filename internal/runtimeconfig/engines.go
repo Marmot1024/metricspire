@@ -55,8 +55,8 @@ func (c Config) validateEngines() error {
 		return fmt.Errorf("storage.database_url_env must be an environment variable name")
 	}
 	if c.Online != nil {
-		if c.Online.Driver != "" && c.Online.Driver != "postgres_online" && c.Online.Driver != "clickhouse_online" {
-			return fmt.Errorf("online.driver %q is not implemented; supported: postgres_online, clickhouse_online", c.Online.Driver)
+		if c.Online.Driver != "" && c.Online.Driver != "postgres_online" && c.Online.Driver != "clickhouse_online" && c.Online.Driver != "doris_online" {
+			return fmt.Errorf("online.driver %q is not implemented; supported: postgres_online, clickhouse_online, doris_online", c.Online.Driver)
 		}
 		if !envName.MatchString(c.Online.DatabaseEnv()) {
 			return fmt.Errorf("online.database_url_env must be an environment variable name")

@@ -46,7 +46,7 @@ MetricSpire 是一个开源的指标库与数据服务，连接你的分析数�
 
 图中实线表示服务调用或数据写入，虚线表示可选的语义配置输入。**OLAP 引擎、指标存储、外部语义层是三个不同的角色。**
 
-接入设计面向 ClickHouse、Doris 等 OLAP 引擎，以及 MySQL、PostgreSQL 等指标存储。**当前仓库已实现 Databricks SQL 分析适配器和 PostgreSQL 指标存储**，另有可选的 PostgreSQL / ClickHouse 预计算汇总 HTTP/MCP 查询和受控 [Trino/Presto 探索](docs/trino-presto.md)；另支持 MySQL 8.4 元数据存储；Doris 适配器尚未提供，ClickHouse 暂不支持探索分析或分析类 MCP 查询。各路径的实现范围见[架构与适配器](docs/architecture.md#adapter-support)。
+接入设计面向 ClickHouse、Doris 等 OLAP 引擎，以及 MySQL、PostgreSQL 等指标存储。**当前仓库已实现 Databricks SQL 分析适配器和 PostgreSQL 指标存储**，另有可选的 PostgreSQL / ClickHouse / Doris 预计算汇总 HTTP/MCP 查询和受控 [Trino/Presto 探索](docs/trino-presto.md)；另支持 MySQL 8.4 元数据存储；ClickHouse/Doris 暂不支持探索分析或分析类 MCP 查询。各路径的实现范围见[架构与适配器](docs/architecture.md#adapter-support)。
 
 ## 从哪里开始？
 
@@ -67,6 +67,7 @@ MetricSpire 是一个开源的指标库与数据服务，连接你的分析数�
 - [MCP 接入](docs/mcp.md) · [HTTP API](docs/http-api.md) — 连接客户端或应用。
 - [架构与适配器](docs/architecture.md) — 系统分工、查询路径与当前数据库支持范围。
 - [离线结果刷新](docs/online-refresh.md): PostgreSQL 类型化批次导出、独立对账与租户快照原子刷新。
+- [Doris 汇总查询服务](docs/doris-online.md) · [runtime.doris.example.yaml](examples/runtime.doris.example.yaml).
 - [ClickHouse 汇总查询服务](docs/clickhouse-online.md) · [runtime.clickhouse.example.yaml](examples/runtime.clickhouse.example.yaml).
 - [团队配置](config/README.md) · [外部语义层](docs/exploration.md) — 维护私有配置与探索性分析所需的定义。
 - [开发状态](docs/development-status.md) — 已实现能力、验证证据和待完成项。

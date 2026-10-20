@@ -8,12 +8,11 @@ These are deployment-owned configuration files, not chat inputs.
 | --- | --- | --- |
 | `storage` | Metric definitions, revisions, releases and audit records | `postgres`, `mysql` |
 | `query_engine` | Published-metric analytical execution | `databricks_sql`, `disabled` |
-| `online` | Bounded reads of precomputed DWS/ADS aggregates | `postgres_online`, `clickhouse_online` |
+| `online` | Bounded reads of precomputed DWS/ADS aggregates | `postgres_online`, `clickhouse_online`, `doris_online` |
 | `exploration` | Temporary analysis over reviewed semantic catalogs | `databricks_sql`, `trino`, `presto` |
 
-Doris result stores remain planned adapters. Selecting them fails configuration validation before
-opening databases or listening. Installing these engines in a test lab does not
-make them supported MetricSpire drivers.
+For Doris result serving and its DATE/SUM/type limits, see [the Doris guide](doris-online.md).
+Online adapters do not imply general analytical or exploration support.
 
 Existing configuration files retain their defaults: PostgreSQL metadata,
 Databricks analytical queries, and optional PostgreSQL online serving.

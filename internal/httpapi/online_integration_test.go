@@ -386,8 +386,19 @@ func TestOnlinePostgresHTTPResultPermissionsAndFailureBoundaries(t *testing.T) {
 	query.TimeGrouping = nil
 	query.OrderBy = nil
 	status, data = f.request(t, "analyst", query)
-	if status != 200 || bytes.Contains(data, []byte("999999")) {
-		t.Fatalf("tenant data leaked %d %s", status, data)
+	var scoped application.OnlineResult
+	if status != 200 || json.Unmarshal(data, &scoped) != nil || scoped.Result == nil || len(scoped.Result.Rows) != 1 || len(scoped.Result.Rows[0]) != 3 {
+		t.Fatalf("invalid tenant result: %d", status)
+	}
+	if scoped.Result.Rows[0][1] != float64(3) {
+		t.Fatal("tenant row count changed")
+	}
+	for column, want := range map[int]int64{0: 150, 2: 50} {
+		raw, ok := scoped.Result.Rows[0][column].(string)
+		value, valid := new(big.Rat).SetString(raw)
+		if !ok || !valid || value.Cmp(big.NewRat(want, 1)) != 0 {
+			t.Fatal("tenant aggregate changed")
+		}
 	}
 	// A writer's incomplete transaction remains invisible to the online read.
 	tx, err := f.admin.Begin(t.Context())

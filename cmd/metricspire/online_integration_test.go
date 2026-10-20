@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/marmot1024/metricspire/internal/adapter/clickhousequery"
 	"github.com/marmot1024/metricspire/internal/adapter/databricks"
+	"github.com/marmot1024/metricspire/internal/adapter/dorisquery"
 	"github.com/marmot1024/metricspire/internal/adapter/postgresquery"
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/catalog"
@@ -76,6 +77,16 @@ func TestServeOnlineClickHouseWithPostgresMetadata(t *testing.T) {
 	testServeOnlineEngine(t, "", false, true, true, clickhousequery.EngineName)
 }
 
+func TestServeOnlineDorisWithPostgresMetadata(t *testing.T) {
+	if os.Getenv("METRICSPIRE_DORIS_TEST_URL") == "" {
+		if os.Getenv("METRICSPIRE_REQUIRE_DORIS_TESTS") == "1" {
+			t.Fatal("Doris URL required")
+		}
+		t.Skip("requires disposable Doris")
+	}
+	testServeOnlineEngine(t, "", false, true, true, dorisquery.EngineName)
+}
+
 func testServeOnlineEngine(t *testing.T, writePrivilege string, inherited, portable, structured bool, driver string, metadataDriver ...string) {
 	testServeOnlineExplorationEngine(t, writePrivilege, inherited, portable, structured, driver, "", false, metadataDriver...)
 }
@@ -100,7 +111,7 @@ func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inher
 	t.Helper()
 	raw := os.Getenv("METRICSPIRE_ONLINE_TEST_DATABASE_URL")
 	if raw == "" {
-		if os.Getenv("METRICSPIRE_REQUIRE_POSTGRES_TESTS") == "1" || os.Getenv("METRICSPIRE_REQUIRE_CLICKHOUSE_TESTS") == "1" || os.Getenv("METRICSPIRE_REQUIRE_MYSQL_TESTS") == "1" {
+		if os.Getenv("METRICSPIRE_REQUIRE_POSTGRES_TESTS") == "1" || os.Getenv("METRICSPIRE_REQUIRE_CLICKHOUSE_TESTS") == "1" || os.Getenv("METRICSPIRE_REQUIRE_MYSQL_TESTS") == "1" || os.Getenv("METRICSPIRE_REQUIRE_DORIS_TESTS") == "1" {
 			t.Fatal("PostgreSQL test URL required")
 		}
 		t.Skip("requires a disposable loopback PostgreSQL administrator")
@@ -194,6 +205,9 @@ func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inher
 	contract, err := postgresquery.DataContractFingerprint(release.Manifest, binding)
 	if driver == clickhousequery.EngineName {
 		contract, err = clickhousequery.DataContractFingerprint(release.Manifest, binding)
+	}
+	if driver == dorisquery.EngineName {
+		contract, err = dorisquery.DataContractFingerprint(release.Manifest, binding)
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -299,6 +313,9 @@ func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inher
 	resultsURL := readerURL.String()
 	if driver == clickhousequery.EngineName {
 		resultsURL = clickHouseStartupFixture(t, data, contract)
+	}
+	if driver == dorisquery.EngineName {
+		resultsURL = dorisStartupFixture(t, data, contract)
 	}
 	// Process-local test environment only: no Databricks profile, OAuth flow,
 	// credential cache or shared configuration is read or written.

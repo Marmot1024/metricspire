@@ -1,0 +1,41 @@
+# Synthetic, disposable single FE/BE only. No host network or workspace mounts.
+name: metricspire-doris-lab
+services:
+  fe:
+    image: apache/doris:fe-4.1.0
+    environment:
+      FE_SERVERS: fe1:172.30.248.2:9010
+      FE_ID: '1'
+    ports: ["127.0.0.1:19030:9030"]
+    entrypoint: [bash, -c]
+    command:
+      - |
+        sed -i -E 's/-Xmx[0-9]+[gGmM]/-Xmx1024m/g; s/-Xms[0-9]+[gGmM]/-Xms1024m/g' /opt/apache-doris/fe/conf/fe.conf
+        exec bash /usr/local/bin/init_fe.sh
+    mem_limit: 2g
+    cpus: 2
+    networks:
+      doris: {ipv4_address: 172.30.248.2}
+  be:
+    image: apache/doris:be-4.1.0
+    environment:
+      FE_SERVERS: fe1:172.30.248.2:9010
+      MASTER_FE_IP: 172.30.248.2
+      CURRENT_BE_IP: 172.30.248.3
+      CURRENT_BE_PORT: '9050'
+      PRIORITY_NETWORKS: 172.30.248.0/24
+    entrypoint: [bash, -c]
+    command:
+      - |
+        sed -i -E 's/-Xmx[0-9]+[gGmM]/-Xmx512m/g; s/-Xms[0-9]+[gGmM]/-Xms512m/g' /opt/apache-doris/be/conf/be.conf
+        echo 'mem_limit = 2G' >> /opt/apache-doris/be/conf/be.conf
+        exec bash /usr/local/bin/init_be.sh
+    mem_limit: 3g
+    cpus: 2
+    depends_on: [fe]
+    networks:
+      doris: {ipv4_address: 172.30.248.3}
+networks:
+  doris:
+    ipam:
+      config: [{subnet: 172.30.248.0/24}]

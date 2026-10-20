@@ -145,3 +145,30 @@ jobs:
           METRICSPIRE_REQUIRE_MYSQL_TESTS: '1'
           METRICSPIRE_ONLINE_TEST_DATABASE_URL: postgres://postgres:ci-only-disposable@127.0.0.1:15432/metricspire_test?sslmode=disable
         run: go test -race -count=1 -v ./internal/repository/mysql ./cmd/metricspire -run 'TestMySQL|TestMigrationInstallUpgradeAndFailure|TestUnsafeMySQLURLs|TestServeMySQLMetadata'
+
+
+  doris-online:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache: true
+      - name: Start disposable Doris and metadata
+        env:
+          METRICSPIRE_LAB_PASSWORD: ci-only-disposable
+        run: |
+          docker compose -f deploy/testing/compose.yaml up -d --wait postgres
+          docker compose -f deploy/testing/doris-compose.yaml up -d
+          METRICSPIRE_DORIS_DISPOSABLE=1 go run ./tools/doris-ready
+      - name: Real Doris read-only grants, exact filters, OIDC and native MCP
+        env:
+          METRICSPIRE_DORIS_TEST_URL: doris://root:ci-only-disposable@127.0.0.1:19030?tls=false
+          METRICSPIRE_REQUIRE_DORIS_TESTS: '1'
+          METRICSPIRE_ONLINE_TEST_DATABASE_URL: postgres://postgres:ci-only-disposable@127.0.0.1:15432/metricspire_test?sslmode=disable
+        run: go test -race -count=1 -v ./internal/adapter/dorisquery ./cmd/metricspire -run 'TestDoris|TestServeOnlineDorisWithPostgresMetadata'
+      - name: Dispose lab containers
+        if: always()
+        run: docker compose -f deploy/testing/doris-compose.yaml down -v
