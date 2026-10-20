@@ -55,6 +55,7 @@ func DetailMetric(m application.MetricCatalogEntry) MetricDetail {
 }
 
 type MetricDetailsInput struct {
+	Route     string   `json:"route,omitempty" jsonschema:"Copy route from search_metrics; online_metrics reads independent certified online definitions, omitted or published_metrics uses the default catalog."`
 	Namespace string   `json:"namespace"`
 	Metrics   []string `json:"metrics" jsonschema:"1 to 20 exact metric names from search_metrics; not external codes or physical names"`
 }
@@ -67,6 +68,7 @@ type QueryRoute struct {
 type QueryRoutes struct {
 	Namespace        string     `json:"namespace"`
 	PublishedMetrics QueryRoute `json:"published_metrics"`
+	OnlineMetrics    QueryRoute `json:"online_metrics"`
 	Exploration      QueryRoute `json:"exploration"`
 	SelectionRules   []string   `json:"selection_rules"`
 }

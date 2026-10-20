@@ -54,8 +54,7 @@ Online execution uses `POST /api/v1/namespaces/{namespace}/online-query` and the
 external metric-code request contract. MCP catalog discovery remains available;
 MCP analytical query tools fail explicitly with `query_engine_disabled`.
 `discover_query_routes` does not advertise the disabled analytical workflow.
-Online HTTP execution is not automatically exposed through the analytical MCP
-query contract. Authentication and authorization still precede disabled-route
+Online execution is exposed separately as `query_online_metrics` when configured; search and fetch details with `route: online_metrics` so independent online policies apply. Authentication and authorization still precede disabled-route
 responses. There is no automatic fallback from failed, denied or disabled routes.
 
 ## Private semantic sources

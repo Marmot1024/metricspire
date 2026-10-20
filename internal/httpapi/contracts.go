@@ -130,6 +130,7 @@ type Dependencies struct {
 	Management          ManagementService
 	Catalog             CatalogReader
 	CatalogSearch       CatalogSearcher
+	OnlineCatalogSearch CatalogSearcher // optional, certified-only with independent online policies
 	Governance          GovernanceService
 	Bindings            application.BindingResolver
 	Queries             QueryService

@@ -29,6 +29,7 @@ import (
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
+	"github.com/marmot1024/metricspire/internal/mcpbridge"
 	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/marmot1024/metricspire/internal/repository/postgres"
 	"github.com/marmot1024/metricspire/internal/runtimeconfig"
@@ -414,11 +415,62 @@ func testServeOnlineEngine(t *testing.T, writePrivilege string, inherited, porta
 			t.Fatalf("online reader restriction changed analytical permissions: %d %s", status, body)
 		}
 	}
+
+	// Native MCP uses the same serving service and trusted OIDC identity even
+	// when there is no analytical engine or Databricks configuration.
+	session := mcpHTTPTransport(t, baseURL+"/api/v1/mcp", token)
+	var routes mcpbridge.QueryRoutes
+	mcpCall(t, session, "discover_query_routes", map[string]any{"namespace": "demo"}, &routes)
+	if !routes.OnlineMetrics.Available || routes.PublishedMetrics.Available == portable {
+		t.Fatal("incorrect portable MCP routes")
+	}
+	onlineInput := mcpbridge.OnlineQueryInput{Namespace: "demo", Query: query}
+	if structured {
+		onlineInput.Query.MetricSelections = nil
+		if text := mcpCallError(t, session, "query_online_metrics", onlineInput); !strings.Contains(text, "metric_selection_required") {
+			t.Fatal(text)
+		}
+		onlineInput.Query.MetricSelections = query.MetricSelections
+	}
+	var detail struct {
+		Metrics []mcpbridge.MetricDetail `json:"metrics"`
+	}
+	mcpCall(t, session, "get_metric_details", mcpbridge.MetricDetailsInput{Namespace: "demo", Route: "online_metrics", Metrics: []string{"revenue"}}, &detail)
+	if len(detail.Metrics) != 1 || detail.Metrics[0].ExternalCode != "10001" || detail.Metrics[0].ManifestFingerprint != release.ManifestFingerprint {
+		t.Fatal("online definition metadata differs")
+	}
+	var native application.OnlineResult
+	mcpCall(t, session, "query_online_metrics", onlineInput, &native)
+	if native.ReleaseID != result.ReleaseID || native.ManifestFingerprint != result.ManifestFingerprint || native.Snapshot.BatchID != result.Snapshot.BatchID || len(native.Result.Rows) != len(result.Result.Rows) {
+		t.Fatal("MCP and HTTP serving evidence differ")
+	}
+	for col, want := range map[int]int64{1: 100, 3: 50} {
+		raw, ok := native.Result.Rows[0][col].(string)
+		amount, valid := new(big.Rat).SetString(raw)
+		if !ok || !valid || amount.Cmp(big.NewRat(want, 1)) != 0 {
+			t.Fatal("wrong native MCP metric value")
+		}
+	}
+	otherSession := mcpHTTPTransport(t, baseURL+"/api/v1/mcp", nonReader)
+	mcpCall(t, otherSession, "discover_query_routes", map[string]any{"namespace": "demo"}, &routes)
+	if routes.OnlineMetrics.Available || routes.PublishedMetrics.Available == portable {
+		t.Fatal("online discovery ignored separate reader policy")
+	}
+	var hidden struct {
+		Metrics []mcpbridge.MetricSummary `json:"metrics"`
+	}
+	mcpCall(t, otherSession, "search_metrics", mcpbridge.SearchInput{Namespace: "demo", Route: "online_metrics"}, &hidden)
+	if len(hidden.Metrics) != 0 {
+		t.Fatal("online metadata leaked to analytical-only reader")
+	}
+	if text := mcpCallError(t, otherSession, "query_online_metrics", onlineInput); !strings.Contains(text, "permission_denied") {
+		t.Fatal(text)
+	}
 	if status, _ := call("/api/v1/namespaces/demo/online-query", query, "invalid"); status != 401 {
 		t.Fatalf("invalid OIDC token: %d", status)
 	}
 	var count int
-	if err := admin.QueryRow(t.Context(), "SELECT count(*) FROM "+qualified(control, "metricspire_query_audit")+" WHERE event_kind IN ('query_started','query_succeeded')").Scan(&count); err != nil || count != 2 {
+	if err := admin.QueryRow(t.Context(), "SELECT count(*) FROM "+qualified(control, "metricspire_query_audit")+" WHERE event_kind IN ('query_started','query_succeeded')").Scan(&count); err != nil || count != 4 {
 		t.Fatalf("startup durable audit count=%d error=%v", count, err)
 	}
 }
