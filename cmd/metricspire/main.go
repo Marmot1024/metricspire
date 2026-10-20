@@ -45,6 +45,8 @@ func runContext(ctx context.Context, arguments []string, stdout, stderr io.Write
 		return runValidateDomains(arguments[1:], stdout, stderr)
 	case "validate-analysis":
 		return runValidateAnalysis(arguments[1:], stdout, stderr)
+	case "export-online", "init-online-refresh", "refresh-online":
+		return runOnlineRefresh(arguments[0], arguments[1:], stdout, stderr)
 	case "online-contract":
 		return runOnlineContract(arguments[1:], stdout, stderr)
 	case "compile":
@@ -196,6 +198,7 @@ Usage:
   metricspire validate-domains --config config/local/domains.yaml
   metricspire validate-analysis --catalog reviewed-analysis.yaml
   metricspire online-contract --source model.yaml --binding online-binding.yaml
+  metricspire export-online|init-online-refresh|refresh-online --help
   metricspire compile --source model.yaml --out manifest.json
   metricspire compile-policy --source policy.yaml --manifest manifest.json --out policy.json
   metricspire plan --manifest manifest.json --policy policy.json --context context.json \

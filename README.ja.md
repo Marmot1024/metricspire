@@ -66,6 +66,7 @@ Web アクセス権がある場合は、チームのインスタンスを開き�
 - [はじめに](docs/getting-started.md) — オフラインサンプル、ローカルカタログ、サービス設定。
 - [MCP 接続](docs/mcp.md) · [HTTP API](docs/http-api.md) — クライアントやアプリとの接続。
 - [アーキテクチャとアダプター](docs/architecture.md) — システムの役割、クエリ経路、現在のデータベース対応範囲。
+- [オフライン集計の更新](docs/online-refresh.md): PostgreSQL の型付きバッチ出力、独立照合、テナント単位のアトミックな更新。
 - [ClickHouse 集計クエリ](docs/clickhouse-online.md) · [runtime.clickhouse.example.yaml](examples/runtime.clickhouse.example.yaml).
 - [チーム設定](config/README.md) · [外部セマンティック層](docs/exploration.md) — 非公開設定と探索的分析用の定義。
 - [開発状況](docs/development-status.md) — 実装済みの機能、検証の根拠、残っている課題。
