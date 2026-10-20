@@ -138,7 +138,7 @@ func (s *Store) SaveDraft(ctx context.Context, input catalog.SaveDraftInput) (ca
 		}
 		current = 0
 	case err != nil:
-		return catalog.Draft{}, fmt.Errorf("lock draft: %w", err)
+		return catalog.Draft{}, classify("lock draft", err)
 	case current != input.ExpectedRevision:
 		return catalog.Draft{}, catalog.ErrConflict
 	}
@@ -219,7 +219,7 @@ func (s *Store) Publish(ctx context.Context, input catalog.PublishInput) (catalo
 	).Scan(&revision, &sourcePayload); errors.Is(err, pgx.ErrNoRows) {
 		return catalog.Release{}, catalog.ErrNotFound
 	} else if err != nil {
-		return catalog.Release{}, fmt.Errorf("lock draft for publish: %w", err)
+		return catalog.Release{}, classify("lock draft for publish", err)
 	}
 	if revision != input.ExpectedRevision {
 		return catalog.Release{}, catalog.ErrConflict
@@ -487,7 +487,7 @@ FOR UPDATE`, namespace, name).Scan(&previous)
 		return "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("lock active release: %w", err)
+		return "", classify("lock active release", err)
 	}
 	return previous, nil
 }
