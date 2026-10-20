@@ -31,6 +31,8 @@
 !internal/planner/*.go
 !internal/policy/*.go
 !internal/repository/postgres/*.go
+!internal/repository/mysql/*.go
+!internal/repository/mysql/migrations/*.sql
 !internal/runtimeconfig/*.go
 # Explicit runtime go:embed inputs.
 !internal/exploration/query.schema.json

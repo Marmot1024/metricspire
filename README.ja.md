@@ -46,7 +46,7 @@ MetricSpire は、分析用データベース、業務アプリ、AI アシス�
 
 実線はサービス呼び出しまたはデータ書き込み、破線は任意の意味定義の入力です。**OLAP エンジン、指標ストア、外部セマンティック層はそれぞれ役割が異なります。**
 
-アダプターの設計対象は ClickHouse、Doris などの OLAP エンジンと、MySQL、PostgreSQL などの指標ストアです。**現在、このリポジトリには Databricks SQL 分析アダプターと PostgreSQL 指標ストアを実装しています。** PostgreSQL / ClickHouse の事前集計データへの HTTP/MCP クエリと、制限付きの [Trino/Presto 探索](docs/trino-presto.md)も利用できます。Doris、MySQL のアダプターは未実装で、ClickHouse の探索分析と分析用 MCP クエリは未対応です。[アーキテクチャと対応範囲](docs/architecture.md#adapter-support)をご確認ください。
+アダプターの設計対象は ClickHouse、Doris などの OLAP エンジンと、MySQL、PostgreSQL などの指標ストアです。**現在、このリポジトリには Databricks SQL 分析アダプターと PostgreSQL 指標ストアを実装しています。** PostgreSQL / ClickHouse の事前集計データへの HTTP/MCP クエリと、制限付きの [Trino/Presto 探索](docs/trino-presto.md)も利用できます。MySQL 8.4 のメタデータ保存にも対応しています。Doris は未実装で、ClickHouse の探索分析と分析用 MCP クエリは未対応です。[アーキテクチャと対応範囲](docs/architecture.md#adapter-support)をご確認ください。
 
 ## どこから始めますか？
 

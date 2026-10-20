@@ -15,6 +15,13 @@ type QueryEngineConfig struct {
 	Driver string `json:"driver,omitempty" yaml:"driver,omitempty"`
 }
 
+func (c Config) StorageDriver() string {
+	if c.Storage.Driver == "" {
+		return "postgres"
+	}
+	return c.Storage.Driver
+}
+
 func (c Config) QueryDriver() string {
 	if c.QueryEngine.Driver == "" {
 		return "databricks_sql"
@@ -37,8 +44,8 @@ func (c OnlineConfig) DatabaseEnv() string {
 }
 
 func (c Config) validateEngines() error {
-	if c.Storage.Driver != "" && c.Storage.Driver != "postgres" {
-		return fmt.Errorf("storage.driver %q is not implemented; supported: postgres", c.Storage.Driver)
+	if c.StorageDriver() != "mysql" && c.StorageDriver() != "postgres" {
+		return fmt.Errorf("storage.driver %q is not implemented; supported: postgres, mysql", c.Storage.Driver)
 	}
 	if c.QueryDriver() != "databricks_sql" && c.QueryDriver() != "disabled" {
 		return fmt.Errorf("query_engine.driver %q is not implemented; supported: databricks_sql, disabled", c.QueryDriver())

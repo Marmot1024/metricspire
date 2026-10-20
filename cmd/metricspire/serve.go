@@ -90,7 +90,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	initializationContext, cancelInitialization := context.WithTimeout(ctx, startupTimeout)
 	defer cancelInitialization()
 
-	store, err := openStore(initializationContext, environment.databaseURL)
+	store, err := openServeMetadataStore(initializationContext, config, environment.databaseURL)
 	if err != nil {
 		return err
 	}

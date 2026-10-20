@@ -7,6 +7,8 @@ integrity hashes are locked in `go.sum`.
 | --- | --- |
 | `github.com/coreos/go-oidc/v3` | Apache License 2.0 |
 | `github.com/go-jose/go-jose/v4` | Apache License 2.0 |
+| `github.com/go-sql-driver/mysql` | Mozilla Public License 2.0 |
+| `filippo.io/edwards25519` | BSD-3-Clause |
 | `github.com/jackc/pgx/v5` | MIT |
 | `github.com/jackc/pgpassfile` | MIT |
 | `github.com/jackc/pgservicefile` | MIT |
