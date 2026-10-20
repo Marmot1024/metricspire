@@ -56,3 +56,5 @@ above. Set the matching `METRICSPIRE_REQUIRE_TRINO_TESTS=1` or
 The public TPCH sf1 source generates about six million rows; fixtures check
 exact counts/sums against an independent SQL oracle, decimal average, final
 window denominator, two stages, OIDC denial, principal isolation and durable audit.
+
+MySQL metadata tests use `--profile metadata` and port `13306`; see [MySQL metadata](../../docs/mysql-metadata.md). Each test owns a generated database and uses only neutral fixtures.

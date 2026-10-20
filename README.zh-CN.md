@@ -46,7 +46,7 @@ MetricSpire 是一个开源的指标库与数据服务，连接你的分析数�
 
 图中实线表示服务调用或数据写入，虚线表示可选的语义配置输入。**OLAP 引擎、指标存储、外部语义层是三个不同的角色。**
 
-接入设计面向 ClickHouse、Doris 等 OLAP 引擎，以及 MySQL、PostgreSQL 等指标存储。**当前仓库已实现 Databricks SQL 分析适配器和 PostgreSQL 指标存储**，另有可选的 PostgreSQL / ClickHouse 预计算汇总 HTTP/MCP 查询和受控 [Trino/Presto 探索](docs/trino-presto.md)；Doris、MySQL 适配器尚未提供，ClickHouse 暂不支持探索分析或分析类 MCP 查询。各路径的实现范围见[架构与适配器](docs/architecture.md#adapter-support)。
+接入设计面向 ClickHouse、Doris 等 OLAP 引擎，以及 MySQL、PostgreSQL 等指标存储。**当前仓库已实现 Databricks SQL 分析适配器和 PostgreSQL 指标存储**，另有可选的 PostgreSQL / ClickHouse 预计算汇总 HTTP/MCP 查询和受控 [Trino/Presto 探索](docs/trino-presto.md)；另支持 MySQL 8.4 元数据存储；Doris 适配器尚未提供，ClickHouse 暂不支持探索分析或分析类 MCP 查询。各路径的实现范围见[架构与适配器](docs/architecture.md#adapter-support)。
 
 ## 从哪里开始？
 

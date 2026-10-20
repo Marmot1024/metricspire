@@ -32,6 +32,7 @@ import (
 	"github.com/marmot1024/metricspire/internal/exploration"
 	"github.com/marmot1024/metricspire/internal/mcpbridge"
 	"github.com/marmot1024/metricspire/internal/model"
+	"github.com/marmot1024/metricspire/internal/repository/mysql"
 	"github.com/marmot1024/metricspire/internal/repository/postgres"
 	"github.com/marmot1024/metricspire/internal/runtimeconfig"
 )
@@ -74,8 +75,8 @@ func TestServeOnlineClickHouseWithPostgresMetadata(t *testing.T) {
 	testServeOnlineEngine(t, "", false, true, true, clickhousequery.EngineName)
 }
 
-func testServeOnlineEngine(t *testing.T, writePrivilege string, inherited, portable, structured bool, driver string) {
-	testServeOnlineExplorationEngine(t, writePrivilege, inherited, portable, structured, driver, "")
+func testServeOnlineEngine(t *testing.T, writePrivilege string, inherited, portable, structured bool, driver string, metadataDriver ...string) {
+	testServeOnlineExplorationEngine(t, writePrivilege, inherited, portable, structured, driver, "", metadataDriver...)
 }
 func TestServeTrinoPrestoWithoutDatabricks(t *testing.T) {
 	for _, engine := range []string{"trino", "presto"} {
@@ -90,11 +91,11 @@ func TestServeTrinoPrestoWithoutDatabricks(t *testing.T) {
 		})
 	}
 }
-func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inherited, portable, structured bool, driver, explorationDriver string) {
+func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inherited, portable, structured bool, driver, explorationDriver string, metadataDriver ...string) {
 	t.Helper()
 	raw := os.Getenv("METRICSPIRE_ONLINE_TEST_DATABASE_URL")
 	if raw == "" {
-		if os.Getenv("METRICSPIRE_REQUIRE_POSTGRES_TESTS") == "1" || os.Getenv("METRICSPIRE_REQUIRE_CLICKHOUSE_TESTS") == "1" {
+		if os.Getenv("METRICSPIRE_REQUIRE_POSTGRES_TESTS") == "1" || os.Getenv("METRICSPIRE_REQUIRE_CLICKHOUSE_TESTS") == "1" || os.Getenv("METRICSPIRE_REQUIRE_MYSQL_TESTS") == "1" {
 			t.Fatal("PostgreSQL test URL required")
 		}
 		t.Skip("requires a disposable loopback PostgreSQL administrator")
@@ -139,15 +140,24 @@ func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inher
 	params := controlURL.Query()
 	params.Set("search_path", control)
 	controlURL.RawQuery = params.Encode()
-	pool, err := pgxpool.New(t.Context(), controlURL.String())
-	if err != nil {
-		t.Fatal("open fixture control pool")
+	var store metadataStore
+	var my *mysql.Store
+	if len(metadataDriver) > 0 && metadataDriver[0] == "mysql" {
+		instance, rawURL := mysqlStartupFixture(t)
+		my = instance
+		store = my
+		controlURL = *rawURL
+	} else {
+		pool, err := pgxpool.New(t.Context(), controlURL.String())
+		if err != nil {
+			t.Fatal("open fixture control pool")
+		}
+		t.Cleanup(pool.Close)
+		if err := postgres.Migrate(t.Context(), pool); err != nil {
+			t.Fatal(err)
+		}
+		store, _ = postgres.New(pool)
 	}
-	t.Cleanup(pool.Close)
-	if err := postgres.Migrate(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
-	store, _ := postgres.New(pool)
 	management, _ := catalog.NewService(store)
 	var source model.SemanticSource
 	var binding model.SourceBinding
@@ -248,6 +258,9 @@ func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inher
 		Policies:       []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: source.Metadata.Name, Tenant: "demo", Path: filepath.Join(base, "policy.yaml")}},
 		Bindings:       []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: source.Metadata.Name, Path: "warehouse.json"}},
 		Online:         &runtimeconfig.OnlineConfig{Tenant: "demo", Namespaces: []string{"demo"}, DataAccess: "tenant_shared", Resources: []model.ResourceRef{{Kind: model.ResourceTable, Schema: data, Table: "daily_sales"}}, MaxDataAge: "5m", Timeout: "1s", Bindings: []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: source.Metadata.Name, Path: "online.json"}}},
+	}
+	if my != nil {
+		config.Storage.Driver = "mysql"
 	}
 	config.Online.Driver = driver
 	config.Online.Policies = []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: source.Metadata.Name, Tenant: "demo", Path: "reader-policy.json"}}
@@ -539,9 +552,32 @@ func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inher
 	if explorationDriver != "" {
 		wantAudits = 6
 	}
-	if err := admin.QueryRow(t.Context(), "SELECT count(*) FROM "+qualified(control, "metricspire_query_audit")+" WHERE event_kind IN ('query_started','query_succeeded')").Scan(&count); err != nil || count != wantAudits {
-		t.Fatalf("startup durable audit count=%d error=%v", count, err)
+	var auditErr error
+	if my != nil {
+		auditErr = my.DB().QueryRowContext(t.Context(), "SELECT count(*) FROM metricspire_query_audit WHERE event_kind IN ('query_started','query_succeeded')").Scan(&count)
+	} else {
+		auditErr = admin.QueryRow(t.Context(), "SELECT count(*) FROM "+qualified(control, "metricspire_query_audit")+" WHERE event_kind IN ('query_started','query_succeeded')").Scan(&count)
 	}
+	if auditErr != nil || count != wantAudits {
+		t.Fatalf("startup durable audit count=%d error=%v", count, auditErr)
+	}
+
+	if my != nil {
+		for _, kind := range []string{"query_started", "query_succeeded"} {
+			ddl := `CREATE TRIGGER reject_query_audit BEFORE INSERT ON metricspire_query_audit FOR EACH ROW BEGIN IF NEW.event_kind='` + kind + `' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='private audit detail'; END IF; END`
+			if _, err := my.DB().ExecContext(t.Context(), ddl); err != nil {
+				t.Fatal(err)
+			}
+			message := mcpCallError(t, session, "query_online_metrics", onlineInput)
+			if !strings.Contains(message, "audit_unavailable") || strings.Contains(message, "private audit") || strings.Contains(message, "data_snapshot") {
+				t.Fatal("audit failure returned unsafe result", message)
+			}
+			if _, err := my.DB().ExecContext(t.Context(), `DROP TRIGGER reject_query_audit`); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
 }
 
 func onlineFixtureToken(t *testing.T, key *rsa.PrivateKey, claims map[string]any) string {

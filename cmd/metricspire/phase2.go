@@ -21,6 +21,7 @@ import (
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
 	"github.com/marmot1024/metricspire/internal/model"
+	"github.com/marmot1024/metricspire/internal/repository/mysql"
 	"github.com/marmot1024/metricspire/internal/repository/postgres"
 )
 
@@ -54,7 +55,7 @@ func runPhase2(ctx context.Context, command string, arguments []string, stdout, 
 func runMigrate(parent context.Context, arguments []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	databaseURL := flags.String("database-url", os.Getenv("METRICSPIRE_DATABASE_URL"), "PostgreSQL URL (or METRICSPIRE_DATABASE_URL)")
+	databaseURL := flags.String("database-url", os.Getenv("METRICSPIRE_DATABASE_URL"), "Metadata PostgreSQL/MySQL URL (or METRICSPIRE_DATABASE_URL)")
 	schema := flags.String("schema", os.Getenv("METRICSPIRE_DATABASE_SCHEMA"), "dedicated PostgreSQL schema (or METRICSPIRE_DATABASE_SCHEMA)")
 	timeout := flags.Duration("timeout", defaultCommandTimeout, "operation timeout")
 	if err := parseNoPositionals(flags, arguments); err != nil {
@@ -65,26 +66,40 @@ func runMigrate(parent context.Context, arguments []string, stdout, stderr io.Wr
 		return err
 	}
 	defer cancel()
-	store, err := openStore(ctx, *databaseURL)
+	store, err := openMetadataStore(ctx, *databaseURL)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	if strings.TrimSpace(*schema) != "" {
-		if err := postgres.EnsureSchema(ctx, store.Pool(), strings.TrimSpace(*schema)); err != nil {
+	switch typed := store.(type) {
+	case *mysql.Store:
+		if strings.TrimSpace(*schema) != "" {
+			return errors.New("MySQL uses the dedicated database in its URL; --schema is PostgreSQL-only")
+		}
+		if err := typed.Migrate(ctx); err != nil {
 			return err
 		}
+		return writeJSON(stdout, map[string]string{"status": "ok", "component": "mysql_migrations"})
+	case *postgres.Store:
+		if strings.TrimSpace(*schema) != "" {
+			if err := postgres.EnsureSchema(ctx, typed.Pool(), strings.TrimSpace(*schema)); err != nil {
+				return err
+			}
+		}
+		if err := postgres.Migrate(ctx, typed.Pool()); err != nil {
+			return err
+		}
+		return writeJSON(stdout, map[string]string{"status": "ok", "component": "postgres_migrations"})
+	default:
+		return errors.New("unsupported metadata store")
 	}
-	if err := postgres.Migrate(ctx, store.Pool()); err != nil {
-		return err
-	}
-	return writeJSON(stdout, map[string]string{"status": "ok", "component": "postgres_migrations"})
+
 }
 
 func runHealthcheck(parent context.Context, arguments []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("healthcheck", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	databaseURL := flags.String("database-url", os.Getenv("METRICSPIRE_DATABASE_URL"), "PostgreSQL URL (or METRICSPIRE_DATABASE_URL)")
+	databaseURL := flags.String("database-url", os.Getenv("METRICSPIRE_DATABASE_URL"), "Metadata PostgreSQL/MySQL URL (or METRICSPIRE_DATABASE_URL)")
 	timeout := flags.Duration("timeout", 5*time.Second, "operation timeout")
 	if err := parseNoPositionals(flags, arguments); err != nil {
 		return err
@@ -94,18 +109,22 @@ func runHealthcheck(parent context.Context, arguments []string, stdout, stderr i
 		return err
 	}
 	defer cancel()
-	store, err := openStore(ctx, *databaseURL)
+	store, err := openMetadataStore(ctx, *databaseURL)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	return writeJSON(stdout, map[string]string{"status": "ok", "component": "postgres"})
+	component := "postgres"
+	if _, ok := store.(*mysql.Store); ok {
+		component = "mysql"
+	}
+	return writeJSON(stdout, map[string]string{"status": "ok", "component": component})
 }
 
 func runDraftPut(parent context.Context, arguments []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("draft-put", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	databaseURL := flags.String("database-url", os.Getenv("METRICSPIRE_DATABASE_URL"), "PostgreSQL URL (or METRICSPIRE_DATABASE_URL)")
+	databaseURL := flags.String("database-url", os.Getenv("METRICSPIRE_DATABASE_URL"), "Metadata PostgreSQL/MySQL URL (or METRICSPIRE_DATABASE_URL)")
 	namespace := flags.String("namespace", "", "catalog namespace")
 	sourcePath := flags.String("source", "", "semantic source (.json/.yaml)")
 	actor := flags.String("actor", "", "human or service actor")
@@ -126,7 +145,7 @@ func runDraftPut(parent context.Context, arguments []string, stdout, stderr io.W
 		return err
 	}
 	defer cancel()
-	store, err := openStore(ctx, *databaseURL)
+	store, err := openMetadataStore(ctx, *databaseURL)
 	if err != nil {
 		return err
 	}
@@ -159,7 +178,7 @@ func runDraftGet(parent context.Context, arguments []string, stdout, stderr io.W
 		return err
 	}
 	defer cancel()
-	store, err := openStore(ctx, *databaseURL)
+	store, err := openMetadataStore(ctx, *databaseURL)
 	if err != nil {
 		return err
 	}
@@ -189,7 +208,7 @@ func runPublish(parent context.Context, arguments []string, stdout, stderr io.Wr
 		return err
 	}
 	defer cancel()
-	store, err := openStore(ctx, *databaseURL)
+	store, err := openMetadataStore(ctx, *databaseURL)
 	if err != nil {
 		return err
 	}
@@ -223,7 +242,7 @@ func runRollback(parent context.Context, arguments []string, stdout, stderr io.W
 		return err
 	}
 	defer cancel()
-	store, err := openStore(ctx, *databaseURL)
+	store, err := openMetadataStore(ctx, *databaseURL)
 	if err != nil {
 		return err
 	}
@@ -254,7 +273,7 @@ func runReleaseList(parent context.Context, arguments []string, stdout, stderr i
 		return err
 	}
 	defer cancel()
-	store, err := openStore(ctx, *databaseURL)
+	store, err := openMetadataStore(ctx, *databaseURL)
 	if err != nil {
 		return err
 	}
@@ -304,7 +323,7 @@ func runReleaseEvents(parent context.Context, arguments []string, stdout, stderr
 		return err
 	}
 	defer cancel()
-	store, err := openStore(ctx, *databaseURL)
+	store, err := openMetadataStore(ctx, *databaseURL)
 	if err != nil {
 		return err
 	}
@@ -319,7 +338,7 @@ func runReleaseEvents(parent context.Context, arguments []string, stdout, stderr
 func runQueryActive(parent context.Context, arguments []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("query-active", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	databaseURL := flags.String("database-url", os.Getenv("METRICSPIRE_DATABASE_URL"), "PostgreSQL URL (or METRICSPIRE_DATABASE_URL)")
+	databaseURL := flags.String("database-url", os.Getenv("METRICSPIRE_DATABASE_URL"), "Metadata PostgreSQL/MySQL URL (or METRICSPIRE_DATABASE_URL)")
 	namespace := flags.String("namespace", "", "catalog namespace")
 	modelName := flags.String("model", "", "semantic model name")
 	contextPath := flags.String("context", "", "trusted request context (.json/.yaml)")
@@ -373,7 +392,7 @@ func runQueryActive(parent context.Context, arguments []string, stdout, stderr i
 		return err
 	}
 	defer cancel()
-	store, err := openStore(ctx, *databaseURL)
+	store, err := openMetadataStore(ctx, *databaseURL)
 	if err != nil {
 		return err
 	}
@@ -401,7 +420,7 @@ func runQueryActive(parent context.Context, arguments []string, stdout, stderr i
 }
 
 func catalogReadFlags(flags *flag.FlagSet) (*string, *string, *string, *time.Duration) {
-	databaseURL := flags.String("database-url", os.Getenv("METRICSPIRE_DATABASE_URL"), "PostgreSQL URL (or METRICSPIRE_DATABASE_URL)")
+	databaseURL := flags.String("database-url", os.Getenv("METRICSPIRE_DATABASE_URL"), "Metadata PostgreSQL/MySQL URL (or METRICSPIRE_DATABASE_URL)")
 	namespace := flags.String("namespace", "", "catalog namespace")
 	modelName := flags.String("model", "", "semantic model name")
 	timeout := flags.Duration("timeout", defaultCommandTimeout, "operation timeout")

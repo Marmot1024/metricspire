@@ -15,7 +15,7 @@ func TestPortableProfileAndUnsupportedDrivers(t *testing.T) {
 		name   string
 		change func(*runtimeconfig.Config)
 	}{
-		{"metadata mysql", func(c *runtimeconfig.Config) { c.Storage.Driver = "mysql" }},
+		{"metadata sqlite", func(c *runtimeconfig.Config) { c.Storage.Driver = "sqlite" }},
 		{"clickhouse", func(c *runtimeconfig.Config) { c.QueryEngine.Driver = "clickhouse" }},
 		{"doris", func(c *runtimeconfig.Config) { c.QueryEngine.Driver = "doris" }},
 		{"online mysql", func(c *runtimeconfig.Config) { c.Online.Driver = "mysql" }},
@@ -48,5 +48,19 @@ func TestClickHouseServingKeepsMetadataAndAnalyticalRolesSeparate(t *testing.T) 
 	c.Online.Driver = "doris"
 	if err := c.Validate(); err == nil {
 		t.Fatal("unimplemented result driver accepted")
+	}
+}
+
+func TestMySQLMetadataProfile(t *testing.T) {
+	c, err := runtimeconfig.Load("../../examples/runtime.postgres.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Storage.Driver = "mysql"
+	if err = c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if c.StorageDriver() != "mysql" || c.Online.EngineDriver() != "postgres_online" {
+		t.Fatal("metadata and result roles conflated")
 	}
 }

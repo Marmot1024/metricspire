@@ -20,12 +20,12 @@ The table describes integration roles, not a list of shipped adapters. The curre
 
 | Path | Shipped implementation | Scope |
 | --- | --- | --- |
-| Metric storage | [PostgreSQL repository](../internal/repository/postgres) | Catalog lifecycle, versions and durable audit. MySQL is an extension target; its repository adapter is not implemented. |
+| Metric storage | [PostgreSQL](../internal/repository/postgres) / [MySQL 8.4](mysql-metadata.md) repositories | Catalog lifecycle, versions, governance imports and durable audit; separate from business result data. |
 | Analytical metric queries | [Databricks SQL adapter](../internal/adapter/databricks) | Published metrics, bounded asynchronous execution, HTTP, web queries and MCP. ClickHouse and Doris analytical adapters are not implemented. |
 | Exploratory queries, opt-in | Databricks / [Trino and Presto](trino-presto.md) analysis adapters + external `AnalysisCatalog` | Temporary queries over approved fields and relationships through HTTP/MCP, with separate execution budgets. No metric registration is required. |
 | Precomputed aggregate queries, opt-in | [PostgreSQL](../internal/adapter/postgresquery) / [ClickHouse](clickhouse-online.md) query adapters | Separate synchronous HTTP and optional native MCP paths with reviewed SUM-based aggregates, freshness checks and a read-only credential. It does not provide general OLAP analysis. |
 
-The [`serve` bootstrap](../cmd/metricspire/serve.go) defaults to PostgreSQL storage and Databricks analytical execution. An explicit `query_engine.driver: disabled` profile supports OIDC plus PostgreSQL or ClickHouse online serving without Databricks credentials or clients. Storage, analytical queries, online serving and exploration have separately validated driver configuration; Doris and MySQL adapters remain unimplemented and are rejected before startup. See [runtime engines](runtime-engines.md).
+The [`serve` bootstrap](../cmd/metricspire/serve.go) defaults to PostgreSQL storage and Databricks analytical execution. An explicit `query_engine.driver: disabled` profile supports OIDC plus PostgreSQL or ClickHouse online serving without Databricks credentials or clients. Storage, analytical queries, online serving and exploration have separately validated driver configuration; Doris adapters remain unimplemented and are rejected before startup. See [runtime engines](runtime-engines.md).
 
 Adding an OLAP engine requires an implementation of [`QueryEngine`](../internal/application/query.go), explicit capabilities, compatible source bindings, execution/cancellation handling, bootstrap wiring and conformance tests. Exploration has a separate `AnalysisEngine` contract in [the analysis service](../internal/application/exploration.go); metric-query support alone does not enable it. Adding a metric store instead requires the catalog repository and audit contracts, including transactional publication and migration behavior. These two extension paths must remain separate.
 
@@ -42,7 +42,7 @@ It uses separate warehouse budgets and does not require result metric registrati
 2. **Query a metric:** authenticate the caller, resolve the active release, check policy, build a logical plan, bind it to the configured engine, record admission, execute and record completion before returning a typed result. HTTP and MCP call the same query application service; the web UI calls HTTP.
 3. **Explore:** load reviewed external semantics, authorize the requested sources and fields, plan a temporary query, and execute it through the analysis adapter with its own jobs and budgets. This path can run without a registered metric and does not inherit all source permissions from the metric catalog.
 
-- `CatalogRepository` owns transactional drafts, revisions, releases, the active pointer, and release events. PostgreSQL stores JSONB definitions and manifests, not analytical facts or query results.
+- `CatalogRepository` owns transactional drafts, revisions, releases, the active pointer, and release events. PostgreSQL and MySQL store JSON definitions and manifests separately from analytical facts or query results.
 - `QueryEngine` owns analytical execution, capabilities, timeout/cancellation, and typed results. It is a different adapter family from `CatalogRepository`.
 - `SourceBinding` maps logical datasets and fields to structured physical resources for one engine and environment. It contains no credentials or SQL fragments.
 - Databricks-specific SQL and HTTP behavior stays under `internal/adapter/databricks`; the semantic, catalog, application, and planner packages do not depend on it.
