@@ -23,6 +23,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/marmot1024/metricspire/internal/adapter/clickhousequery"
 	"github.com/marmot1024/metricspire/internal/adapter/databricks"
 	"github.com/marmot1024/metricspire/internal/adapter/postgresquery"
 	"github.com/marmot1024/metricspire/internal/application"
@@ -58,9 +59,26 @@ func TestServeOnlinePostgresRejectsWriteCredential(t *testing.T) {
 }
 
 func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited, portable, structured bool) {
+	testServeOnlineEngine(t, writePrivilege, inherited, portable, structured, postgresquery.EngineName)
+}
+
+func TestServeOnlineClickHouseWithPostgresMetadata(t *testing.T) {
+	if os.Getenv("METRICSPIRE_CLICKHOUSE_TEST_URL") == "" {
+		if os.Getenv("METRICSPIRE_REQUIRE_CLICKHOUSE_TESTS") == "1" {
+			t.Fatal("ClickHouse URL required")
+		}
+		t.Skip("requires disposable ClickHouse")
+	}
+	testServeOnlineEngine(t, "", false, true, true, clickhousequery.EngineName)
+}
+
+func testServeOnlineEngine(t *testing.T, writePrivilege string, inherited, portable, structured bool, driver string) {
 	t.Helper()
 	raw := os.Getenv("METRICSPIRE_ONLINE_TEST_DATABASE_URL")
 	if raw == "" {
+		if os.Getenv("METRICSPIRE_REQUIRE_POSTGRES_TESTS") == "1" || os.Getenv("METRICSPIRE_REQUIRE_CLICKHOUSE_TESTS") == "1" {
+			t.Fatal("PostgreSQL test URL required")
+		}
 		t.Skip("requires a disposable loopback PostgreSQL administrator")
 	}
 	u, err := url.Parse(raw)
@@ -131,6 +149,7 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited, por
 		}
 	}
 	binding.Datasets[0].Resource.Schema = data
+	binding.Engine = driver
 	draft, err := management.SaveDraft(t.Context(), catalog.SaveDraftInput{Namespace: "demo", Source: source, Actor: "fixture"})
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +159,9 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited, por
 		t.Fatal(err)
 	}
 	contract, err := postgresquery.DataContractFingerprint(release.Manifest, binding)
+	if driver == clickhousequery.EngineName {
+		contract, err = clickhousequery.DataContractFingerprint(release.Manifest, binding)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,6 +231,7 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited, por
 		Bindings:       []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: source.Metadata.Name, Path: "warehouse.json"}},
 		Online:         &runtimeconfig.OnlineConfig{Tenant: "demo", Namespaces: []string{"demo"}, DataAccess: "tenant_shared", Resources: []model.ResourceRef{{Kind: model.ResourceTable, Schema: data, Table: "daily_sales"}}, MaxDataAge: "5m", Timeout: "1s", Bindings: []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: source.Metadata.Name, Path: "online.json"}}},
 	}
+	config.Online.Driver = driver
 	config.Online.Policies = []runtimeconfig.PolicyRoute{{Namespace: "demo", ModelName: source.Metadata.Name, Tenant: "demo", Path: "reader-policy.json"}}
 	if portable {
 		config.QueryEngine.Driver = "disabled"
@@ -222,10 +245,14 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited, por
 	}
 	readerURL := *u
 	readerURL.User = url.UserPassword(role, "synthetic-local-only")
+	resultsURL := readerURL.String()
+	if driver == clickhousequery.EngineName {
+		resultsURL = clickHouseStartupFixture(t, data, contract)
+	}
 	// Process-local test environment only: no Databricks profile, OAuth flow,
 	// credential cache or shared configuration is read or written.
 	for name, value := range map[string]string{
-		"METRICSPIRE_DATABASE_URL": controlURL.String(), "METRICSPIRE_ONLINE_DATABASE_URL": readerURL.String(),
+		"METRICSPIRE_DATABASE_URL": controlURL.String(), "METRICSPIRE_ONLINE_DATABASE_URL": resultsURL,
 		"METRICSPIRE_SESSION_KEY": base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")), "METRICSPIRE_OIDC_CLIENT_SECRET": "",
 		"DATABRICKS_HOST": warehouse.URL, "DATABRICKS_SQL_WAREHOUSE_ID": "fixture", "DATABRICKS_TOKEN": "synthetic-local-token", "DATABRICKS_CLIENT_ID": "", "DATABRICKS_CLIENT_SECRET": "",
 	} {
@@ -236,7 +263,7 @@ func testServeOnlinePostgres(t *testing.T, writePrivilege string, inherited, por
 			t.Setenv(name, "")
 		}
 		t.Setenv(config.Storage.DatabaseURLEnv, controlURL.String())
-		t.Setenv(config.Online.DatabaseURLEnv, readerURL.String())
+		t.Setenv(config.Online.DatabaseURLEnv, resultsURL)
 	}
 	if writePrivilege != "" {
 		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)

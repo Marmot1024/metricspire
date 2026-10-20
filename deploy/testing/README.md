@@ -39,3 +39,11 @@ latency. Container startup or `SELECT 1` alone is not application acceptance.
 `docker compose stop` preserves this lab's data. Removing volumes is a separate
 intentional cleanup step; never apply cleanup commands to another project.
 Record resolved image digests with acceptance evidence when reproducing a run.
+The small ClickHouse container disables periodic metric logs to avoid unrelated
+wide-log merges consuming its memory; query logs remain enabled. On an existing
+lab volume, old metric-log tables may still merge: inspect those before assuming
+a memory rejection came from the application query.
+
+For ClickHouse adapter and full service tests, set `METRICSPIRE_CLICKHOUSE_TEST_URL` to this lab administrator URL and `METRICSPIRE_REQUIRE_CLICKHOUSE_TESTS=1`. The image enables account management solely to create dedicated SELECT-only fixture users. `TestServeOnlineClickHouseWithPostgresMetadata` requires both engines and verifies the real OIDC/HTTP/catalog/audit path. Runtime credentials never use this administrator.
+
+Run `go test -race -count=1 ./internal/adapter/clickhousequery ./cmd/metricspire` with those URLs. Set `METRICSPIRE_CLICKHOUSE_LOAD_ROWS=10000000` for a ten-million-row synthetic aggregate fixture; it verifies exact sums, counts and ratios and cleans its own resources. Timings describe this lab, not production SLAs.

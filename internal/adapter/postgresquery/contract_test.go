@@ -41,6 +41,10 @@ func TestDataContractIgnoresPresentationButRetainsCalculationAndBinding(t *testi
 	}
 	source, binding := fixture()
 	want := fingerprint(source, binding)
+	// Captured from the pre-extraction PostgreSQL implementation.
+	if want != "sha256:5948e71014cc14c70371ccf64c25ba9b7c352168eee2c0afc337f41b8818e47d" {
+		t.Fatal("existing producer contract changed")
+	}
 	for _, test := range []struct {
 		name       string
 		compatible bool

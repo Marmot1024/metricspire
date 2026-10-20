@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/marmot1024/metricspire/internal/adapter/postgresquery"
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/contractio"
 	"github.com/marmot1024/metricspire/internal/model"
@@ -62,8 +61,8 @@ func loadOnlineBindings(base string, config runtimeconfig.OnlineConfig) ([]appli
 		if err := contractio.ReadFile(resolveConfigPath(base, route.Path), &binding); err != nil {
 			return nil, err
 		}
-		if binding.Engine != postgresquery.EngineName || len(binding.Datasets) != 1 || !allowed[binding.Datasets[0].Resource] {
-			return nil, fmt.Errorf("online binding %s/%s requires one enabled PostgreSQL source", route.Namespace, route.ModelName)
+		if binding.Engine != config.EngineDriver() || len(binding.Datasets) != 1 || !allowed[binding.Datasets[0].Resource] {
+			return nil, fmt.Errorf("online binding %s/%s requires one enabled source matching online.driver", route.Namespace, route.ModelName)
 		}
 		bindings = append(bindings, application.BindingConfiguration{Namespace: route.Namespace, ModelName: route.ModelName, Binding: binding})
 	}

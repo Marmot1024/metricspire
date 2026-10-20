@@ -25,6 +25,8 @@ New to MetricSpire? Read the [overview and sample result](../README.md) first, t
 | [HTTP API](http-api.md) | Requests, permissions, results, errors and audit limits. |
 | [Exploratory analysis](exploration.md) | Connect an external semantic layer for temporary queries over approved sources. |
 | [PostgreSQL online query](online-query.md) | Optional synchronous queries over precomputed aggregates. |
+| [ClickHouse online query](clickhouse-online.md) | Bounded aggregate HTTP serving with PostgreSQL metadata. |
+| [Runtime engines](runtime-engines.md) | Configure metadata, analytical queries, online serving and exploration separately. |
 | [PostgreSQL table responsibilities](postgres-tables.md) | Control/history tables, business aggregates and cleanup boundaries. |
 | [Native MCP acceptance](mcp-native-acceptance.md) | Maintainer checks for a specific deployment and client. |
 | [Contributing](../CONTRIBUTING.md) | Development workflow and checks, including documentation validation. |

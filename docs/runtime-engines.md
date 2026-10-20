@@ -8,10 +8,10 @@ These are deployment-owned configuration files, not chat inputs.
 | --- | --- | --- |
 | `storage` | Metric definitions, revisions, releases and audit records | `postgres` |
 | `query_engine` | Published-metric analytical execution | `databricks_sql`, `disabled` |
-| `online` | Bounded reads of precomputed DWS/ADS aggregates | `postgres_online` |
+| `online` | Bounded reads of precomputed DWS/ADS aggregates | `postgres_online`, `clickhouse_online` |
 | `exploration` | Temporary analysis over reviewed semantic catalogs | `databricks_sql` |
 
-MySQL metadata storage, ClickHouse/Doris result stores and Trino/Presto exploration
+MySQL metadata storage, Doris result stores and Trino/Presto exploration
 remain planned adapters. Selecting them fails configuration validation before
 opening databases or listening. Installing these engines in a test lab does not
 make them supported MetricSpire drivers.
@@ -22,6 +22,8 @@ Databricks analytical queries, and optional PostgreSQL online serving.
 variables; connection strings and credentials belong in the deployment secret
 store. Defaults are `METRICSPIRE_DATABASE_URL` and
 `METRICSPIRE_ONLINE_DATABASE_URL`.
+
+For ClickHouse result serving with PostgreSQL metadata, see [the ClickHouse guide](clickhouse-online.md).
 
 ## PostgreSQL-only profile
 

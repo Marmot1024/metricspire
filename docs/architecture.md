@@ -21,15 +21,15 @@ The table describes integration roles, not a list of shipped adapters. The curre
 | Path | Shipped implementation | Scope |
 | --- | --- | --- |
 | Metric storage | [PostgreSQL repository](../internal/repository/postgres) | Catalog lifecycle, versions and durable audit. MySQL is an extension target; its repository adapter is not implemented. |
-| Analytical metric queries | [Databricks SQL adapter](../internal/adapter/databricks) | Published metrics, bounded asynchronous execution, HTTP, web queries and MCP. ClickHouse and Doris adapters are not implemented. |
+| Analytical metric queries | [Databricks SQL adapter](../internal/adapter/databricks) | Published metrics, bounded asynchronous execution, HTTP, web queries and MCP. ClickHouse and Doris analytical adapters are not implemented. |
 | Exploratory queries, opt-in | Databricks analysis adapter + external `AnalysisCatalog` | Temporary queries over approved fields and relationships through HTTP/MCP, with separate execution budgets. No metric registration is required. |
-| Precomputed aggregate queries, opt-in | [PostgreSQL query adapter](../internal/adapter/postgresquery) | A separate synchronous HTTP path with reviewed SUM-based aggregates, freshness checks and a read-only credential. It does not provide general OLAP analysis or MCP tools. |
+| Precomputed aggregate queries, opt-in | [PostgreSQL](../internal/adapter/postgresquery) / [ClickHouse](clickhouse-online.md) query adapters | A separate synchronous HTTP path with reviewed SUM-based aggregates, freshness checks and a read-only credential. It does not provide general OLAP analysis or MCP tools. |
 
-The [`serve` bootstrap](../cmd/metricspire/serve.go) defaults to PostgreSQL storage and Databricks analytical execution. An explicit `query_engine.driver: disabled` profile supports OIDC plus PostgreSQL-only online serving without Databricks credentials or clients. Storage, analytical queries, online serving and exploration have separately validated driver configuration; ClickHouse, Doris, MySQL and Trino/Presto adapters remain unimplemented and are rejected before startup. See [runtime engines](runtime-engines.md).
+The [`serve` bootstrap](../cmd/metricspire/serve.go) defaults to PostgreSQL storage and Databricks analytical execution. An explicit `query_engine.driver: disabled` profile supports OIDC plus PostgreSQL or ClickHouse online serving without Databricks credentials or clients. Storage, analytical queries, online serving and exploration have separately validated driver configuration; Doris, MySQL and Trino/Presto adapters remain unimplemented and are rejected before startup. See [runtime engines](runtime-engines.md).
 
 Adding an OLAP engine requires an implementation of [`QueryEngine`](../internal/application/query.go), explicit capabilities, compatible source bindings, execution/cancellation handling, bootstrap wiring and conformance tests. Exploration has a separate `AnalysisEngine` contract in [the analysis service](../internal/application/exploration.go); metric-query support alone does not enable it. Adding a metric store instead requires the catalog repository and audit contracts, including transactional publication and migration behavior. These two extension paths must remain separate.
 
-The opt-in [online HTTP path](online-query.md) uses PostgreSQL as a business-data source, separately from PostgreSQL's catalog-storage role. Its source bindings, SELECT-only credential and short handling budget are independent of analytical execution. Requests never silently switch paths after a failure.
+The opt-in [online HTTP path](online-query.md) uses PostgreSQL or ClickHouse as a business-data source, separately from PostgreSQL's catalog-storage role. Its source bindings, SELECT-only credential and short handling budget are independent of analytical execution. Requests never silently switch paths after a failure.
 
 ## Component boundaries
 

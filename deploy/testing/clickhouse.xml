@@ -1,0 +1,6 @@
+<clickhouse>
+    <!-- The wide periodic metrics log can exceed this synthetic lab's 3 GiB
+         budget during background merges. Preserve query_log for acceptance. -->
+    <metric_log remove="1" />
+    <asynchronous_metric_log remove="1" />
+</clickhouse>
