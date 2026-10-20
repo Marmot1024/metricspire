@@ -338,3 +338,22 @@ func TestRealTPCH(t *testing.T) {
 		})
 	}
 }
+
+func TestContinuationQueryBoundaries(t *testing.T) {
+	for _, driver := range []string{Trino, Presto} {
+		e, err := New(Config{Driver: driver, Connection: "http://127.0.0.1:8080", User: "reader"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, query := range []string{"", "?slug=x", "?slug=", "?slug=x&slug=y", "?token=x", "?slug=x&token=y", "?slug=%zz", "?", "?slug=" + strings.Repeat("x", 1025)} {
+			_, err = e.next("http://127.0.0.1:8080/v1/statement/query/1" + query)
+			want := query == "" || (driver == Presto && query == "?slug=x")
+			if (err == nil) != want {
+				t.Fatalf("%s query %q accepted=%v", driver, query, err == nil)
+			}
+		}
+		if _, err := e.next("https://evil.example/v1/statement/query/1?slug=x"); err == nil {
+			t.Fatal("foreign origin accepted")
+		}
+	}
+}

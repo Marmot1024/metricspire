@@ -55,11 +55,25 @@ type page struct {
 
 func (e *Engine) next(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != e.endpoint.Scheme || u.Host != e.endpoint.Host || u.User != nil || u.Fragment != "" || u.RawQuery != "" || !strings.HasPrefix(u.Path, "/v1/statement/") || strings.Contains(u.Path, "..") {
+	if err != nil || u.Scheme != e.endpoint.Scheme || u.Host != e.endpoint.Host || u.User != nil || u.Fragment != "" || !e.validContinuationQuery(u) || !strings.HasPrefix(u.Path, "/v1/statement/") || strings.Contains(u.Path, "..") {
 		return nil, problem("analysis_engine_protocol", "engine returned an untrusted continuation")
 	}
 	return u, nil
 }
+
+// Presto attaches a server-generated slug to queued and executing continuations.
+// Keep origin/path pinning and reject all other query parameters.
+func (e *Engine) validContinuationQuery(u *url.URL) bool {
+	if u.RawQuery == "" {
+		return !u.ForceQuery
+	}
+	if e.config.Driver != Presto || len(u.RawQuery) > 1024 {
+		return false
+	}
+	q, err := url.ParseQuery(u.RawQuery)
+	return err == nil && len(q) == 1 && len(q["slug"]) == 1 && q.Get("slug") != ""
+}
+
 func (e *Engine) request(ctx context.Context, method string, u *url.URL, sql, session string) (*http.Response, error) {
 	v := *u
 	v.User = nil
