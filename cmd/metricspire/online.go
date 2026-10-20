@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/marmot1024/metricspire/internal/application"
+	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
 	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/marmot1024/metricspire/internal/runtimeconfig"
@@ -70,4 +73,19 @@ func loadOnlineBindings(base string, config runtimeconfig.OnlineConfig) ([]appli
 		return nil, err
 	}
 	return bindings, nil
+}
+
+// Online discovery must not advertise unrelated models from a broader shared
+// policy resolver. Execution independently checks the same scope and bindings.
+func onlineCatalogPolicies(policies application.PolicyResolver, config runtimeconfig.OnlineConfig) application.PolicyResolver {
+	bound := map[string]bool{}
+	for _, route := range config.Bindings {
+		bound[route.Namespace+"\x00"+route.ModelName] = true
+	}
+	return application.PolicyResolverFunc(func(ctx context.Context, scope application.QueryScope, release catalog.Release) (model.PolicySource, error) {
+		if scope.Context.Tenant != config.Tenant || !slices.Contains(config.Namespaces, scope.Namespace) || !bound[scope.Namespace+"\x00"+scope.ModelName] {
+			return model.PolicySource{}, application.ErrResolutionNotFound
+		}
+		return policies.ResolvePolicy(ctx, scope, release)
+	})
 }

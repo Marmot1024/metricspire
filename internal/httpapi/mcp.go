@@ -65,9 +65,13 @@ func (backend *remoteMCPBackend) SearchMetrics(ctx context.Context, input mcpbri
 	defer cancel()
 	started := time.Now()
 	scope := application.QueryScope{Namespace: input.Namespace, Context: backend.requestContext()}
-	search := backend.server.deps.CatalogSearch.SearchActive
+	catalogSearch, err := backend.metricCatalog(input.Route)
+	if err != nil {
+		return nil, backend.safeError(err)
+	}
+	search := catalogSearch.SearchActive
 	if input.View != "detail" {
-		if summary, ok := backend.server.deps.CatalogSearch.(interface {
+		if summary, ok := catalogSearch.(interface {
 			SearchActiveSummary(context.Context, application.QueryScope, string, int) ([]application.MetricCatalogEntry, error)
 		}); ok {
 			search = summary.SearchActiveSummary

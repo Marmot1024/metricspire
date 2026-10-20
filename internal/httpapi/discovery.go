@@ -48,6 +48,13 @@ func (s *Server) queryNamespaces(ctx context.Context, principal Principal, rc mo
 		if err != nil {
 			return nil, err
 		}
+
+		if len(entries) == 0 && s.deps.OnlineCatalogSearch != nil {
+			entries, err = s.deps.OnlineCatalogSearch.SearchActive(ctx, application.QueryScope{Namespace: namespace, Context: rc}, "", 1)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if len(entries) > 0 {
 			names = appendUniqueNamespaces(names, namespace)
 		}

@@ -88,6 +88,13 @@ func (transport remoteMCPBearerTransport) RoundTrip(request *http.Request) (*htt
 
 func mcpHTTP(t *testing.T, endpoint, token string) *mcp.ClientSession {
 	t.Helper()
+	session := mcpHTTPTransport(t, endpoint, token)
+	assertMCPTools(t, session)
+	return session
+}
+
+func mcpHTTPTransport(t *testing.T, endpoint, token string) *mcp.ClientSession {
+	t.Helper()
 	client := mcp.NewClient(&mcp.Implementation{Name: "metricspire-remote-acceptance", Version: "1"}, nil)
 	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{
 		Endpoint: endpoint,
@@ -101,7 +108,6 @@ func mcpHTTP(t *testing.T, endpoint, token string) *mcp.ClientSession {
 		t.Fatalf("remote MCP initialize: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Close() })
-	assertMCPTools(t, session)
 	return session
 }
 

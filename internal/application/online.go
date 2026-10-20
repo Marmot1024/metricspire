@@ -50,6 +50,13 @@ func NewOnlineService(releases ActiveReleaseLister, queries *QueryService, tenan
 	return &OnlineService{releases: releases, queries: queries, tenant: tenant, namespaces: namespaceSet(namespaces), slots: make(chan struct{}, concurrency), timeout: timeout}, nil
 }
 
+// Available reports configured scope, not semantic fit, reader authorization or
+// data readiness. Discovery additionally filters the catalog by caller policy.
+func (s *OnlineService) Available(scope QueryScope) bool {
+	_, ok := s.namespaces[scope.Namespace]
+	return ok && scope.Context.Tenant == s.tenant && scope.Context.Principal != ""
+}
+
 func (s *OnlineService) Execute(ctx context.Context, scope QueryScope, request OnlineQuery) (OnlineResult, error) {
 	if scope.Context.Tenant != s.tenant || scope.Context.Principal == "" || scope.Context.RequestID == "" {
 		return OnlineResult{}, &model.Problem{Code: "permission_denied", Message: "online scope is not authorized"}

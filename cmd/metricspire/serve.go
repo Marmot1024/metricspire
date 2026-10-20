@@ -164,6 +164,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		defer analysisJobs.Close()
 	}
 	var online httpapi.OnlineQueryService
+	var onlineCatalog httpapi.CatalogSearcher
 	onlineTimeout := httpapi.DefaultOnlineTimeout
 	var readiness httpapi.ReadinessChecker = store
 	if config.Online != nil {
@@ -183,6 +184,10 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 			return err
 		}
 		onlineResolver, err := application.NewConfiguredBindingResolver(onlineBindings)
+		if err != nil {
+			return err
+		}
+		onlineCatalog, err = application.NewCatalogService(store, onlineCatalogPolicies(onlinePolicyResolver, *config.Online), onlineResolver)
 		if err != nil {
 			return err
 		}
@@ -222,6 +227,11 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	}
 	logger := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	catalogPolicies, catalogBindings := config.CatalogRoutes()
+	if config.Online != nil {
+		catalogBindings = append(append([]runtimeconfig.BindingRoute{}, catalogBindings...), config.Online.Bindings...)
+		catalogPolicies = append(append([]runtimeconfig.PolicyRoute{}, catalogPolicies...), config.Online.Policies...)
+	}
+	uiModels := configuredUIModels(catalogBindings, catalogPolicies)
 	// Keep a truly nil interface for the disabled job service.
 	var queryJobs httpapi.JobService
 	if jobs != nil {
@@ -234,14 +244,14 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		MCPAuthorizationServer: mcpAuthorizationServer(config, environment),
 		AuthenticationProfile:  config.Authentication.Provider, MCPVersion: version,
 		TrialReleaseNamespaces: trialNamespaces,
-		UIModels:               configuredUIModels(catalogBindings, catalogPolicies),
+		UIModels:               uiModels,
 		UISourcePrefixes:       configuredUISourcePrefixes(bindings),
 	}, httpapi.Dependencies{
 		Authenticator: authenticator, AuthEndpoints: authEndpoints,
 		Readiness:  readiness,
 		Management: management, Catalog: store, CatalogSearch: catalogSearch, Governance: governanceService,
 		Bindings: bindingResolver, Queries: queries, Jobs: queryJobs, ExecutionCredential: executionCredential,
-		Online:   online,
+		Online: online, OnlineCatalogSearch: onlineCatalog,
 		Analysis: analysis, AnalysisJobs: analysisJobs, AnalysisCatalogs: analysisCatalogs,
 	}, logger)
 	if err != nil {

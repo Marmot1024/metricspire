@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -158,5 +159,29 @@ func TestAnalyticalAndOnlineBindingsRemainSeparate(t *testing.T) {
 				t.Fatal("unsafe online binding accepted")
 			}
 		})
+	}
+}
+
+func TestOnlineCatalogPoliciesExcludeUnboundModelsAndWrongScopes(t *testing.T) {
+	calls := 0
+	resolver := onlineCatalogPolicies(application.PolicyResolverFunc(func(context.Context, application.QueryScope, catalog.Release) (model.PolicySource, error) {
+		calls++
+		return model.PolicySource{}, nil
+	}), runtimeconfig.OnlineConfig{Tenant: "demo", Namespaces: []string{"demo"}, Bindings: []runtimeconfig.BindingRoute{{Namespace: "demo", ModelName: "daily_sales"}}})
+	for _, scope := range []application.QueryScope{
+		{Namespace: "demo", ModelName: "other", Context: model.RequestContext{Tenant: "demo"}},
+		{Namespace: "elsewhere", ModelName: "daily_sales", Context: model.RequestContext{Tenant: "demo"}},
+		{Namespace: "demo", ModelName: "daily_sales", Context: model.RequestContext{Tenant: "other"}},
+	} {
+		if _, err := resolver.ResolvePolicy(t.Context(), scope, catalog.Release{}); !errors.Is(err, application.ErrResolutionNotFound) {
+			t.Fatal("unserved model advertised")
+		}
+	}
+	if calls != 0 {
+		t.Fatal("unserved scope resolved")
+	}
+	_, err := resolver.ResolvePolicy(t.Context(), application.QueryScope{Namespace: "demo", ModelName: "daily_sales", Context: model.RequestContext{Tenant: "demo"}}, catalog.Release{})
+	if err != nil || calls != 1 {
+		t.Fatal("served scope hidden")
 	}
 }

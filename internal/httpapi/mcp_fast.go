@@ -13,7 +13,11 @@ import (
 func (b *remoteMCPBackend) GetMetricDetails(ctx context.Context, in mcpbridge.MetricDetailsInput) ([]mcpbridge.MetricDetail, error) {
 	ctx, cancel := context.WithTimeout(ctx, b.server.config.ControlTimeout)
 	defer cancel()
-	entries, err := b.server.deps.CatalogSearch.SearchActiveCodes(ctx, application.QueryScope{Namespace: in.Namespace, Context: b.requestContext()}, in.Metrics)
+	catalogSearch, err := b.metricCatalog(in.Route)
+	if err != nil {
+		return nil, b.safeError(err)
+	}
+	entries, err := catalogSearch.SearchActiveCodes(ctx, application.QueryScope{Namespace: in.Namespace, Context: b.requestContext()}, in.Metrics)
 	if err != nil {
 		return nil, b.safeError(err)
 	}
@@ -42,8 +46,10 @@ func (b *remoteMCPBackend) DiscoverQueryRoutes(ctx context.Context, in mcpbridge
 	result := mcpbridge.QueryRoutes{
 		Namespace:        in.Namespace,
 		PublishedMetrics: mcpbridge.QueryRoute{Available: len(entries) > 0 && b.server.deps.Queries != nil, Workflow: []string{"search_metrics", "get_metric_details", "prepare_query", "run_query"}},
+		OnlineMetrics:    mcpbridge.QueryRoute{Workflow: []string{}},
 		Exploration:      mcpbridge.QueryRoute{Workflow: []string{"discover_analysis", "plan_analysis", "submit_analysis", "get_analysis", "cancel_analysis"}},
 		SelectionRules: []string{
+			"Prefer online_metrics for a matching certified definition with an external_code when that serving route is available; use query_online_metrics with numeric codes and code-to-manifest_fingerprint selections. Do not fall back on serving failures.",
 			"Use published_metrics when a maintained definition, population, denominator and time grain answer the question.",
 			"Use exploration for a requested temporary formula, cohort or counting grain only when available and approved sources/fields support its meaning; discover_analysis first.",
 			"Resolve population, exclusions, denominator and counting grain before execution. Roles and usage history rank suggestions, never silently choose a different definition. Confirm no suitable authorized metric before exploration; empty search is not proof of absence.",
@@ -51,6 +57,20 @@ func (b *remoteMCPBackend) DiscoverQueryRoutes(ctx context.Context, in mcpbridge
 			"Availability is current-user catalog access, not business certification or proof that a data query succeeds.",
 		},
 	}
+
+	if online, ok := b.server.deps.Online.(interface {
+		Available(application.QueryScope) bool
+	}); ok && b.server.deps.OnlineCatalogSearch != nil && online.Available(application.QueryScope{Namespace: in.Namespace, Context: b.requestContext()}) {
+		onlineEntries, err := b.SearchMetrics(ctx, mcpbridge.SearchInput{Namespace: in.Namespace, Route: "online_metrics", Limit: 1})
+		if err != nil {
+			return mcpbridge.QueryRoutes{}, err
+		}
+		result.OnlineMetrics.Available = len(onlineEntries) > 0
+		if result.OnlineMetrics.Available {
+			result.OnlineMetrics.Workflow = []string{"search_metrics (route=online_metrics)", "get_metric_details (route=online_metrics)", "query_online_metrics"}
+		}
+	}
+
 	if b.server.deps.Queries == nil {
 		result.PublishedMetrics.Workflow = []string{}
 	}

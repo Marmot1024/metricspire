@@ -45,13 +45,14 @@ storage are not implemented by this change.
 
 ## Query workflow
 
-The hosted MCP implementation defines eleven core tools, with five additional exploration tools when enabled. The installer verifies the original seven-tool compatibility baseline, not the complete current tool set. Use the connected server's advertised tools for the actual inventory.
+The hosted MCP implementation defines eleven core tools, with five additional exploration tools when enabled and `query_online_metrics` when online serving is configured. The installer verifies the original seven-tool compatibility baseline, not the complete current tool set. Use the connected server's advertised tools for the actual inventory.
 
 | Tool | Behavior |
 | --- | --- |
 | `list_namespaces`, `search_metrics` | Discover permitted domains and compact candidates. Search defaults to five matches, ranks exact codes/names first, and omits expressions and dimension details. |
 | `get_metric_details` | Fetch authorized definitions, dimension types, time grains and calendar timezones for 1–20 selected exact metric names together. |
 | `discover_query_routes` | Report the current user's available published-metric and exploration categories, with semantic selection rules. No data query. |
+| `query_online_metrics` | Read a matching certified online metric with numeric `external_code` values, bounded time range and code-to-manifest-fingerprint selections. Returns typed data and snapshot provenance through the same authorized service as online HTTP. No analytical fallback. |
 | `prepare_query` | Validate once and return metric definitions, the normalized query and four execution identity/fingerprint guards. No data query or execution credential. |
 | `run_query` | Recheck the prepared query, submit once, and wait up to 10 seconds by default (maximum 15). Return the typed result or the accepted job ID. |
 | `explain_query` | Validate a structured `SemanticQuery` and explain its meaning without analytical SQL. |
@@ -59,7 +60,9 @@ The hosted MCP implementation defines eleven core tools, with five additional ex
 | `submit_query` | Submit a bounded query job; warehouse costs may apply. |
 | `get_query`, `cancel_query` | Read or cancel a job owned by the same tenant and principal. |
 
-Prefer **search → selected details → prepare → run** after discovering the namespace. No separate explain/plan calls are needed on this path; poll only if the returned job is pending or running. The server's initialization instructions, tool descriptions and returned next steps describe this workflow without local skills or conversation history. Clients still control tool selection; this is guidance, not guaranteed client behavior or a latency SLA.
+Call `discover_query_routes` after discovering the namespace. For a matching certified metric on `online_metrics`, use **search → selected details → query_online_metrics**. Set `route: "online_metrics"` on search and detail calls to use independent online catalog policies; keep it through selection. Its `query` uses numeric `metric_codes` from detail `external_code` fields; `metric_selections` maps those codes to the reviewed `manifest_fingerprint`. The same definition selection, policy, freshness, timeout and durable audit checks apply as [online HTTP](online-query.md). A serving failure does not authorize an analytical fallback.
+
+For analytical `published_metrics`, prefer **search → selected details → prepare → run**. No separate explain/plan calls are needed on this path; poll only if the returned job is pending or running. The server's initialization instructions, tool descriptions and returned next steps describe this workflow without local skills or conversation history. Clients still control tool selection; this is guidance, not guaranteed client behavior or a latency SLA.
 
 Pass the normalized `query` and all four `expected_plan` values from `prepare_query` unchanged to `run_query`. They are equality guards, not release-selection authority. The service rechecks current authorization and the actual plan immediately before engine execution, including asynchronous execution. A changed query, release, policy or binding is rejected; prepare again and review the new scope. Published verification/channel status remains visible throughout this workflow.
 

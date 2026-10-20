@@ -149,7 +149,7 @@ func (server *Server) queryRoute(handler http.HandlerFunc) http.HandlerFunc {
 }
 
 func queryEngineDisabled() error {
-	return &model.Problem{Code: "query_engine_disabled", Message: "the analytical query engine is disabled; online serving uses its separately configured HTTP endpoint"}
+	return &model.Problem{Code: "query_engine_disabled", Message: "the analytical query engine is disabled; online serving requires its separately configured HTTP or MCP route"}
 }
 
 func (server *Server) handleUIContext(response http.ResponseWriter, request *http.Request) {
