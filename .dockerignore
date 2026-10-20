@@ -6,6 +6,8 @@
 !THIRD_PARTY_NOTICES.md
 !cmd/metricspire/*.go
 !cmd/metricspire-app-probe/*.go
+!internal/adapter/clickhousequery/*.go
+!internal/adapter/onlinecontract/*.go
 !internal/adapter/databricks/*.go
 !internal/adapter/lakebase/*.go
 !internal/adapter/postgresquery/*.go
