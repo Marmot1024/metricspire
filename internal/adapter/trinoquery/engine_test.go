@@ -329,8 +329,14 @@ func TestRealTPCH(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Native DECIMAL division rules differ: Trino yields scale 18,
+			// Presto preserves the scale-20 operands. Neither uses float64.
+			wantShare := "0.333333333333333333"
+			if driver == Presto {
+				wantShare = "0.33333333333333333333"
+			}
 			for _, row := range exact.Result.Rows {
-				if row[3] != "0.333333333333333333" {
+				if row[3] != wantShare {
 					t.Fatalf("high-scale share changed: %v", row[3])
 				}
 			}

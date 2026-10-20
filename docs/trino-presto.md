@@ -43,7 +43,9 @@ integers remain signed 64-bit values. Decimal calculations use the engine's
 native precision/scale and overflow rules; repeating division is rounded at that
 scale. Integer averages are promoted to DECIMAL(38,12), integer division/share
 to DECIMAL(38,18); existing decimal inputs are never forcibly rescaled. These
-operators do not promise arbitrary-precision rational arithmetic. Inexact engine DOUBLE/REAL output cannot
+operators do not promise arbitrary-precision rational arithmetic. Native decimal
+division can differ between engines: the scale-20 share fixture produces 18
+fractional digits on Trino 484 and 20 on Presto 0.299, both retained exactly. Inexact engine DOUBLE/REAL output cannot
 satisfy a decimal contract: review connector types and rounding explicitly rather
 than disguising float results as exact values.
 
