@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/assets/metricspire-mark.svg" width="44" height="44" alt="MetricSpire"></p>
 
-PostgreSQL のみの起動とエンジン設定：[ランタイムエンジン](docs/runtime-engines.md)。
+ポータブル起動とエンジン設定：[ランタイムエンジン](docs/runtime-engines.md)。
 
 構造化された指標定義の選択：[指標定義](docs/metric-definitions.md)。
 
@@ -46,7 +46,7 @@ MetricSpire は、分析用データベース、業務アプリ、AI アシス�
 
 実線はサービス呼び出しまたはデータ書き込み、破線は任意の意味定義の入力です。**OLAP エンジン、指標ストア、外部セマンティック層はそれぞれ役割が異なります。**
 
-アダプターの設計対象は ClickHouse、Doris などの OLAP エンジンと、MySQL、PostgreSQL などの指標ストアです。**現在、このリポジトリには Databricks SQL 分析アダプターと PostgreSQL 指標ストアを実装しています。** PostgreSQL の事前集計データへの任意のクエリ機能もあります。ClickHouse、Doris、MySQL のアダプターはまだ含まれていません。[アーキテクチャと対応範囲](docs/architecture.md#adapter-support)をご確認ください。
+アダプターの設計対象は ClickHouse、Doris などの OLAP エンジンと、MySQL、PostgreSQL などの指標ストアです。**現在、このリポジトリには Databricks SQL 分析アダプターと PostgreSQL 指標ストアを実装しています。** PostgreSQL / ClickHouse の事前集計データに対する任意の HTTP クエリ機能もあります。Doris、MySQL のアダプターは未実装で、ClickHouse の探索分析と分析用 MCP クエリは未対応です。[アーキテクチャと対応範囲](docs/architecture.md#adapter-support)をご確認ください。
 
 ## どこから始めますか？
 
@@ -57,7 +57,7 @@ MetricSpire は、分析用データベース、業務アプリ、AI アシス�
 | ローカル Codex CLI からチームのサービスを使う | [チーム用インストーラーを入手](docs/mcp-installer.md#get-the-installer) | 稼働中のインスタンス、チームのインストーラー、その環境に必要な Databricks アクセス権。 |
 | 別の MCP クライアントを接続する | [MCP 接続ガイド](docs/mcp.md#connect) | インスタンスの URL と、その環境に対応した認証設定。 |
 | データに接続せず指標定義を試す | [オフラインサンプル](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database) | Go のみ。データベースやクラウドアカウントは不要です。生成されるのはクエリ計画であり、データの結果ではありません。 |
-| チーム用のサービスを構築する | [サービス設定](docs/getting-started.md#run-the-http-service) | 現在の実装では PostgreSQL、認証設定、Databricks SQL が必要です。 |
+| チーム用のサービスを構築する | [サービス設定](docs/getting-started.md#run-the-http-service) | PostgreSQL のメタデータ、認証設定、[対応クエリ構成](docs/runtime-engines.md)が必要です。 |
 
 Web アクセス権がある場合は、チームのインスタンスを開き、**指標カタログ**から始めてください。このリポジトリには公開サービスのインスタンスや社内の指標定義は含まれていません。詳細ガイドは現在英語です。
 
@@ -66,6 +66,7 @@ Web アクセス権がある場合は、チームのインスタンスを開き�
 - [はじめに](docs/getting-started.md) — オフラインサンプル、ローカルカタログ、サービス設定。
 - [MCP 接続](docs/mcp.md) · [HTTP API](docs/http-api.md) — クライアントやアプリとの接続。
 - [アーキテクチャとアダプター](docs/architecture.md) — システムの役割、クエリ経路、現在のデータベース対応範囲。
+- [ClickHouse 集計クエリ](docs/clickhouse-online.md) · [runtime.clickhouse.example.yaml](examples/runtime.clickhouse.example.yaml).
 - [チーム設定](config/README.md) · [外部セマンティック層](docs/exploration.md) — 非公開設定と探索的分析用の定義。
 - [開発状況](docs/development-status.md) — 実装済みの機能、検証の根拠、残っている課題。
 - [貢献ガイド](CONTRIBUTING.md) · [ドキュメント一覧](docs/README.md)。

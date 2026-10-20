@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/assets/metricspire-mark.svg" width="44" height="44" alt="MetricSpire"></p>
 
-仅使用 PostgreSQL 启动与引擎配置：[运行时引擎](docs/runtime-engines.md)。
+便携部署与引擎配置：[运行时引擎](docs/runtime-engines.md)。
 
 结构化口径选择：[指标定义](docs/metric-definitions.md)。
 
@@ -46,7 +46,7 @@ MetricSpire 是一个开源的指标库与数据服务，连接你的分析数�
 
 图中实线表示服务调用或数据写入，虚线表示可选的语义配置输入。**OLAP 引擎、指标存储、外部语义层是三个不同的角色。**
 
-接入设计面向 ClickHouse、Doris 等 OLAP 引擎，以及 MySQL、PostgreSQL 等指标存储。**当前仓库已实现 Databricks SQL 分析适配器和 PostgreSQL 指标存储**，另有可选的 PostgreSQL 预计算汇总查询；ClickHouse、Doris 和 MySQL 适配器尚未随仓库提供。各路径的实现范围见[架构与适配器](docs/architecture.md#adapter-support)。
+接入设计面向 ClickHouse、Doris 等 OLAP 引擎，以及 MySQL、PostgreSQL 等指标存储。**当前仓库已实现 Databricks SQL 分析适配器和 PostgreSQL 指标存储**，另有可选的 PostgreSQL / ClickHouse 预计算汇总 HTTP 查询；Doris、MySQL 适配器尚未提供，ClickHouse 暂不支持探索分析或分析类 MCP 查询。各路径的实现范围见[架构与适配器](docs/architecture.md#adapter-support)。
 
 ## 从哪里开始？
 
@@ -57,7 +57,7 @@ MetricSpire 是一个开源的指标库与数据服务，连接你的分析数�
 | 在本地 Codex CLI 中使用团队服务 | [获取团队安装器](docs/mcp-installer.md#get-the-installer) | 已部署的实例、团队提供的安装器，以及该部署所需的 Databricks 访问权限。 |
 | 连接其他 MCP 客户端 | [MCP 连接指南](docs/mcp.md#connect) | 实例地址，以及该部署支持的身份认证配置。 |
 | 不连接数据，先理解指标定义 | [运行离线示例](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database) | Go；无需数据库或云账号。示例生成查询计划，不返回数据结果。 |
-| 为团队部署服务 | [服务配置指南](docs/getting-started.md#run-the-http-service) | 当前实现需要 PostgreSQL、身份认证配置和 Databricks SQL。 |
+| 为团队部署服务 | [服务配置指南](docs/getting-started.md#run-the-http-service) | 需要 PostgreSQL 元数据、身份认证配置及[已支持的查询配置](docs/runtime-engines.md)。 |
 
 已有网页访问权限？打开团队实例，从**指标目录**开始。仓库不附带公开服务实例，也不包含公司的指标定义。上述详细指南目前为英文。
 
@@ -66,6 +66,7 @@ MetricSpire 是一个开源的指标库与数据服务，连接你的分析数�
 - [快速上手](docs/getting-started.md) — 离线示例、本地指标目录与服务配置。
 - [MCP 接入](docs/mcp.md) · [HTTP API](docs/http-api.md) — 连接客户端或应用。
 - [架构与适配器](docs/architecture.md) — 系统分工、查询路径与当前数据库支持范围。
+- [ClickHouse 汇总查询服务](docs/clickhouse-online.md) · [runtime.clickhouse.example.yaml](examples/runtime.clickhouse.example.yaml).
 - [团队配置](config/README.md) · [外部语义层](docs/exploration.md) — 维护私有配置与探索性分析所需的定义。
 - [开发状态](docs/development-status.md) — 已实现能力、验证证据和待完成项。
 - [贡献指南](CONTRIBUTING.md) · [全部文档](docs/README.md)。

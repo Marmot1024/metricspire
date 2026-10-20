@@ -11,7 +11,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +30,20 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8
+        env:
+          CLICKHOUSE_USER: lab
+          CLICKHOUSE_PASSWORD: ci-only-disposable
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+        ports:
+          - 8123:8123
+        options: >-
+          --memory 2g --cpus 2
+          --health-cmd "wget -q -O - http://127.0.0.1:8123/ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -46,9 +60,11 @@ jobs:
       - run: python3 -m unittest tools/test_deploy_staging.py
       - run: python3 -m unittest discover -s deploy/databricks-apps -p test_render.py
       - run: go mod verify
-      - name: Test with real PostgreSQL (catalog and online HTTP)
+      - name: Test with real PostgreSQL and ClickHouse (catalog and online HTTP)
         env:
           METRICSPIRE_REQUIRE_POSTGRES_TESTS: '1'
+          METRICSPIRE_REQUIRE_CLICKHOUSE_TESTS: '1'
+          METRICSPIRE_CLICKHOUSE_TEST_URL: http://lab:ci-only-disposable@127.0.0.1:8123/
           METRICSPIRE_TEST_DATABASE_URL: postgres://metricspire_test:ci-only-disposable@127.0.0.1:5432/metricspire_test?sslmode=disable
           METRICSPIRE_ONLINE_TEST_DATABASE_URL: postgres://metricspire_test:ci-only-disposable@127.0.0.1:5432/metricspire_test?sslmode=disable
         run: go test -race -count=1 -v ./...

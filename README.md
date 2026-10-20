@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/assets/metricspire-mark.svg" width="44" height="44" alt="MetricSpire"></p>
 
-PostgreSQL-only startup and engine configuration: [runtime engines](docs/runtime-engines.md).
+Portable startup and engine configuration: [runtime engines](docs/runtime-engines.md).
 
 Structured scope selection: [metric definitions](docs/metric-definitions.md).
 
@@ -46,7 +46,7 @@ An application can query the same metric through the HTTP API and reuse its calc
 
 Solid arrows show service calls or data writes; the dashed arrow supplies optional semantic configuration. **The OLAP engine, metric store and external semantic layer have distinct responsibilities.**
 
-The adapter design targets OLAP engines such as ClickHouse and Doris, and metric stores such as MySQL and PostgreSQL. **This repository currently ships a Databricks SQL analytical adapter and a PostgreSQL metric store**, plus optional queries over precomputed PostgreSQL aggregates. ClickHouse, Doris and MySQL adapters are not shipped yet. See [architecture and adapter support](docs/architecture.md#adapter-support) for the scope of each path.
+The adapter design targets OLAP engines such as ClickHouse and Doris, and metric stores such as MySQL and PostgreSQL. **This repository currently ships a Databricks SQL analytical adapter and a PostgreSQL metric store**, plus optional HTTP queries over precomputed PostgreSQL or ClickHouse aggregates. Doris and MySQL adapters are not shipped yet; ClickHouse exploration and analytical MCP queries are not supported. See [architecture and adapter support](docs/architecture.md#adapter-support) for the scope of each path.
 
 ## Choose where to start
 
@@ -57,7 +57,7 @@ The adapter design targets OLAP engines such as ClickHouse and Doris, and metric
 | Use your team's service from local Codex CLI | [Get the team installer](docs/mcp-installer.md#get-the-installer) | A deployed instance, its team installer, and the Databricks access required by that deployment. |
 | Connect another MCP client | [MCP connection guide](docs/mcp.md#connect) | An instance URL and the authentication setup supported by that deployment. |
 | Understand metric definitions without connecting to data | [Run the offline example](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database) | Go; no database or cloud account. This produces query plans, not data results. |
-| Run a service for your team | [Service setup](docs/getting-started.md#run-the-http-service) | The current implementation requires PostgreSQL, identity configuration and Databricks SQL. |
+| Run a service for your team | [Service setup](docs/getting-started.md#run-the-http-service) | PostgreSQL metadata, identity configuration and a [supported query profile](docs/runtime-engines.md). |
 
 Already have web access? Open your team's instance and start in the **metric catalog**. This repository does not include a public instance or your company's metric definitions.
 
@@ -66,6 +66,7 @@ Already have web access? Open your team's instance and start in the **metric cat
 - [Getting started](docs/getting-started.md) — offline example, local catalog and service setup.
 - [MCP integration](docs/mcp.md) · [HTTP API](docs/http-api.md) — connect a client or application.
 - [Architecture and adapters](docs/architecture.md) — system responsibilities, query paths and current database support.
+- [ClickHouse aggregate serving](docs/clickhouse-online.md) · [runtime.clickhouse.example.yaml](examples/runtime.clickhouse.example.yaml).
 - [Team configuration](config/README.md) · [External semantic layer](docs/exploration.md) — maintain private settings and definitions for exploration.
 - [Development status](docs/development-status.md) — implemented features, verification evidence and remaining gaps.
 - [Contributing](CONTRIBUTING.md) · [All documentation](docs/README.md).

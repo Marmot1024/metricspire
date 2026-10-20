@@ -19,10 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/marmot1024/metricspire/internal/adapter/databricks"
-	"github.com/marmot1024/metricspire/internal/adapter/postgresquery"
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/auth/appsauth"
 	"github.com/marmot1024/metricspire/internal/auth/oidcauth"
@@ -193,46 +190,16 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 		if urlValue == "" || urlValue == environment.databaseURL {
 			return fmt.Errorf("online serving requires a separate %s read credential", config.Online.DatabaseEnv())
 		}
-		poolConfig, err := pgxpool.ParseConfig(urlValue)
-		if err != nil {
-			return errors.New("invalid online PostgreSQL connection configuration")
-		}
-		poolConfig.MaxConns = 4
-		poolConfig.ConnConfig.RuntimeParams["application_name"] = "metricspire-online"
-		poolConfig.ConnConfig.RuntimeParams["default_transaction_read_only"] = "on"
-		poolConfig.ConnConfig.RuntimeParams["timezone"] = "UTC"
-		poolConfig.ConnConfig.RuntimeParams["statement_timeout"] = "2000"
-		pool, err := pgxpool.NewWithConfig(initializationContext, poolConfig)
-		if err != nil {
-			return errors.New("could not open online PostgreSQL pool")
-		}
-		defer pool.Close()
-		var privileged bool
-		if err = pool.QueryRow(initializationContext, `SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user`).Scan(&privileged); err != nil || privileged {
-			return errors.New("online PostgreSQL requires a non-superuser, non-BYPASSRLS read role")
-		}
-		age, _ := runtimeconfig.ParseDuration(config.Online.MaxDataAge, time.Minute)
-		onlineEngine, err := postgresquery.NewQueryEngine(pool, postgresquery.Config{Tenant: config.Online.Tenant, Resources: config.Online.Resources, MaxDataAge: age, MaxBytes: 4 << 20})
+		onlineEngine, engineReady, closeEngine, err := openOnlineEngine(initializationContext, urlValue, *config.Online)
 		if err != nil {
 			return err
 		}
-		for _, resource := range config.Online.Resources {
-			qualified := pgx.Identifier{resource.Schema, resource.Table}.Sanitize()
-			var readOnly bool
-			// Table checks alone miss column grants. These inquiries also include
-			// privileges inherited by the current role.
-			if err := pool.QueryRow(initializationContext, `SELECT
-				has_table_privilege(current_user,$1,'SELECT')
-				AND NOT has_table_privilege(current_user,$1,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-				AND NOT has_any_column_privilege(current_user,$1,'INSERT,UPDATE,REFERENCES')`, qualified).Scan(&readOnly); err != nil || !readOnly {
-				return errors.New("online credential must have SELECT and no write privileges on each enabled source")
-			}
-		}
+		defer closeEngine()
 		readiness = httpapi.ReadinessFunc(func(ctx context.Context) error {
 			if err := store.Ready(ctx); err != nil {
 				return err
 			}
-			return pool.Ping(ctx)
+			return engineReady(ctx)
 		})
 		onlineQueries, err := application.NewQueryService(store, onlinePolicyResolver, onlineResolver, onlineEngine, store)
 		if err != nil {
@@ -536,7 +503,7 @@ func loadTrustedRoutes(baseDirectory string, config runtimeconfig.Config) ([]app
 		}
 		expectedEngine := databricks.EngineName
 		if config.QueryDriver() == "disabled" {
-			expectedEngine = postgresquery.EngineName
+			expectedEngine = config.Online.EngineDriver()
 		}
 		if source.Engine != expectedEngine {
 			return nil, nil, fmt.Errorf("binding route %s/%s uses unsupported engine %q", route.Namespace, route.ModelName, source.Engine)

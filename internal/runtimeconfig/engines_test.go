@@ -36,3 +36,17 @@ func TestPortableProfileAndUnsupportedDrivers(t *testing.T) {
 		})
 	}
 }
+
+func TestClickHouseServingKeepsMetadataAndAnalyticalRolesSeparate(t *testing.T) {
+	c, err := runtimeconfig.Load("../../examples/runtime.clickhouse.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Storage.Driver != "postgres" || c.QueryEngine.Driver != "disabled" || c.Online.EngineDriver() != "clickhouse_online" {
+		t.Fatal("runtime roles conflated")
+	}
+	c.Online.Driver = "doris"
+	if err := c.Validate(); err == nil {
+		t.Fatal("unimplemented result driver accepted")
+	}
+}

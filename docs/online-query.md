@@ -114,3 +114,5 @@ For a bounded sustained sample, also set `METRICSPIRE_ONLINE_SOAK_DURATION=30s` 
 Non-finite PostgreSQL numeric values such as NaN and Infinity are rejected with `503 online_data_unavailable`, not exposed as successful metric values. Zero-denominator nulls remain supported.
 
 Before deployment, agree a real metric/dimension grain and freshness target; reconcile results with its source; test intended OIDC identities and denied access; measure warm and after-idle first requests, p95/p99, sustained throughput, timeouts/429s, database restart and audit failure under realistic load. Measure database compute/storage, refresh and audit costs. PostgreSQL can also suspend or have cold connections; bypassing Warehouse does not eliminate that operational risk. No staging or production acceptance follows from local tests alone.
+
+The same HTTP request and authorization contract also supports [ClickHouse aggregate serving](clickhouse-online.md). Its physical types, numeric precision and producer configuration are explicit in that guide.
