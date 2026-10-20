@@ -1,13 +1,16 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 
 	"github.com/marmot1024/metricspire/internal/adapter/databricks"
+	"github.com/marmot1024/metricspire/internal/adapter/trinoquery"
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/audit"
 	"github.com/marmot1024/metricspire/internal/contractio"
 	"github.com/marmot1024/metricspire/internal/exploration"
+	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/marmot1024/metricspire/internal/runtimeconfig"
 )
 
@@ -29,16 +32,31 @@ func buildServeExploration(base string, c *runtimeconfig.ExplorationConfig, clie
 		}
 		catalogs = append(catalogs, catalog)
 	}
+	for _, catalog := range catalogs {
+		if catalog.EngineName() != c.EngineDriver() {
+			return nil, nil, nil, &model.Problem{Code: "engine_mismatch", Message: "analysis catalog engine differs from deployment driver"}
+		}
+		if c.EngineDriver() != "databricks_sql" {
+			if err := trinoquery.ValidateCatalog(catalog, c.EngineDriver()); err != nil {
+				return nil, nil, nil, err
+			}
+		}
+	}
 	routes, err := application.NewConfiguredAnalysisCatalogs(catalogs)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	clientConfig.WarehouseID = c.WarehouseID
-	client, err := databricks.NewClient(clientConfig)
-	if err != nil {
-		return nil, nil, nil, err
+	var engine application.AnalysisEngine
+	if c.EngineDriver() == "databricks_sql" {
+		clientConfig.WarehouseID = c.WarehouseID
+		client, e := databricks.NewClient(clientConfig)
+		if e != nil {
+			return nil, nil, nil, e
+		}
+		engine, err = databricks.NewAnalysisEngine(client)
+	} else {
+		engine, err = trinoquery.New(trinoquery.Config{Driver: c.EngineDriver(), Connection: os.Getenv(c.ConnectionEnv), User: c.User})
 	}
-	engine, err := databricks.NewAnalysisEngine(client)
 	if err != nil {
 		return nil, nil, nil, err
 	}

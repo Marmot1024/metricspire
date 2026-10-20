@@ -64,3 +64,27 @@ func TestAnalysisConfigurationAndOfflineValidation(t *testing.T) {
 		t.Fatal("disabled exploration must stay disabled")
 	}
 }
+
+func TestExternalExplorationStartupRejectsUnsupportedCatalogs(t *testing.T) {
+	var c exploration.Catalog
+	if err := contractio.ReadFile("../../testdata/trino/catalog.json", &c); err != nil {
+		t.Fatal(err)
+	}
+	config := &runtimeconfig.ExplorationConfig{Driver: "trino", ReviewedCatalogs: []exploration.Catalog{c}, ConnectionEnv: "SYNTHETIC_ANALYSIS_URL", User: "reader", Concurrency: 1, Capacity: 2, ResultTTL: "10m"}
+	t.Setenv(config.ConnectionEnv, "http://127.0.0.1:1")
+	_, jobs, _, err := buildServeExploration("", config, databricks.ClientConfig{}, audit.NewMemoryRecorder())
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs.Close()
+	config.ReviewedCatalogs[0].Engine = "presto"
+	if _, _, _, err = buildServeExploration("", config, databricks.ClientConfig{}, audit.NewMemoryRecorder()); err == nil {
+		t.Fatal("engine mismatch accepted")
+	}
+	config.ReviewedCatalogs[0].Engine = "trino"
+	config.ReviewedCatalogs[0].Datasets[0].Fields[0].Type = model.DataTypeTimestamp
+	config.ReviewedCatalogs[0].Datasets[0].Fields[0].CalendarTimezone = ""
+	if _, _, _, err = buildServeExploration("", config, databricks.ClientConfig{}, audit.NewMemoryRecorder()); err == nil {
+		t.Fatal("timestamp accepted")
+	}
+}

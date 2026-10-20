@@ -9,10 +9,9 @@ These are deployment-owned configuration files, not chat inputs.
 | `storage` | Metric definitions, revisions, releases and audit records | `postgres` |
 | `query_engine` | Published-metric analytical execution | `databricks_sql`, `disabled` |
 | `online` | Bounded reads of precomputed DWS/ADS aggregates | `postgres_online`, `clickhouse_online` |
-| `exploration` | Temporary analysis over reviewed semantic catalogs | `databricks_sql` |
+| `exploration` | Temporary analysis over reviewed semantic catalogs | `databricks_sql`, `trino`, `presto` |
 
-MySQL metadata storage, Doris result stores and Trino/Presto exploration
-remain planned adapters. Selecting them fails configuration validation before
+MySQL metadata storage and Doris result stores remain planned adapters. Selecting them fails configuration validation before
 opening databases or listening. Installing these engines in a test lab does not
 make them supported MetricSpire drivers.
 
@@ -67,3 +66,5 @@ registry and engine configuration. Never commit real company aliases, physical
 mappings, semantic artifacts or credentials into the public examples.
 
 For a synthetic external database lab, see [testing](../deploy/testing/README.md).
+
+For independent DATE-based exploration, see [Trino and Presto](trino-presto.md).

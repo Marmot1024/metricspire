@@ -9,24 +9,39 @@ import (
 	"github.com/marmot1024/metricspire/internal/exploration"
 )
 
-// Exploration is opt-in and has its own warehouse and execution capacity.
-// Host/authentication are shared with the authenticated Databricks deployment.
+// Exploration is opt-in and has its own engine credentials and capacity.
 type ExplorationConfig struct {
 	Driver           string                `json:"driver,omitempty" yaml:"driver,omitempty"`
 	ReviewedCatalogs []exploration.Catalog `json:"-" yaml:"-"`
 	CatalogPaths     []string              `json:"catalog_paths" yaml:"catalog_paths"`
 	WarehouseID      string                `json:"warehouse_id" yaml:"warehouse_id"`
+	ConnectionEnv    string                `json:"connection_env,omitempty" yaml:"connection_env,omitempty"`
+	User             string                `json:"user,omitempty" yaml:"user,omitempty"`
 	Concurrency      int                   `json:"concurrency" yaml:"concurrency"`
 	Capacity         int                   `json:"capacity" yaml:"capacity"`
 	ResultTTL        string                `json:"result_ttl" yaml:"result_ttl"`
 }
 
-func (c ExplorationConfig) Validate() error {
-	if c.Driver != "" && c.Driver != "databricks_sql" {
-		return errors.New("exploration.driver is not implemented; supported: databricks_sql")
+func (c ExplorationConfig) EngineDriver() string {
+	if c.Driver == "" {
+		return "databricks_sql"
 	}
-	if len(c.CatalogPaths)+len(c.ReviewedCatalogs) == 0 || len(c.CatalogPaths)+len(c.ReviewedCatalogs) > 32 || !regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`).MatchString(c.WarehouseID) || c.Concurrency < 1 || c.Concurrency > 32 || c.Capacity < c.Concurrency || c.Capacity > 1000 {
-		return errors.New("exploration requires catalog_paths, warehouse_id, concurrency (1-32), and capacity (up to 1000)")
+	return c.Driver
+}
+
+func (c ExplorationConfig) Validate() error {
+	if c.EngineDriver() != "databricks_sql" && c.Driver != "trino" && c.Driver != "presto" {
+		return errors.New("exploration.driver is not implemented; supported: databricks_sql, trino, presto")
+	}
+	if c.EngineDriver() == "databricks_sql" {
+		if !regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`).MatchString(c.WarehouseID) || c.ConnectionEnv != "" || c.User != "" {
+			return errors.New("Databricks exploration requires warehouse_id and no external connection")
+		}
+	} else if c.WarehouseID != "" || !regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,127}$`).MatchString(c.ConnectionEnv) || !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`).MatchString(c.User) {
+		return errors.New("external exploration requires connection_env and user, without warehouse_id")
+	}
+	if len(c.CatalogPaths)+len(c.ReviewedCatalogs) == 0 || len(c.CatalogPaths)+len(c.ReviewedCatalogs) > 32 || c.Concurrency < 1 || c.Concurrency > 32 || c.Capacity < c.Concurrency || c.Capacity > 1000 {
+		return errors.New("exploration requires catalog_paths, concurrency (1-32), and capacity (up to 1000)")
 	}
 	seen := map[string]bool{}
 	for _, p := range c.CatalogPaths {

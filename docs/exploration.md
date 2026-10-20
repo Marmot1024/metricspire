@@ -150,3 +150,9 @@ Deployment acceptance additionally requires loading the reviewed business
 catalog, discovering only granted sources/fields, and reconciling results at
 the requested grain against an independently reviewed warehouse query. A local
 test run does not enable exploration on an already deployed MCP server.
+
+## Independent Trino and Presto engines
+
+For approved single-table DATE sources without Databricks credentials, use the
+[Trino/Presto profile](trino-presto.md). Databricks relationship and timestamp
+features do not automatically apply to these adapters.

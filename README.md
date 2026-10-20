@@ -46,7 +46,7 @@ An application can query the same metric through the HTTP API and reuse its calc
 
 Solid arrows show service calls or data writes; the dashed arrow supplies optional semantic configuration. **The OLAP engine, metric store and external semantic layer have distinct responsibilities.**
 
-The adapter design targets OLAP engines such as ClickHouse and Doris, and metric stores such as MySQL and PostgreSQL. **This repository currently ships a Databricks SQL analytical adapter and a PostgreSQL metric store**, plus optional HTTP queries over precomputed PostgreSQL or ClickHouse aggregates. Doris and MySQL adapters are not shipped yet; ClickHouse exploration and analytical MCP queries are not supported. See [architecture and adapter support](docs/architecture.md#adapter-support) for the scope of each path.
+The adapter design targets OLAP engines such as ClickHouse and Doris, and metric stores such as MySQL and PostgreSQL. **This repository currently ships a Databricks SQL analytical adapter and a PostgreSQL metric store**, plus optional HTTP/MCP queries over precomputed PostgreSQL or ClickHouse aggregates and bounded [Trino/Presto exploration](docs/trino-presto.md). Doris and MySQL adapters are not shipped yet; ClickHouse exploration and analytical MCP queries are not supported. See [architecture and adapter support](docs/architecture.md#adapter-support) for the scope of each path.
 
 ## Choose where to start
 
