@@ -29,6 +29,7 @@ import (
 	"github.com/marmot1024/metricspire/internal/application"
 	"github.com/marmot1024/metricspire/internal/catalog"
 	"github.com/marmot1024/metricspire/internal/contractio"
+	"github.com/marmot1024/metricspire/internal/exploration"
 	"github.com/marmot1024/metricspire/internal/mcpbridge"
 	"github.com/marmot1024/metricspire/internal/model"
 	"github.com/marmot1024/metricspire/internal/repository/postgres"
@@ -74,6 +75,22 @@ func TestServeOnlineClickHouseWithPostgresMetadata(t *testing.T) {
 }
 
 func testServeOnlineEngine(t *testing.T, writePrivilege string, inherited, portable, structured bool, driver string) {
+	testServeOnlineExplorationEngine(t, writePrivilege, inherited, portable, structured, driver, "")
+}
+func TestServeTrinoPrestoWithoutDatabricks(t *testing.T) {
+	for _, engine := range []string{"trino", "presto"} {
+		t.Run(engine, func(t *testing.T) {
+			if os.Getenv("METRICSPIRE_"+strings.ToUpper(engine)+"_TEST_URL") == "" {
+				if os.Getenv("METRICSPIRE_REQUIRE_"+strings.ToUpper(engine)+"_TESTS") == "1" {
+					t.Fatal("external engine URL required")
+				}
+				t.Skip("requires disposable external engine")
+			}
+			testServeOnlineExplorationEngine(t, "", false, true, true, postgresquery.EngineName, engine)
+		})
+	}
+}
+func testServeOnlineExplorationEngine(t *testing.T, writePrivilege string, inherited, portable, structured bool, driver, explorationDriver string) {
 	t.Helper()
 	raw := os.Getenv("METRICSPIRE_ONLINE_TEST_DATABASE_URL")
 	if raw == "" {
@@ -239,6 +256,21 @@ func testServeOnlineEngine(t *testing.T, writePrivilege string, inherited, porta
 		config.Policies, config.Bindings = nil, nil
 		config.Storage.DatabaseURLEnv = "SYNTHETIC_METADATA_URL"
 		config.Online.DatabaseURLEnv = "SYNTHETIC_RESULTS_URL"
+	}
+	if explorationDriver != "" {
+		var ec exploration.Catalog
+		if err := contractio.ReadFile("../../testdata/trino/catalog.json", &ec); err != nil {
+			t.Fatal(err)
+		}
+		ec.Engine = explorationDriver
+		config.Exploration = &runtimeconfig.ExplorationConfig{Driver: explorationDriver, ReviewedCatalogs: []exploration.Catalog{ec}, ConnectionEnv: "SYNTHETIC_EXPLORATION_URL", User: "synthetic_reader", Concurrency: 1, Capacity: 10, ResultTTL: "10m"}
+		// ReviewedCatalogs deliberately has no serialized form; deployment loads a file.
+		if err := contractio.WriteJSON(filepath.Join(dir, "exploration.json"), ec); err != nil {
+			t.Fatal(err)
+		}
+		config.Exploration.ReviewedCatalogs = nil
+		config.Exploration.CatalogPaths = []string{"exploration.json"}
+		t.Setenv("SYNTHETIC_EXPLORATION_URL", os.Getenv("METRICSPIRE_"+strings.ToUpper(explorationDriver)+"_TEST_URL"))
 	}
 	configPath := filepath.Join(dir, "runtime.json")
 	if err := contractio.WriteJSON(configPath, config); err != nil {
@@ -469,8 +501,45 @@ func testServeOnlineEngine(t *testing.T, writePrivilege string, inherited, porta
 	if status, _ := call("/api/v1/namespaces/demo/online-query", query, "invalid"); status != 401 {
 		t.Fatalf("invalid OIDC token: %d", status)
 	}
+	if explorationDriver != "" {
+		var views struct {
+			Sources []application.AnalysisSourceView `json:"sources"`
+		}
+		mcpCall(t, session, "discover_analysis", mcpbridge.AnalysisDiscoveryInput{Namespace: "demo"}, &views)
+		if len(views.Sources) != 1 {
+			t.Fatal("external source discovery failed")
+		}
+		in := mcpbridge.AnalysisInput{Namespace: "demo", Query: exploration.Query{APIVersion: model.APIVersion, Kind: exploration.Kind, Source: "shipments", GroupBy: []string{"flag"}, TimeRange: &model.TimeRange{Dimension: "day", Start: "1995-01-01T00:00:00Z", End: "1996-01-01T00:00:00Z", Timezone: "UTC"}, Measures: []exploration.Measure{{Name: "items", Op: "count"}, {Name: "order_sum", Op: "sum", Field: "order"}}, Limit: 100}}
+		var planned application.AnalysisPlanView
+		mcpCall(t, session, "plan_analysis", in, &planned)
+		var job application.AnalysisJobView
+		mcpCall(t, session, "submit_analysis", in, &job)
+		if job.ID == "" {
+			t.Fatal("missing job ID")
+		}
+		deadline := time.Now().Add(65 * time.Second)
+		for job.Status == model.JobRunning && time.Now().Before(deadline) {
+			time.Sleep(50 * time.Millisecond)
+			mcpCall(t, session, "get_analysis", mcpbridge.AnalysisJobInput{Namespace: "demo", JobID: job.ID}, &job)
+		}
+		if job.Status != model.JobSucceeded || job.Result == nil || len(job.Result.Rows) != 3 {
+			t.Fatalf("external analysis failed: status=%s code=%s", job.Status, job.ErrorCode)
+		}
+		if text := mcpCallError(t, otherSession, "get_analysis", mcpbridge.AnalysisJobInput{Namespace: "demo", JobID: job.ID}); text == "" {
+			t.Fatal("cross-principal result access")
+		}
+		denied := onlineFixtureToken(t, key, map[string]any{"iss": issuer.URL, "aud": "fixture-api", "sub": "denied", "tenant": "demo", "roles": []string{"none"}, "permissions": []string{"query:execute"}, "exp": time.Now().Add(time.Minute).Unix()})
+		deniedSession := mcpHTTPTransport(t, baseURL+"/api/v1/mcp", denied)
+		if text := mcpCallError(t, deniedSession, "submit_analysis", in); text == "" {
+			t.Fatal("unapproved exploration executed")
+		}
+	}
 	var count int
-	if err := admin.QueryRow(t.Context(), "SELECT count(*) FROM "+qualified(control, "metricspire_query_audit")+" WHERE event_kind IN ('query_started','query_succeeded')").Scan(&count); err != nil || count != 4 {
+	wantAudits := 4
+	if explorationDriver != "" {
+		wantAudits = 6
+	}
+	if err := admin.QueryRow(t.Context(), "SELECT count(*) FROM "+qualified(control, "metricspire_query_audit")+" WHERE event_kind IN ('query_started','query_succeeded')").Scan(&count); err != nil || count != wantAudits {
 		t.Fatalf("startup durable audit count=%d error=%v", count, err)
 	}
 }

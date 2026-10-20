@@ -11,6 +11,7 @@
 !internal/adapter/databricks/*.go
 !internal/adapter/lakebase/*.go
 !internal/adapter/postgresquery/*.go
+!internal/adapter/trinoquery/*.go
 !internal/application/*.go
 !internal/audit/*.go
 !internal/auth/appsauth/*.go

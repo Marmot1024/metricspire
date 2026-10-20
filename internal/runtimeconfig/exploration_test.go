@@ -20,3 +20,19 @@ func TestExplorationBudgetsRequireExplicitConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func TestExternalExplorationConfiguration(t *testing.T) {
+	for _, driver := range []string{"trino", "presto"} {
+		c := runtimeconfig.ExplorationConfig{Driver: driver, CatalogPaths: []string{"private.json"}, ConnectionEnv: "METRICSPIRE_EXPLORATION_URL", User: "reader", Concurrency: 1, Capacity: 10, ResultTTL: "10m"}
+		if err := c.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		for _, change := range []func(*runtimeconfig.ExplorationConfig){func(c *runtimeconfig.ExplorationConfig) { c.WarehouseID = "wrong" }, func(c *runtimeconfig.ExplorationConfig) { c.ConnectionEnv = "https://secret" }, func(c *runtimeconfig.ExplorationConfig) { c.User = "reader\nadmin" }} {
+			copy := c
+			change(&copy)
+			if err := copy.Validate(); err == nil {
+				t.Fatal("mixed external configuration accepted")
+			}
+		}
+	}
+}

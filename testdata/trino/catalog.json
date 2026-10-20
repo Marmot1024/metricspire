@@ -1,0 +1,95 @@
+{
+  "api_version": "metricspire.io/v1alpha1",
+  "kind": "AnalysisCatalog",
+  "engine": "trino",
+  "metadata": {
+    "name": "tpch_demo",
+    "version": "1"
+  },
+  "namespace": "demo",
+  "tenant": "demo",
+  "datasets": [
+    {
+      "name": "lineitems",
+      "resource": {
+        "kind": "table",
+        "catalog": "tpch",
+        "schema": "sf1",
+        "table": "lineitem"
+      },
+      "fields": [
+        {
+          "name": "day",
+          "column": "shipdate",
+          "type": "date",
+          "calendar_timezone": "UTC"
+        },
+        {
+          "name": "flag",
+          "column": "returnflag",
+          "type": "string"
+        },
+        {
+          "name": "order",
+          "column": "orderkey",
+          "type": "integer"
+        }
+      ]
+    }
+  ],
+  "attributes": [
+    {
+      "name": "day",
+      "dataset": "lineitems",
+      "field": "day"
+    },
+    {
+      "name": "flag",
+      "dataset": "lineitems",
+      "field": "flag"
+    },
+    {
+      "name": "order",
+      "dataset": "lineitems",
+      "field": "order"
+    }
+  ],
+  "sources": [
+    {
+      "name": "shipments",
+      "dataset": "lineitems",
+      "dimensions": [
+        "day",
+        "flag",
+        "order"
+      ],
+      "roles": [
+        "analyst"
+      ],
+      "max_window_days": 366,
+      "max_rows": 100,
+      "timeout": 60000000000
+    }
+  ],
+  "policy": {
+    "api_version": "metricspire.io/v1alpha1",
+    "kind": "PolicySource",
+    "metadata": {
+      "name": "tpch_read",
+      "version": "1"
+    },
+    "tenant": "demo",
+    "rules": [
+      {
+        "name": "read",
+        "effect": "allow",
+        "roles": [
+          "analyst"
+        ],
+        "dimensions": [
+          "*"
+        ]
+      }
+    ]
+  }
+}

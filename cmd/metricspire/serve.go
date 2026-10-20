@@ -122,7 +122,7 @@ func runServe(parent context.Context, arguments []string, stdout, stderr io.Writ
 	var queries httpapi.QueryService
 	var jobs *application.JobManager
 	clientConfig := databricks.ClientConfig{Host: environment.databricksHost, WarehouseID: environment.warehouseID}
-	if config.QueryDriver() != "disabled" || config.Exploration != nil {
+	if config.QueryDriver() != "disabled" || (config.Exploration != nil && config.Exploration.EngineDriver() == "databricks_sql") {
 		if config.Authentication.Provider == runtimeconfig.AuthenticationDatabricksApps {
 			clientConfig.RequireRequestToken = true
 		} else {
@@ -446,7 +446,7 @@ func loadServeEnvironment(getenv func(string) string, config runtimeconfig.Confi
 	}
 	host := strings.TrimSpace(getenv("DATABRICKS_HOST"))
 	warehouseID := strings.TrimSpace(getenv("DATABRICKS_SQL_WAREHOUSE_ID"))
-	needsDatabricks := config.QueryDriver() != "disabled" || config.Exploration != nil
+	needsDatabricks := config.QueryDriver() != "disabled" || (config.Exploration != nil && config.Exploration.EngineDriver() == "databricks_sql")
 	if (needsDatabricks || authenticationProvider == runtimeconfig.AuthenticationDatabricksApps) && host == "" {
 		return serveEnvironment{}, errors.New("DATABRICKS_HOST is required by the selected engine or authentication provider")
 	}

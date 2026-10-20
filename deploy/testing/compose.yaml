@@ -36,6 +36,13 @@ services:
     volumes: ["./trino/jvm.config:/etc/trino/jvm.config:ro"]
     mem_limit: 3g
     cpus: 2
+  presto:
+    profiles: [analytical]
+    image: prestodb/presto:0.299
+    ports: ["127.0.0.1:18081:8080"]
+    volumes: ["./presto/jvm.config:/opt/presto-server/etc/jvm.config:ro", "./presto/config.properties:/opt/presto-server/etc/config.properties:ro", "./presto/tpch.properties:/opt/presto-server/etc/catalog/tpch.properties:ro"]
+    mem_limit: 3g
+    cpus: 2
 volumes:
   postgres-data:
   clickhouse-data:

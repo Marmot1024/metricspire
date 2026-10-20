@@ -17,6 +17,7 @@ import (
 // registry: temporary analysis starts from an explicitly approved row source.
 // Transports must never accept this object from an analysis request.
 type Catalog struct {
+	Engine        string             `json:"engine,omitempty" yaml:"engine,omitempty"`
 	APIVersion    string             `json:"api_version" yaml:"api_version"`
 	Kind          string             `json:"kind" yaml:"kind"`
 	Metadata      model.Metadata     `json:"metadata" yaml:"metadata"`
@@ -96,7 +97,17 @@ func validType(t model.DataType) bool {
 }
 
 // ValidateCatalog rejects ambiguous routes and unbound fields at startup.
+func (c Catalog) EngineName() string {
+	if c.Engine == "" {
+		return "databricks_sql"
+	}
+	return c.Engine
+}
+
 func ValidateCatalog(c Catalog) error {
+	if c.EngineName() != "databricks_sql" && c.EngineName() != "trino" && c.EngineName() != "presto" {
+		return invalid("catalog.engine", "unsupported analysis engine")
+	}
 	if c.APIVersion != model.APIVersion || c.Kind != "AnalysisCatalog" || !namePattern.MatchString(c.Metadata.Name) || c.Metadata.Version == "" || c.Namespace == "" || c.Tenant == "" || len(c.Datasets) == 0 || len(c.Sources) == 0 || len(c.Datasets) > 64 || len(c.Attributes) > 256 || len(c.Relationships) > 32 {
 		return invalid("catalog", "invalid external analysis catalog")
 	}
@@ -467,7 +478,7 @@ func PlanCatalog(c Catalog, q Query, rc model.RequestContext) (Plan, error) {
 	tr.End = end.UTC().Format(time.RFC3339Nano)
 	q.TimeRange = &tr
 	root := datasets[source.Dataset]
-	base := model.PhysicalPlan{APIVersion: model.APIVersion, Kind: model.KindPhysicalPlan, Engine: "databricks_sql", ManifestFingerprint: fingerprint, PolicyFingerprint: policyFingerprint, BindingFingerprint: fingerprint, Root: model.PhysicalDataset{Name: root.Name, Entity: root.Name, Resource: root.Resource}, Dimensions: physicalDims, TimeRange: q.TimeRange, TimeGrouping: q.TimeGrouping, Filters: q.Filters, Limit: q.Limit}
+	base := model.PhysicalPlan{APIVersion: model.APIVersion, Kind: model.KindPhysicalPlan, Engine: c.EngineName(), ManifestFingerprint: fingerprint, PolicyFingerprint: policyFingerprint, BindingFingerprint: fingerprint, Root: model.PhysicalDataset{Name: root.Name, Entity: root.Name, Resource: root.Resource}, Dimensions: physicalDims, TimeRange: q.TimeRange, TimeGrouping: q.TimeGrouping, Filters: q.Filters, Limit: q.Limit}
 	base.LogicalFingerprint, err = canonical.Fingerprint(q)
 	if err != nil {
 		return Plan{}, err

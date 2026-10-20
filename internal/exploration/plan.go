@@ -457,6 +457,12 @@ func containsShare(e Expression) bool {
 	return false
 }
 
+// ExpressionType applies the same semantic type rules used to validate plans.
+// Adapters use it to preserve intermediate types across calculation stages.
+func ExpressionType(e Expression, refs map[string]model.DataType, groups []string, final bool) (model.DataType, error) {
+	return expressionType(e, refs, groups, final)
+}
+
 func expressionType(e Expression, refs map[string]model.DataType, groups []string, final bool) (model.DataType, error) {
 	bad := func() (model.DataType, error) {
 		return "", invalid("expression", "invalid expression shape or types: "+e.Op)
