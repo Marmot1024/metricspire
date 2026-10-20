@@ -51,10 +51,13 @@ func TestPostgresCatalogLifecycleAndOptimisticConcurrency(t *testing.T) {
 	var conflicts int
 	var mu sync.Mutex
 	var wait sync.WaitGroup
-	for range 2 {
+	start := make(chan struct{})
+	const racers = 8
+	for range racers {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
+			<-start
 			candidate := source
 			candidate.Metadata.Version = fmt.Sprintf("1.1.%d", time.Now().UnixNano())
 			_, err := service.SaveDraft(ctx, catalog.SaveDraftInput{
@@ -71,8 +74,9 @@ func TestPostgresCatalogLifecycleAndOptimisticConcurrency(t *testing.T) {
 			}
 		}()
 	}
+	close(start)
 	wait.Wait()
-	if successes != 1 || conflicts != 1 {
+	if successes != 1 || conflicts != racers-1 {
 		t.Fatalf("concurrent saves: successes=%d conflicts=%d", successes, conflicts)
 	}
 	current, err := store.GetDraft(ctx, namespace, source.Metadata.Name)
