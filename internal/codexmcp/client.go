@@ -241,3 +241,33 @@ func (c *Client) VerifyConnection(endpoint, helper string) error {
 	}
 	return nil
 }
+
+// VerifyOAuthConnection checks effective native OAuth configuration without
+// inspecting its credential cache or permitting mixed header authentication.
+func (c *Client) VerifyOAuthConnection(endpoint, clientID string) error {
+	var reply struct {
+		Config struct {
+			Servers map[string]map[string]any `json:"mcp_servers"`
+		} `json:"config"`
+	}
+	if err := c.rpc("config/read", map[string]any{"includeLayers": false, "cwd": c.cmd.Dir}, &reply); err != nil {
+		return err
+	}
+	s := reply.Config.Servers[c.server]
+	if s["url"] != endpoint || s["enabled"] == false {
+		return errors.New("effective native OAuth endpoint differs from installation")
+	}
+	oauth, ok := s["oauth"].(map[string]any)
+	if !ok || oauth["client_id"] != clientID {
+		return errors.New("effective native OAuth client differs from installation")
+	}
+	for _, k := range []string{"command", "http_headers_helper", "bearer_token_env_var", "http_headers", "env_http_headers"} {
+		if v, ok := s[k]; ok && v != nil {
+			return errors.New("effective native OAuth connection mixes authentication or transports")
+		}
+	}
+	if v, ok := oauth["client_secret"]; ok && v != nil && v != "" {
+		return errors.New("native onboarding requires a registered public OAuth client")
+	}
+	return nil
+}

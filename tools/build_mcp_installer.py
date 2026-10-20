@@ -67,8 +67,30 @@ def validate_connection(c):
             raise ValueError("MCP URL must end in /api/v1/mcp")
 
 
-def build(c, platforms, output):
-    validate_connection(c)
+def validate_oidc_connection(c):
+    if set(c) != {"url", "issuer", "client_id", "scopes"}:
+        raise ValueError("OIDC bundle accepts public URL, issuer, public client_id and scopes only")
+    for key in ("url", "issuer"):
+        raw = c[key]
+        if not isinstance(raw, str) or any(ord(ch) < 32 for ch in raw):
+            raise ValueError("Invalid OIDC connection URL")
+        u = urlsplit(raw)
+        _ = u.port
+        if u.scheme != "https" or not u.hostname or u.username or u.password or u.query or u.fragment:
+            raise ValueError("OIDC connection requires credential-free HTTPS URLs")
+        if key == "url" and u.path not in ("/mcp", "/api/v1/mcp"):
+            raise ValueError("Invalid MCP endpoint")
+    if not isinstance(c["client_id"], str) or not c["client_id"].strip() or len(c["client_id"]) > 512:
+        raise ValueError("Registered public OAuth client_id is required")
+    scopes = c["scopes"]
+    if (not isinstance(scopes, list) or not 1 <= len(scopes) <= 16
+            or any(not isinstance(x, str) or not x or len(x) > 128 or any(ch in x for ch in " ,\t\r\n\x00") for x in scopes)
+            or len(set(scopes)) != len(scopes)):
+        raise ValueError("Configure unique provider-approved scopes")
+
+
+def build(c, platforms, output, oidc=False):
+    (validate_oidc_connection if oidc else validate_connection)(c)
     # Environment-specific artifacts must remain in ignored dist/, never docs/.
     output = output.resolve()
     dist = (ROOT / "dist").resolve()
@@ -91,7 +113,7 @@ def build(c, platforms, output):
                     binary = Path(tmp) / platform
                     env = dict(os.environ, CGO_ENABLED="0", GOOS=goos, GOARCH=goarch)
                     subprocess.run(["go", "build", "-trimpath", "-ldflags=-s -w",
-                                    "-o", str(binary), "./tools/mcp-installer"],
+                                    "-o", str(binary), "./tools/mcp-oidc" if oidc else "./tools/mcp-installer"],
                                    cwd=ROOT, env=env, check=True)
                     add(platform + "/metricspire-install", binary.read_bytes(), 0o700)
         data = payload.getvalue()
@@ -111,14 +133,23 @@ def build(c, platforms, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True)
-    parser.add_argument("--workspace-host", required=True, help="Databricks workspace HTTPS origin")
+    provider = parser.add_mutually_exclusive_group(required=True)
+    provider.add_argument("--workspace-host", help="Databricks workspace HTTPS origin")
+    provider.add_argument("--oidc-issuer", help="Reviewed standard OIDC issuer")
+    parser.add_argument("--oauth-client-id", help="Registered public MCP client, without secret")
+    parser.add_argument("--scope", action="append", help="Provider-approved OAuth scope (repeatable, OIDC only)")
     parser.add_argument("--platform", action="append", choices=PLATFORMS,
                         help="Default: all four platforms; restrict only for local testing")
     parser.add_argument("--output", type=Path, default=ROOT / "dist/metricspire-install.sh")
     args = parser.parse_args()
-    c = dict(url=args.url, workspace_host=args.workspace_host)
+    if args.oidc_issuer:
+        c = dict(url=args.url, issuer=args.oidc_issuer, client_id=args.oauth_client_id, scopes=args.scope)
+    else:
+        if args.oauth_client_id or args.scope:
+            parser.error("OAuth client/scopes require --oidc-issuer")
+        c = dict(url=args.url, workspace_host=args.workspace_host)
     try:
-        digest = build(c, args.platform or PLATFORMS, args.output)
+        digest = build(c, args.platform or PLATFORMS, args.output, oidc=bool(args.oidc_issuer))
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         parser.exit(1, "Build failed: " + str(error) + "\n")
     print(str(args.output) + "\nSHA-256: " + digest)
