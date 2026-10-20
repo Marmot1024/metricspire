@@ -66,6 +66,7 @@ MetricSpire 是一个开源的指标库与数据服务，连接你的分析数�
 - [快速上手](docs/getting-started.md) — 离线示例、本地指标目录与服务配置。
 - [MCP 接入](docs/mcp.md) · [HTTP API](docs/http-api.md) — 连接客户端或应用。
 - [架构与适配器](docs/architecture.md) — 系统分工、查询路径与当前数据库支持范围。
+- [离线结果刷新](docs/online-refresh.md): PostgreSQL 类型化批次导出、独立对账与租户快照原子刷新。
 - [ClickHouse 汇总查询服务](docs/clickhouse-online.md) · [runtime.clickhouse.example.yaml](examples/runtime.clickhouse.example.yaml).
 - [团队配置](config/README.md) · [外部语义层](docs/exploration.md) — 维护私有配置与探索性分析所需的定义。
 - [开发状态](docs/development-status.md) — 已实现能力、验证证据和待完成项。

@@ -66,6 +66,7 @@ Already have web access? Open your team's instance and start in the **metric cat
 - [Getting started](docs/getting-started.md) — offline example, local catalog and service setup.
 - [MCP integration](docs/mcp.md) · [HTTP API](docs/http-api.md) — connect a client or application.
 - [Architecture and adapters](docs/architecture.md) — system responsibilities, query paths and current database support.
+- [Operator refresh](docs/online-refresh.md): PostgreSQL typed batch export, reconciliation and atomic tenant refresh.
 - [ClickHouse aggregate serving](docs/clickhouse-online.md) · [runtime.clickhouse.example.yaml](examples/runtime.clickhouse.example.yaml).
 - [Team configuration](config/README.md) · [External semantic layer](docs/exploration.md) — maintain private settings and definitions for exploration.
 - [Development status](docs/development-status.md) — implemented features, verification evidence and remaining gaps.
