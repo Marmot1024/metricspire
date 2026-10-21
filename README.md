@@ -46,7 +46,7 @@ An application can query the same metric through the HTTP API and reuse its calc
 
 Solid arrows show service calls or data writes; the dashed arrow supplies optional semantic configuration. **The OLAP engine, metric store and external semantic layer have distinct responsibilities.**
 
-The adapter design targets OLAP engines such as ClickHouse and Doris, and metric stores such as MySQL and PostgreSQL. **This repository currently ships a Databricks SQL analytical adapter and a PostgreSQL metric store**, plus optional HTTP/MCP queries over precomputed PostgreSQL, ClickHouse or Doris aggregates and bounded [Trino/Presto exploration](docs/trino-presto.md). MySQL 8.4 metadata storage is also available. ClickHouse/Doris exploration and analytical MCP queries are not supported. See [architecture and adapter support](docs/architecture.md#adapter-support) for the scope of each path.
+**Implemented paths:** PostgreSQL or MySQL 8.4 for metric definitions, versions and audit; Databricks SQL for analytical metric queries; PostgreSQL, ClickHouse or Doris for HTTP/MCP queries over precomputed DWS/ADS aggregates; and Databricks or bounded [Trino/Presto exploration](docs/trino-presto.md). A self-hosted OIDC deployment can disable Databricks analytical queries and use the independent serving/exploration paths without a Databricks account. ClickHouse/Doris exploration and general analytical metric queries are not supported. See [architecture and adapter support](docs/architecture.md#adapter-support) for the scope of each path.
 
 ## Choose where to start
 
@@ -54,10 +54,10 @@ The adapter design targets OLAP engines such as ClickHouse and Doris, and metric
 
 | Your goal | Start here | You will need |
 | --- | --- | --- |
-| Use your team's service from local Codex CLI | [Get the team installer](docs/mcp-installer.md#get-the-installer) | A deployed instance, its team installer, and the Databricks access required by that deployment. |
+| Use your team's service from local Codex CLI | [Databricks installer](docs/mcp-installer.md#get-the-installer) or [OIDC installer](docs/oidc-mcp.md#user-installation) | A deployed instance, its team installer, and your own identity/data permissions for that deployment. |
 | Connect another MCP client | [MCP connection guide](docs/mcp.md#connect) | An instance URL and the authentication setup supported by that deployment. |
 | Understand metric definitions without connecting to data | [Run the offline example](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database) | Go; no database or cloud account. This produces query plans, not data results. |
-| Run a service for your team | [Service setup](docs/getting-started.md#run-the-http-service) | PostgreSQL metadata, identity configuration and a [supported query profile](docs/runtime-engines.md). |
+| Run a service for your team | [Service setup](docs/getting-started.md#run-the-http-service) | PostgreSQL or MySQL metadata, identity configuration and a [supported query profile](docs/runtime-engines.md). |
 
 Already have web access? Open your team's instance and start in the **metric catalog**. This repository does not include a public instance or your company's metric definitions.
 

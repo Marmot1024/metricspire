@@ -79,13 +79,55 @@ file, business names/aliases and checksum-verified semantic exports. The
 
 ## Run the HTTP service
 
-Before starting, prepare a PostgreSQL database for catalog state, an identity provider and an analytical engine with reviewed bindings and user access. Databricks SQL is the current analytical adapter. The [Databricks Apps package](../deploy/databricks-apps/README.md) is a dedicated staging path; portable OIDC hosting is configurable but still needs deployment acceptance.
+Choose a deployment profile before configuring connections. Metric definitions
+and audit use **PostgreSQL or MySQL 8.4**; DWS/ADS results use a separate store and
+read credential. Ordinary query users connect to the team's deployed service;
+they do not need to provision these components themselves.
 
-`metricspire serve --config <runtime.yaml>` assembles the catalog, identity, query, audit, job, UI, and engine adapters. Start from the non-secret [portable OIDC example](../examples/runtime.example.yaml) or the [Databricks Apps example](../examples/runtime.databricks-apps.example.yaml); supply secrets through the environment or deployment platform, not the config file.
+| Team environment | Start from | Query path |
+| --- | --- | --- |
+| Databricks | [Portable OIDC runtime](../examples/runtime.example.yaml), or the dedicated [Databricks Apps staging package](../deploy/databricks-apps/README.md) | Published metrics through Databricks SQL; optional approved exploration. |
+| No Databricks, PostgreSQL results | [Independent runtime](../examples/runtime.postgres.example.yaml) | Precomputed DWS/ADS through HTTP and native MCP. No Databricks account or variables are required. |
+| No Databricks, ClickHouse or Doris results | [ClickHouse guide](clickhouse-online.md) or [Doris guide](doris-online.md) | Bounded precomputed aggregates, with each adapter's type and query limits. |
 
-Run `metricspire migrate` as a separate operation before serving. The server never migrates PostgreSQL or creates analytical tables on startup. `GET /health/live` checks only the process; `GET /health/ready` checks the control PostgreSQL pool and, when online queries are enabled, their separate PostgreSQL pool. Neither proves warehouse access or snapshot freshness.
+To use MySQL for definitions/versions/audit, follow [MySQL metadata](mysql-metadata.md).
+Optional [Trino/Presto exploration](trino-presto.md) uses reviewed single-table
+DATE catalogs and separate access/budgets. It does not enable arbitrary SQL,
+automatic table discovery or cross-engine joins. The full driver matrix and
+configuration boundaries are in [runtime engines](runtime-engines.md).
 
-After starting, open the configured service URL and sign in. A query user starts in the metric catalog; a maintainer can manage definitions. Verify one published metric through a successful bounded query using the intended user before considering that environment usable.
+1. Provision the metadata store and run `metricspire migrate` separately, using
+   the appropriate driver's migration instructions and a deployment secret.
+   `serve` never migrates or populates business tables.
+2. Configure your identity provider and map the intended tenant, roles and
+   permissions. OIDC self-hosting and Databricks Apps identity are separate
+   deployment choices. Keep credentials and the session key in the environment
+   or deployment secret store, outside Git and distributable installers.
+3. Copy the selected runtime template into private deployment configuration.
+   Configure reviewed policies/bindings, publish metric definitions and prepare
+   the matching data. Online serving needs precomputed results and a valid
+   snapshot/freshness contract; starting the service does not synchronize data.
+   [PostgreSQL refresh tooling](online-refresh.md) is an operator workflow, not
+   an upstream extraction or scheduling service.
+4. Configure private business aliases and reviewed semantic exports through
+   [team configuration](../config/README.md). Users select logical business
+   names; they do not supply repository URLs in chat. Registration does not
+   clone Git or export a warehouse schema.
+5. Run `metricspire serve --config <private-runtime.yaml>`. `/health/live`
+   checks the process; `/health/ready` checks metadata and, when enabled, the
+   online engine connection. Neither proves analytical/exploration access,
+   result correctness or snapshot freshness.
+6. Distribute the matching [Databricks installer](mcp-installer.md) or
+   [OIDC installer](oidc-mcp.md) privately. In an independent serving profile,
+   discover `online_metrics`, compare definitions and use `query_online_metrics`;
+   disabled analytical tools do not fall back automatically.
+
+Before inviting a team, use an intended query user's own account to discover a
+metric, confirm any ambiguous scope, execute a bounded query and reconcile its
+typed result. Also verify a denied scope and token renewal. Keep publication
+permission separate from query permission. A successful installer, health probe
+or administrator query alone does not establish team readiness. See
+[development status](development-status.md) for the remaining acceptance scope.
 
 The [Dockerfile](../Dockerfile) builds a non-root static-binary image. It is the self-hosted packaging path; the Databricks Apps staging package has a separate bootstrap and resource contract in [`deploy/databricks-apps`](../deploy/databricks-apps/README.md).
 

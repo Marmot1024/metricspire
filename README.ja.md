@@ -46,7 +46,7 @@ MetricSpire は、分析用データベース、業務アプリ、AI アシス�
 
 実線はサービス呼び出しまたはデータ書き込み、破線は任意の意味定義の入力です。**OLAP エンジン、指標ストア、外部セマンティック層はそれぞれ役割が異なります。**
 
-アダプターの設計対象は ClickHouse、Doris などの OLAP エンジンと、MySQL、PostgreSQL などの指標ストアです。**現在、このリポジトリには Databricks SQL 分析アダプターと PostgreSQL 指標ストアを実装しています。** PostgreSQL / ClickHouse / Doris の事前集計データへの HTTP/MCP クエリと、制限付きの [Trino/Presto 探索](docs/trino-presto.md)も利用できます。MySQL 8.4 のメタデータ保存にも対応しています。ClickHouse / Doris の探索分析と分析用 MCP クエリは未対応です。[アーキテクチャと対応範囲](docs/architecture.md#adapter-support)をご確認ください。
+**実装済みの経路：** PostgreSQL / MySQL 8.4 による指標定義・版・監査の保存、Databricks SQL による分析用指標クエリ、PostgreSQL / ClickHouse / Doris の DWS/ADS 事前集計に対する HTTP/MCP クエリ、Databricks または制限付きの [Trino/Presto 探索](docs/trino-presto.md)。セルフホストの OIDC 構成では Databricks 分析クエリを無効にし、Databricks アカウントなしで独立した集計クエリと探索を利用できます。ClickHouse / Doris の探索分析と汎用的な分析用指標クエリは未対応です。[アーキテクチャと対応範囲](docs/architecture.md#adapter-support)をご確認ください。
 
 ## どこから始めますか？
 
@@ -54,10 +54,10 @@ MetricSpire は、分析用データベース、業務アプリ、AI アシス�
 
 | 目的 | 入口 | 必要なもの |
 | --- | --- | --- |
-| ローカル Codex CLI からチームのサービスを使う | [チーム用インストーラーを入手](docs/mcp-installer.md#get-the-installer) | 稼働中のインスタンス、チームのインストーラー、その環境に必要な Databricks アクセス権。 |
+| ローカル Codex CLI からチームのサービスを使う | [Databricks インストーラー](docs/mcp-installer.md#get-the-installer)または [OIDC インストーラー](docs/oidc-mcp.md#user-installation) | 稼働中のインスタンス、チームのインストーラー、その環境での本人の認証とデータ権限。 |
 | 別の MCP クライアントを接続する | [MCP 接続ガイド](docs/mcp.md#connect) | インスタンスの URL と、その環境に対応した認証設定。 |
 | データに接続せず指標定義を試す | [オフラインサンプル](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database) | Go のみ。データベースやクラウドアカウントは不要です。生成されるのはクエリ計画であり、データの結果ではありません。 |
-| チーム用のサービスを構築する | [サービス設定](docs/getting-started.md#run-the-http-service) | PostgreSQL のメタデータ、認証設定、[対応クエリ構成](docs/runtime-engines.md)が必要です。 |
+| チーム用のサービスを構築する | [サービス設定](docs/getting-started.md#run-the-http-service) | PostgreSQL / MySQL のメタデータ、認証設定、[対応クエリ構成](docs/runtime-engines.md)が必要です。 |
 
 Web アクセス権がある場合は、チームのインスタンスを開き、**指標カタログ**から始めてください。このリポジトリには公開サービスのインスタンスや社内の指標定義は含まれていません。詳細ガイドは現在英語です。
 
