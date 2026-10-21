@@ -46,7 +46,7 @@ MetricSpire 是一个开源的指标库与数据服务，连接你的分析数�
 
 图中实线表示服务调用或数据写入，虚线表示可选的语义配置输入。**OLAP 引擎、指标存储、外部语义层是三个不同的角色。**
 
-接入设计面向 ClickHouse、Doris 等 OLAP 引擎，以及 MySQL、PostgreSQL 等指标存储。**当前仓库已实现 Databricks SQL 分析适配器和 PostgreSQL 指标存储**，另有可选的 PostgreSQL / ClickHouse / Doris 预计算汇总 HTTP/MCP 查询和受控 [Trino/Presto 探索](docs/trino-presto.md)；另支持 MySQL 8.4 元数据存储；ClickHouse/Doris 暂不支持探索分析或分析类 MCP 查询。各路径的实现范围见[架构与适配器](docs/architecture.md#adapter-support)。
+**已实现的路径**：PostgreSQL / MySQL 8.4 保存指标定义、版本与审计；Databricks SQL 执行分析类指标查询；PostgreSQL / ClickHouse / Doris 提供 DWS/ADS 预计算汇总 HTTP/MCP 查询；Databricks 或受控 [Trino/Presto](docs/trino-presto.md) 提供探索分析。自托管 OIDC 部署可关闭 Databricks 分析查询，使用独立的汇总查询与探索路径，无需 Databricks 账号。ClickHouse/Doris 暂不支持探索分析或通用分析类指标查询。各路径的实现范围见[架构与适配器](docs/architecture.md#adapter-support)。
 
 ## 从哪里开始？
 
@@ -54,10 +54,10 @@ MetricSpire 是一个开源的指标库与数据服务，连接你的分析数�
 
 | 你的目标 | 入口 | 需要准备 |
 | --- | --- | --- |
-| 在本地 Codex CLI 中使用团队服务 | [获取团队安装器](docs/mcp-installer.md#get-the-installer) | 已部署的实例、团队提供的安装器，以及该部署所需的 Databricks 访问权限。 |
+| 在本地 Codex CLI 中使用团队服务 | [Databricks 安装器](docs/mcp-installer.md#get-the-installer)或 [OIDC 安装器](docs/oidc-mcp.md#user-installation) | 已部署的实例、团队安装器，以及本人在该部署中的身份与数据权限。 |
 | 连接其他 MCP 客户端 | [MCP 连接指南](docs/mcp.md#connect) | 实例地址，以及该部署支持的身份认证配置。 |
 | 不连接数据，先理解指标定义 | [运行离线示例](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database) | Go；无需数据库或云账号。示例生成查询计划，不返回数据结果。 |
-| 为团队部署服务 | [服务配置指南](docs/getting-started.md#run-the-http-service) | 需要 PostgreSQL 元数据、身份认证配置及[已支持的查询配置](docs/runtime-engines.md)。 |
+| 为团队部署服务 | [服务配置指南](docs/getting-started.md#run-the-http-service) | 需要 PostgreSQL / MySQL 元数据、身份认证配置及[已支持的查询配置](docs/runtime-engines.md)。 |
 
 已有网页访问权限？打开团队实例，从**指标目录**开始。仓库不附带公开服务实例，也不包含公司的指标定义。上述详细指南目前为英文。
 

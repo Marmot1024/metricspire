@@ -1,6 +1,6 @@
 # Standard OIDC MCP onboarding
 
-A self-hosted team can use PostgreSQL/ClickHouse serving with an enterprise OIDC
+A self-hosted team can use PostgreSQL/ClickHouse/Doris serving with an enterprise OIDC
 issuer and native MCP OAuth, without Databricks accounts or CLI profiles. Use the
 independent connection **`metricspire-oidc`**; keep existing Databricks helper
 connections unchanged. This path uses a registered **public** OAuth client, PKCE

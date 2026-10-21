@@ -39,7 +39,10 @@ Repository addresses and artifact paths are omitted from public discovery.
 
 The control database (definitions/releases/audit), metric result database
 (DWS/ADS), exploration engine and Git semantic source have distinct roles.
-This change does not add MySQL, Doris, ClickHouse, Trino or Presto drivers, or
-change analytical/online routing. Current supported runtime settings remain
-in the [architecture](../docs/architecture.md) and
-[online query guide](../docs/online-query.md).
+Choose implemented drivers and their separate credentials in the
+[runtime engine guide](../docs/runtime-engines.md). For a deployment without
+Databricks, start from its PostgreSQL-only profile, then select
+[MySQL metadata](../docs/mysql-metadata.md),
+[ClickHouse](../docs/clickhouse-online.md) or [Doris](../docs/doris-online.md)
+serving, and [Trino/Presto exploration](../docs/trino-presto.md) as needed.
+These settings do not create, discover or populate business tables.
