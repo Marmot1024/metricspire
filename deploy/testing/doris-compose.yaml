@@ -6,11 +6,15 @@ services:
     environment:
       FE_SERVERS: fe1:172.30.248.2:9010
       FE_ID: '1'
+      # Bundled JDK metrics can fail under runner cgroups during BDB startup.
+      # Keep explicit heap/container limits and a bounded processor count.
+      # https://github.com/apache/doris/issues/56784
+      JAVA_TOOL_OPTIONS: -XX:-UseContainerSupport -XX:ActiveProcessorCount=2
     ports: ["127.0.0.1:19030:9030"]
     entrypoint: [bash, -c]
     command:
       - |
-        sed -i -E 's/-Xmx[0-9]+[gGmM]/-Xmx1024m/g; s/-Xms[0-9]+[gGmM]/-Xms1024m/g' /opt/apache-doris/fe/conf/fe.conf
+        sed -i -E 's/-Xmx[0-9]+[gGmM]/-Xmx1024m/g; s/-Xms[0-9]+[gGmM]/-Xms1024m/g; s/-XX:\+UseContainerSupport/-XX:-UseContainerSupport/g' /opt/apache-doris/fe/conf/fe.conf
         exec bash /usr/local/bin/init_fe.sh
     mem_limit: 2g
     cpus: 2

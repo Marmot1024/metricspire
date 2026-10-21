@@ -169,6 +169,17 @@ jobs:
           METRICSPIRE_REQUIRE_DORIS_TESTS: '1'
           METRICSPIRE_ONLINE_TEST_DATABASE_URL: postgres://postgres:ci-only-disposable@127.0.0.1:15432/metricspire_test?sslmode=disable
         run: go test -race -count=1 -v ./internal/adapter/dorisquery ./cmd/metricspire -run 'TestDoris|TestServeOnlineDorisWithPostgresMetadata'
+      - name: Diagnose failed disposable Doris
+        if: failure()
+        run: |
+          df -h /
+          docker compose -f deploy/testing/doris-compose.yaml ps -a
+          for container in $(docker compose -f deploy/testing/doris-compose.yaml ps -a -q); do
+            docker inspect --format '{{.Name}} status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "$container"
+          done
+          docker compose -f deploy/testing/doris-compose.yaml logs --tail 250
+          docker compose -f deploy/testing/doris-compose.yaml exec -T fe bash -c 'tail -n 80 /opt/apache-doris/fe/log/fe.out' || true
+          docker compose -f deploy/testing/doris-compose.yaml exec -T be bash -c 'tail -n 80 /opt/apache-doris/be/log/be.out /opt/apache-doris/be/log/be.INFO' || true
       - name: Dispose lab containers
         if: always()
         run: docker compose -f deploy/testing/doris-compose.yaml down -v
