@@ -25,7 +25,10 @@ and model. Physical bindings, policy and identity remain server-owned.
 1. Search authorized metrics. Search summaries include family/variant identifiers;
    they do not copy the full definition into every result.
 2. Read `get_metric_details` for candidates. It returns structured definitions,
-   manifest fingerprints, calendars and field differences. Legacy metrics without
+   manifest fingerprints, calendars and field differences.
+   `comparison.has_scope_alternatives` identifies same-family scope differences;
+   it does not assert that the user has or has not already chosen a scope.
+   Words such as “total” do not resolve population or exclusion choices. Legacy metrics without
    a definition appear in `missing_structured_definitions`; do not infer missing
    population or exclusion rules from a name, popularity or SQL.
 3. Resolve the intended meaning. An unambiguous request can select its matching

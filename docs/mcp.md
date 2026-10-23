@@ -47,6 +47,31 @@ storage are not implemented by this change.
 
 ## Query workflow
 
+### Context available to a new client
+
+The MCP connection supplies initialization instructions, tool schemas/descriptions
+and tool results. These carry the minimum query workflow; a user does not need to
+paste a handoff, repository path or previous conversation. Hosts decide how to
+include this material in model context and whether to display it. A normal chat
+may show tool calls without showing the initialization text. Local memory, project
+notes and custom agent prompts are separate and are not uploaded by MetricSpire.
+The Codex installer also distributes a short, readable usage skill; it is an
+optional client aid, not an authorization boundary.
+
+Inspect `list_namespaces`, `discover_query_routes` and `get_metric_details` to see
+the authorized domains, workflows and definitions behind an answer. `namespace`
+is the canonical business domain; an exploration source belongs in `query.source`
+within that domain. If discovery is empty, check the domain before concluding
+absence. On permission denial, stop the request and report its request ID rather
+than probing more tools or routes. Clients still need acceptance testing: the
+server cannot prove that a model understood a question or obtained human consent.
+A prior result proves neither current access nor unchanged freshness. When a user
+explicitly requests a fresh query, perform a new authorized read; polling an
+already accepted job continues with its existing job ID.
+
+For a repeatable test without custom agent context, see
+[OpenCode acceptance](opencode-acceptance.md).
+
 The hosted MCP implementation defines eleven core tools, with five additional exploration tools when enabled and `query_online_metrics` when online serving is configured. The installer verifies the original seven-tool compatibility baseline, not the complete current tool set. Use the connected server's advertised tools for the actual inventory.
 
 | Tool | Behavior |

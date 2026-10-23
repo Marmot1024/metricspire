@@ -11,11 +11,11 @@ import (
 )
 
 type AnalysisInput struct {
-	Namespace string            `json:"namespace" jsonschema:"Business domain; use discover_analysis to find approved sources and attributes"`
+	Namespace string            `json:"namespace" jsonschema:"Canonical business domain from list_namespaces; query.source is a separate logical source returned by discover_analysis"`
 	Query     exploration.Query `json:"query" jsonschema:"AnalysisQuery uses logical source and field codes, never metric codes or SQL. time_range is mandatory RFC3339 half-open range with declared business timezone. Grouping defines the counting unit. Row/measure where expressions are boolean. calculations are typed ordered expressions; summarize adds one aggregate stage; share is final-stage only. Honor discovered snapshot/missing semantics."`
 }
 type AnalysisDiscoveryInput struct {
-	Namespace string `json:"namespace"`
+	Namespace string `json:"namespace" jsonschema:"Canonical business domain from list_namespaces, never a source name"`
 }
 type AnalysisJobInput struct {
 	Namespace string `json:"namespace"`
@@ -32,12 +32,19 @@ type AnalysisBackend interface {
 }
 
 func addAnalysisTools(s *mcp.Server, b AnalysisBackend) {
-	add(s, "discover_analysis", "Discover approved sources, fields, calendars, associations and budgets. internal_only fields cannot be output as values. Use after confirming metric coverage is unsuitable; no data query.", true, func(ctx context.Context, in AnalysisDiscoveryInput) (any, error) {
+	add(s, "discover_analysis", "Within a canonical namespace from list_namespaces, discover approved sources, fields, calendars, associations and budgets. Source names belong in query.source, never namespace. internal_only fields cannot be output as values. Use after confirming metric coverage is unsuitable; no data query.", true, func(ctx context.Context, in AnalysisDiscoveryInput) (any, error) {
 		if _, err := namespacePath(in.Namespace); err != nil {
 			return nil, err
 		}
 		v, err := b.DiscoverAnalysis(ctx, in)
-		return map[string]any{"sources": v}, err
+		if err != nil {
+			return nil, err
+		}
+		next := "Keep this namespace for plan/submit/get_analysis. Select query.source from these sources; review fields and budgets before planning."
+		if len(v) == 0 {
+			next = "No authorized sources returned in this namespace. Verify the canonical namespace with list_namespaces; an empty result does not prove a named source is absent elsewhere. Do not guess physical tables."
+		}
+		return map[string]any{"namespace": in.Namespace, "sources": v, "next_step": next}, nil
 	})
 	add(s, "plan_analysis", "Validate temporary formula, population and counting stages against approved semantics. Inspect normalized plan and gaps before submission. No execution or metric registration.", true, func(ctx context.Context, in AnalysisInput) (any, error) {
 		if _, err := namespacePath(in.Namespace); err != nil {

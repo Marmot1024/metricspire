@@ -311,3 +311,12 @@ func TestChunkedResponseLimit(t *testing.T) {
 		t.Fatal(out)
 	}
 }
+
+func TestPermissionErrorsStopFurtherToolProbing(t *testing.T) {
+	for _, code := range []string{"permission_denied", "analysis_forbidden"} {
+		got := SanitizedAPIError(code, "req_denied").Error()
+		if !strings.Contains(got, "STOP") || !strings.Contains(got, "Do not probe") || !strings.Contains(got, "req_denied") {
+			t.Fatal(got)
+		}
+	}
+}

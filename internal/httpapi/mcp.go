@@ -60,6 +60,24 @@ func (backend *remoteMCPBackend) ListNamespaces(ctx context.Context) ([]string, 
 	return append([]string{}, backend.namespaces...), backend.safeError(backend.namespaceErr)
 }
 
+// Discovery must not turn a mistaken source-as-namespace into false absence.
+// Unknown and unauthorized namespaces receive the same bounded response.
+func (backend *remoteMCPBackend) requireNamespace(ctx context.Context, namespace string) error {
+	namespaces, err := backend.ListNamespaces(ctx)
+	if err != nil {
+		return err
+	}
+	if len(namespaces) == 0 {
+		return nil // Legacy deployments may support direct routes without configured discovery candidates.
+	}
+	for _, name := range namespaces {
+		if name == namespace {
+			return nil
+		}
+	}
+	return mcpbridge.SanitizedDomainError("namespace_not_found", "namespace", "Use a canonical authorized business domain from list_namespaces. A source name belongs in query.source, not namespace; this response does not prove data absence.", requestID(backend.request))
+}
+
 func (backend *remoteMCPBackend) SearchMetrics(ctx context.Context, input mcpbridge.SearchInput) ([]application.MetricCatalogEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, backend.server.config.ControlTimeout)
 	defer cancel()

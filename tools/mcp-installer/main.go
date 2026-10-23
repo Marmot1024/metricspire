@@ -487,5 +487,6 @@ func installHelper(c connection, check bool) error {
 }
 func knownPreviousSkill(data []byte) bool {
 	digest := fmt.Sprintf("%x", sha256.Sum256(data))
-	return digest == "2f9fa1f29192836de75c28a44595f4975119cc299ed274845ae2c59efab8587e"
+	return digest == "2f9fa1f29192836de75c28a44595f4975119cc299ed274845ae2c59efab8587e" ||
+		digest == "6aaf7e39e774bd93e622d0c0ab7b0b69679f68b2147a3c135db64dcc4e31989b"
 }

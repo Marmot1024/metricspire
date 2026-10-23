@@ -71,6 +71,7 @@ type QueryRoutes struct {
 	OnlineMetrics    QueryRoute `json:"online_metrics"`
 	Exploration      QueryRoute `json:"exploration"`
 	SelectionRules   []string   `json:"selection_rules"`
+	NextStep         string     `json:"next_step"`
 }
 
 type PreparedQuery struct {

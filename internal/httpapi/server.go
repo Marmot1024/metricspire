@@ -864,7 +864,7 @@ func (server *Server) authorize(response http.ResponseWriter, request *http.Requ
 		return Principal{}, false
 	}
 	if !principal.Has(permission) {
-		server.writeProblem(response, request, http.StatusForbidden, "permission_denied", "Permission denied", "the authenticated principal lacks the required permission", "")
+		server.writeProblem(response, request, http.StatusForbidden, "permission_denied", "Permission denied", "the authenticated principal lacks the required permission; stop this request and report request_id; do not probe other tools or query routes", "")
 		return Principal{}, false
 	}
 	return principal, true
