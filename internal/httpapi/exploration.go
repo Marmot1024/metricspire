@@ -42,7 +42,7 @@ func (s *Server) handleAnalysisSources(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	v, err := b.DiscoverAnalysis(r.Context(), mcpbridge.AnalysisDiscoveryInput{Namespace: r.PathValue("namespace")})
+	v, err := b.discover(r.Context(), r.PathValue("namespace"))
 	if err != nil {
 		s.analysisError(w, r, err)
 		return
@@ -105,10 +105,21 @@ func (s *Server) analysisJob(w http.ResponseWriter, r *http.Request, cancel bool
 }
 
 func (b *analysisMCPBackend) DiscoverAnalysis(ctx context.Context, in mcpbridge.AnalysisDiscoveryInput) ([]application.AnalysisSourceView, error) {
+	v, err := b.discover(ctx, in.Namespace)
+	if err == nil && len(v) == 0 {
+		if err := b.requireNamespace(ctx, in.Namespace); err != nil {
+			return nil, err
+		}
+	}
+	return v, b.analysisSafeError(err)
+}
+
+// Keep REST discovery's raw errors and response contract separate from MCP's
+// recovery guidance and sanitized errors.
+func (b *analysisMCPBackend) discover(ctx context.Context, namespace string) ([]application.AnalysisSourceView, error) {
 	ctx, cancel := context.WithTimeout(ctx, b.server.config.ControlTimeout)
 	defer cancel()
-	v, err := b.server.deps.AnalysisCatalogs.Discover(ctx, in.Namespace, b.requestContext())
-	return v, b.analysisSafeError(err)
+	return b.server.deps.AnalysisCatalogs.Discover(ctx, namespace, b.requestContext())
 }
 func (b *analysisMCPBackend) PlanAnalysis(ctx context.Context, in mcpbridge.AnalysisInput) (application.AnalysisPlanView, error) {
 	v, err := b.plan(ctx, in)

@@ -85,6 +85,10 @@ func (b *remoteMCPBackend) DiscoverQueryRoutes(ctx context.Context, in mcpbridge
 			}
 		}
 	}
+	result.NextStep = "Use an available route only after confirming semantic fit. For exploration keep namespace and discover query.source with discover_analysis."
+	if !result.PublishedMetrics.Available && !result.OnlineMetrics.Available && !result.Exploration.Available {
+		result.NextStep = "No query route returned for this namespace. Verify the canonical business domain with list_namespaces; a source name belongs in query.source, not namespace. This does not prove data absence."
+	}
 	return result, nil
 }
 
@@ -193,7 +197,7 @@ func (b *remoteMCPBackend) RunQuery(ctx context.Context, in mcpbridge.RunQueryIn
 	result.ElapsedMS = time.Since(started).Milliseconds()
 	switch result.Job.Status {
 	case model.JobSucceeded:
-		result.NextStep = "Answer from the typed result and actual time/release evidence; retain catalog verification status. Do not resubmit."
+		result.NextStep = "Answer from the typed result and actual time/release evidence; retain catalog verification status. Polling must not resubmit this accepted job. A later explicit refresh is a new authorized query; this result does not prove later freshness or access."
 	case model.JobFailed, model.JobCancelled:
 		result.NextStep = "Report this terminal status and error. Do not retry submission or switch query categories automatically."
 	default:

@@ -84,7 +84,7 @@ func (f httpAnalysisEngineFunc) Execute(ctx context.Context, p exploration.Plan)
 	return f(ctx, p)
 }
 
-func newExplorationTransport(t *testing.T, fixture explorationHTTPFixture, engine application.AnalysisEngine, credential httpapi.ExecutionCredentialProvider) (http.Handler, *fakeEngine) {
+func newExplorationTransport(t *testing.T, fixture explorationHTTPFixture, engine application.AnalysisEngine, credential httpapi.ExecutionCredentialProvider, configure ...func(*httpapi.Dependencies)) (http.Handler, *fakeEngine) {
 	t.Helper()
 	recorder := audit.NewMemoryRecorder()
 	routes, err := application.NewConfiguredAnalysisCatalogs([]exploration.Catalog{fixture.catalog})
@@ -104,6 +104,9 @@ func newExplorationTransport(t *testing.T, fixture explorationHTTPFixture, engin
 		d.Analysis = service
 		d.AnalysisJobs = jobs
 		d.AnalysisCatalogs = routes
+		for _, f := range configure {
+			f(d)
+		}
 	})
 	return handler, metricEngine
 }

@@ -182,7 +182,7 @@ func TestMCPQueryRoutesDescribeActualAuthorizedCapabilities(t *testing.T) {
 	if err := json.Unmarshal([]byte(text), &routes); err != nil {
 		t.Fatal(err)
 	}
-	if routes.PublishedMetrics.Available || routes.Exploration.Available {
+	if routes.PublishedMetrics.Available || routes.Exploration.Available || !strings.Contains(routes.NextStep, "list_namespaces") || !strings.Contains(routes.NextStep, "query.source") {
 		t.Fatal(text)
 	}
 }
@@ -252,5 +252,37 @@ func TestFastMCPPreservesTypedIntegerAndDecimal(t *testing.T) {
 	}
 	if _, ok := result.Meta["metricspire/elapsed_ms"]; !ok {
 		t.Fatal("missing server timing metadata")
+	}
+}
+
+func TestMCPExplorationRejectsSourceAsNamespaceWithRecovery(t *testing.T) {
+	f := explorationTransportFixture(t)
+	h, _ := newExplorationTransport(t, f, httpAnalysisEngineFunc(func(context.Context, exploration.Plan) (model.ExecutionSnapshot, error) {
+		t.Fatal("discovery executed an engine")
+		return model.ExecutionSnapshot{}, nil
+	}), nil)
+	session := connectRemoteMCP(t, h, "query")
+	text := callRemoteMCP(t, session, "discover_analysis", map[string]any{"namespace": "not_a_domain"}, true)
+	if !strings.Contains(text, "namespace_not_found") || !strings.Contains(text, "query.source") {
+		t.Fatal(text)
+	}
+	// MCP recovery guidance must not change the existing REST empty-discovery
+	// response into an internal error.
+	response := performRequest(h, http.MethodGet, "/api/v1/namespaces/not_a_domain/analysis/sources", "query", nil)
+	var sources []any
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &sources) != nil || len(sources) != 0 {
+		t.Fatalf("REST discovery contract changed: %d %s", response.Code, response.Body.String())
+	}
+	text = callRemoteMCP(t, session, "discover_analysis", map[string]any{"namespace": "demo"}, false)
+	var got struct {
+		Namespace string `json:"namespace"`
+		Sources   []any  `json:"sources"`
+		NextStep  string `json:"next_step"`
+	}
+	if err := json.Unmarshal([]byte(text), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Namespace != "demo" || len(got.Sources) == 0 || !strings.Contains(got.NextStep, "query.source") {
+		t.Fatal(text)
 	}
 }

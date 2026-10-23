@@ -19,7 +19,7 @@ type OnlineQueryInput struct {
 }
 
 func addOnlineTools(s *mcp.Server, b OnlineBackend) {
-	add(s, "query_online_metrics", "Read matching certified metric results from configured online serving. Use only after comparing definitions and resolving user intent. Numeric external codes, version-bound selections and a time range are required. Returns typed values, release and data snapshot; no analytical fallback. Freshness/permission/connection errors stop this route.", false, func(ctx context.Context, in OnlineQueryInput) (any, error) {
+	add(s, "query_online_metrics", "Read matching certified metric results from configured online serving. Use only after comparing definitions and resolving user intent. Numeric external codes, version-bound selections and a time range are required. Returns typed values, release and data snapshot; no analytical fallback. Freshness/permission/connection errors stop this route. An explicit refresh needs a new authorized read; a previous snapshot proves neither current freshness nor current access.", false, func(ctx context.Context, in OnlineQueryInput) (any, error) {
 		if _, err := namespacePath(in.Namespace); err != nil {
 			return nil, err
 		}

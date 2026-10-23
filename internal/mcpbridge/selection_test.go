@@ -54,6 +54,16 @@ func TestStructuredComparisonDoesNotInferScopeFromIdenticalLabels(t *testing.T) 
 	if !reflect.DeepEqual(got.DifferingFields, []string{"definition.population", "definition.exclusions"}) {
 		t.Fatalf("lost structured distinction: %+v", got)
 	}
+	if !got.HasScopeAlternatives || !strings.Contains(got.NextStep, "total/sum") {
+		t.Fatalf("same-family scope alternatives were not actionable: %+v", got)
+	}
+	if compareMetrics([]MetricDetail{a}).HasScopeAlternatives {
+		t.Fatal("one definition is not a set of alternatives")
+	}
+	b.Definition.Family = "unrelated"
+	if compareMetrics([]MetricDetail{a, b}).HasScopeAlternatives {
+		t.Fatal("unrelated measures incorrectly require a family choice")
+	}
 	b.Definition = nil
 	got = compareMetrics([]MetricDetail{a, b})
 	if !reflect.DeepEqual(got.MissingStructuredDefinitions, []string{"orders_production"}) {

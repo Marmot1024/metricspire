@@ -18,5 +18,5 @@ func MCPInputSchema() map[string]any {
 	defs := query["$defs"].(map[string]any)
 	delete(query, "$defs")
 	defs["query"] = query
-	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"namespace", "query"}, "properties": map[string]any{"namespace": map[string]any{"type": "string"}, "query": map[string]any{"$ref": "#/$defs/query"}}, "$defs": defs}
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"namespace", "query"}, "properties": map[string]any{"namespace": map[string]any{"type": "string", "description": "Canonical business domain from list_namespaces. Keep it for the analysis job; the logical source belongs in query.source, never namespace."}, "query": map[string]any{"$ref": "#/$defs/query"}}, "$defs": defs}
 }

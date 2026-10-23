@@ -19,7 +19,7 @@ Repository administrators should protect `main`: require a pull request, require
 ```bash
 python3 tools/check_docs.py
 node --test internal/httpapi/ui/app_test.js
-python3 -m unittest tools/test_mcp_installer.py tools/test_deploy_staging.py
+python3 -m unittest tools/test_mcp_installer.py tools/test_deploy_staging.py tools/test_run_opencode_mcp.py
 python3 -m unittest discover -s deploy/databricks-apps -p test_render.py
 go mod verify
 go test -race ./...

@@ -26,6 +26,7 @@ type metricComparison struct {
 	DifferingFields              []string `json:"differing_fields"`
 	MissingDefinitions           []string `json:"missing_definitions"`
 	MissingStructuredDefinitions []string `json:"missing_structured_definitions"`
+	HasScopeAlternatives         bool     `json:"has_scope_alternatives"`
 	NextStep                     string   `json:"next_step"`
 }
 
@@ -104,6 +105,22 @@ func compareMetrics(metrics []MetricDetail) metricComparison {
 				}
 			}
 		}
+	}
+	// Same-family alternatives need a scope decision, not a popularity default.
+	// This is metadata evidence, not a claim about what the user has confirmed.
+	for i, a := range metrics {
+		for _, b := range metrics[i+1:] {
+			if a.Definition == nil || b.Definition == nil || a.Definition.Family == "" || a.Definition.Family != b.Definition.Family {
+				continue
+			}
+			x, y := a.Definition, b.Definition
+			if x.Population != y.Population || !reflect.DeepEqual(x.Exclusions, y.Exclusions) || x.Denominator != y.Denominator || x.CountingUnit != y.CountingUnit || x.TimeBasis != y.TimeBasis {
+				out.HasScopeAlternatives = true
+			}
+		}
+	}
+	if out.HasScopeAlternatives {
+		out.NextStep = "Same-family scope alternatives are present. If the user has not specified the differing scope, present the choices and STOP before prepare or execution. Words such as total/sum do not mean include test accounts or choose the broadest population. If the request explicitly resolves the difference, select that matching definition. " + out.NextStep
 	}
 	return out
 }
