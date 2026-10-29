@@ -2,9 +2,13 @@
 
 Choose the path that matches your goal:
 
-- **Use an existing team service:** start with the [Codex installer](mcp-installer.md#get-the-installer), [other MCP clients](mcp.md#connect), or your team's web metric catalog. You do not need Go, Docker or this repository.
+- **Use an existing team service:** start with the team's [Databricks installer](mcp-installer.md#get-the-installer) or [OIDC installer](oidc-mcp.md#user-installation), [other MCP clients](mcp.md#connect), or web metric catalog. You do not need Go, Docker or this repository.
 - **Learn how metric definitions work:** follow the offline example below. You will generate a query plan without connecting to data.
 - **Operate a service:** read [service setup](#run-the-http-service) for the required database, identity provider and warehouse configuration. The offline example alone does not set these up.
+
+For a first maintained metric, use [definition → publication → query](metric-maintenance.md).
+For independent deployment, start with [PostgreSQL + OIDC](self-hosted.md).
+For external semantics, follow [the export walkthrough](semantic-layer.md).
 
 ## Prerequisites for the local examples
 
@@ -23,6 +27,9 @@ Run the following commands from the repository root. The `dist/` directory conta
 ## Compile and inspect a plan without a database
 
 The example uses public, neutral order data. It compiles a semantic model and policy, then produces logical and physical plans without submitting an analytical query.
+
+Run all steps with `sh examples/quickstart.sh`. It creates a new `dist/quickstart.*`
+directory and prints the logical plan. The equivalent individual commands follow:
 
 ```bash
 mkdir -p dist/demo

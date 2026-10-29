@@ -1,0 +1,18 @@
+{
+  "api_version": "metricspire.io/v1alpha1",
+  "kind": "AnalysisQuery",
+  "source": "orders",
+  "group_by": ["day"],
+  "time_range": {
+    "dimension": "day",
+    "start": "1996-01-01T00:00:00Z",
+    "end": "1996-01-08T00:00:00Z",
+    "timezone": "UTC"
+  },
+  "measures": [
+    {"name": "orders", "op": "count"},
+    {"name": "customers", "op": "count_distinct", "field": "customer"}
+  ],
+  "order_by": [{"field": "day", "direction": "asc"}],
+  "limit": 10
+}

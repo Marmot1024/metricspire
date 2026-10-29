@@ -1,78 +1,68 @@
 <p align="center"><img src="docs/assets/metricspire-mark.svg" width="44" height="44" alt="MetricSpire"></p>
-
-ポータブル起動とエンジン設定：[ランタイムエンジン](docs/runtime-engines.md)。
-
-構造化された指標定義の選択：[指標定義](docs/metric-definitions.md)。
-
 <h1 align="center">MetricSpire</h1>
-
-<p align="center"><strong>指標カタログとデータサービスを、MCP で AI につなぐ。</strong></p>
-
+<p align="center"><strong>指標を一度定義し、アプリと AI アシスタントから共通の意味で問い合わせる。</strong></p>
 <p align="center"><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <strong>日本語</strong></p>
 
-MetricSpire は、分析用データベース、業務アプリ、AI アシスタントをつなぐオープンソースの指標カタログとデータサービスです。チームで指標の意味と計算方法を管理し、アプリや AI が共通のインターフェースでデータを取得できます。
+MetricSpire は HTTP と MCP に対応したオープンソースの指標カタログ・データサービスです。チームが指標定義をレビューして公開し、アプリや AI アシスタントがその意味を確認して同じサービスからデータを取得します。
 
-- **指標カタログ：** 指標の説明、計算ルール、版をまとめて管理し、検索・レビュー・公開できます。
-- **データサービス：** 指標、期間、集計区分を指定して OLAP エンジン（分析用データベース）を問い合わせ、結果テーブルをアプリに返します。
-- **MCP 接続：** AI アシスタントが指標を探し、定義を確認してデータサービスを呼び出せます。
-- **探索的分析（任意）：** 外部のセマンティック層リポジトリを接続し、フィールドの意味、テーブル間の関連、業務ルールを使って一時的な分析を行えます。
+- **指標の管理**：ドラフト、定義レビュー、バージョン付き公開、Web ワークベンチ。
+- **データの提供**：指標・期間・グループを指定する構造化リクエスト、アクセス確認、型付き結果。
+- **必要に応じた探索**：レビュー済みの外部セマンティクスを読み込み、公開済み指標で答えられない一時的な分析を実行。
 
-## 注文の例で使い方を見る
+たとえば「決済成功注文数」を公開し、「先週、地域ごとの決済成功注文は何件？」と質問します。サービスは公開済みの定義と設定されたデータ経路を使います。アプリも HTTP で同じ指標を要求できます。
 
-以下は、利用の流れを説明するための架空のデータです。
+> **開発プレビュー。** 本番向けの正式リリースや公開デモサービスはありません。自社データの問い合わせにはデプロイ、認証、定義のレビューが必要です。[現状と検証範囲](docs/development-status.md)をご確認ください。
 
-**1. チームが指標を定義します。** 例えば「支払い済み注文数」は、支払いが成功した注文を注文 ID で重複排除し、支払日を基準に数えます。管理者が既存の OLAP テーブルと定義を結び付け、公開します。
+## Go だけで試す：データベース不要
 
-**2. ユーザーが質問します。** 接続済みの AI アシスタントに尋ねます。
+Go 1.26 または 1.27 と Git を用意して実行します。
 
-> 先週、地域ごとの支払い済み注文は何件ありましたか？
+```sh
+git clone https://github.com/marmot1024/metricspire.git
+cd metricspire
+sh examples/quickstart.sh
+```
 
-**3. サービスがデータを取得します。** AI アシスタントが指標を探し、質問をクエリに変換します。MetricSpire は権限を確認し、公開済みの定義に従って OLAP エンジンに問い合わせ、AI が表示する結果を返します。
+中立的な注文モデルとアクセス方針をコンパイルし、**日付・顧客セグメント別の平均注文額と返金率**の計画を表示します。新しい `dist/quickstart.*` ディレクトリに JSON ファイルを4つ作り、最後に次を表示します。
 
-| 地域 | 支払い済み注文数 |
-| --- | ---: |
-| 東部 | 120 |
-| 南部 | 80 |
+```text
+Offline example complete. No database connection or data query was made.
+```
 
-業務アプリも HTTP API から同じ指標を問い合わせ、その計算ルールを再利用できます。実際に使うには、チームでデータを接続し、定義を公開する必要があります。
+実際のコンパイラとプランナーを使いますが、データベース接続やデータ取得は行いません。初回は Go の依存関係をダウンロードします。[各手順の説明](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database)も参照できます。
 
-**未登録の指標について追加で聞く場合は？** 例えば「そのうち、注文金額が 500 を超える注文の割合は？」という質問です。探索的分析を有効にすると、外部セマンティック層に設定した注文金額、地域、関連ルールを使って一時的なクエリを組み立てられます。固定指標を先に作る必要はありません。セマンティック層はデータの意味と使い方を定義し、実データの問い合わせは OLAP エンジンが担当します。入力形式は[外部セマンティック層の設定](docs/exploration.md)をご覧ください。
-
-## データシステムでの役割
-
-**既存のパイプラインがデータを収集・加工し、OLAP エンジンが業務データの保存と計算を行い、MetricSpire が指標管理とクエリサービスを担います。** 指標定義と版は別のリレーショナルデータベースに保存します。探索的分析には、任意で外部セマンティック層を接続できます。
-
-![MetricSpire の接続構成：Web、アプリ、AI が指標カタログとデータサービスを利用。アダプター経由で OLAP に問い合わせ、別の関係データベースで指標定義を保存。外部セマンティック層は任意で接続。](docs/assets/architecture.ja.svg)
-
-実線はサービス呼び出しまたはデータ書き込み、破線は任意の意味定義の入力です。**OLAP エンジン、指標ストア、外部セマンティック層はそれぞれ役割が異なります。**
-
-**実装済みの経路：** PostgreSQL / MySQL 8.4 による指標定義・版・監査の保存、Databricks SQL による分析用指標クエリ、PostgreSQL / ClickHouse / Doris の DWS/ADS 事前集計に対する HTTP/MCP クエリ、Databricks または制限付きの [Trino/Presto 探索](docs/trino-presto.md)。セルフホストの OIDC 構成では Databricks 分析クエリを無効にし、Databricks アカウントなしで独立した集計クエリと探索を利用できます。ClickHouse / Doris の探索分析と汎用的な分析用指標クエリは未対応です。[アーキテクチャと対応範囲](docs/architecture.md#adapter-support)をご確認ください。
-
-## どこから始めますか？
-
-> **開発プレビュー。** 自分のデータを問い合わせるには、設定済みのサービスとデータ権限が必要です。本番利用に対応した正式版はまだ公開していません。[現在の状況](docs/development-status.md)（英語）をご確認ください。
+## 目的に合わせて進む
 
 | 目的 | 入口 | 必要なもの |
 | --- | --- | --- |
-| ローカル Codex CLI からチームのサービスを使う | [Databricks インストーラー](docs/mcp-installer.md#get-the-installer)または [OIDC インストーラー](docs/oidc-mcp.md#user-installation) | 稼働中のインスタンス、チームのインストーラー、その環境での本人の認証とデータ権限。 |
-| 別の MCP クライアントを接続する | [MCP 接続ガイド](docs/mcp.md#connect) | インスタンスの URL と、その環境に対応した認証設定。 |
-| データに接続せず指標定義を試す | [オフラインサンプル](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database) | Go のみ。データベースやクラウドアカウントは不要です。生成されるのはクエリ計画であり、データの結果ではありません。 |
-| チーム用のサービスを構築する | [サービス設定](docs/getting-started.md#run-the-http-service) | PostgreSQL / MySQL のメタデータ、認証設定、[対応クエリ構成](docs/runtime-engines.md)が必要です。 |
+| チームの既存サービスを使う | [Databricks インストーラー](docs/mcp-installer.md#get-the-installer) / [OIDC インストーラー](docs/oidc-mcp.md#user-installation)、[その他の MCP クライアント](docs/mcp.md#connect) | チームの URL、接続パッケージ、自分の権限。ソース取得は不要。 |
+| 指標を追加・保守する | [定義 → ドラフト → 公開 → 問い合わせ](docs/metric-maintenance.md) · [任意の保守者 skill](skills/metricspire-maintainer/SKILL.md) | 合意済みの定義、モデル管理権限、既存データ経路。 |
+| Databricks なしで導入する | [PostgreSQL + OIDC の手順](docs/self-hosted.md) | メタデータ／結果 DB、IdP、準備済み集計データ。利用者に Databricks アカウントは不要。 |
+| 既存セマンティックレイヤーを接続する | [エクスポート → 設定 → 検出 → 照合](docs/semantic-layer.md) | レビュー済み AnalysisCatalog と対応探索エンジン。Git/dbt/Cube の自動取り込みは未実装。 |
 
-Web アクセス権がある場合は、チームのインスタンスを開き、**指標カタログ**から始めてください。このリポジトリには公開サービスのインスタンスや社内の指標定義は含まれていません。詳細ガイドは現在英語です。
+Web にアクセスできる場合は、チームの**指標カタログ**から始めます。詳細ガイドは現在英語が中心で、3言語の概要は同じ機能範囲を説明しています。
 
-## ドキュメントと開発状況
+## データ基盤での役割
 
-- [はじめに](docs/getting-started.md) — オフラインサンプル、ローカルカタログ、サービス設定。
-- [MCP 接続](docs/mcp.md) · [HTTP API](docs/http-api.md) — クライアントやアプリとの接続。
-- [アーキテクチャとアダプター](docs/architecture.md) — システムの役割、クエリ経路、現在のデータベース対応範囲。
-- [オフライン集計の更新](docs/online-refresh.md): PostgreSQL の型付きバッチ出力、独立照合、テナント単位のアトミックな更新。
-- [Doris 集計クエリ](docs/doris-online.md) · [runtime.doris.example.yaml](examples/runtime.doris.example.yaml).
-- [ClickHouse 集計クエリ](docs/clickhouse-online.md) · [runtime.clickhouse.example.yaml](examples/runtime.clickhouse.example.yaml).
-- [チーム設定](config/README.md) · [外部セマンティック層](docs/exploration.md) — 非公開設定と探索的分析用の定義。
-- [開発状況](docs/development-status.md) — 実装済みの機能、検証の根拠、残っている課題。
-- [貢献ガイド](CONTRIBUTING.md) · [ドキュメント一覧](docs/README.md)。
+既存パイプラインがデータを準備し、クエリエンジンが保存・計算します。MetricSpire は定義、アクセス確認、構造化クエリの提供を担当します。
 
-詳細ドキュメントは現在英語です。上の注文例は製品説明用です。再現可能な技術的リクエストと期待結果は [TPCH 検証サンプル](testdata/acceptance/databricks-tpch)をご覧ください。意味定義の契約 [`metricspire.io/v1alpha1`](contracts/metricspire.schema.json) と予定する製品版 `v0.1.0` は別々にバージョン管理します。
+![MetricSpire 構成：Web、HTTP、MCP クライアントからカタログとデータサービスへ接続し、アダプターがクエリエンジン、指標メタデータ、任意のセマンティクスを接続。](docs/assets/architecture.ja.svg)
 
-[Apache 2.0](LICENSE) ライセンスです。公開サンプルは中立なデータを使います。社内定義、認証情報、本番データはこのリポジトリに含めないでください。
+| 役割 | 実装済みの選択肢 |
+| --- | --- |
+| 定義、公開履歴、監査 | PostgreSQL / MySQL 8.4 |
+| 公開済み指標の分析クエリ | Databricks SQL |
+| 事前集計結果の提供 | PostgreSQL / ClickHouse / Doris、HTTP・MCP 経由 |
+| レビュー済み定義による一時分析 | Databricks、または Trino/Presto の制限付き単一テーブル DATE 探索 |
+
+独立した OIDC デプロイでは Databricks 分析を無効化できます。DB の対応範囲は各行の役割に限られ、メタデータ用アダプターは汎用クエリ用ではありません。上流 ETL や業務テーブル作成は行いません。[対応範囲](docs/architecture.md#adapter-support)を参照してください。
+
+## ドキュメントと貢献
+
+- [全ドキュメント](docs/README.md) · [利用開始](docs/getting-started.md)
+- [MCP ワークフロー](docs/mcp.md) · [HTTP API](docs/http-api.md)
+- [非公開のチーム設定](config/README.md) · [実行エンジン](docs/runtime-engines.md)
+- [更新と照合](docs/online-refresh.md) · [隔離環境での技術検証](deploy/testing/README.md)
+- [アーキテクチャ](docs/architecture.md) · [開発状況](docs/development-status.md) · [貢献ガイド](CONTRIBUTING.md)
+
+[Apache 2.0](LICENSE) ライセンスです。公開例は中立的なデータを使います。会社の定義、実際のフィールド対応、認証情報、本番データは非公開で管理してください。セマンティック契約 `metricspire.io/v1alpha1` と予定製品版 `v0.1.0` は別々にバージョン管理されます。

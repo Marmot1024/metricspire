@@ -55,6 +55,10 @@ jobs:
           node-version: '22'
           package-manager-cache: false
       - run: python3 tools/check_docs.py
+      - name: Run the documented offline walkthrough
+        run: |
+          sh examples/quickstart.sh
+          go run ./cmd/metricspire validate-analysis --catalog examples/semantic-layer/catalog.yaml
       - run: node --test internal/httpapi/ui/app_test.js
       - run: python3 -m unittest tools/test_mcp_installer.py tools/test_oidc_builder.py
       - run: python3 -m unittest tools/test_deploy_staging.py tools/test_run_opencode_mcp.py
@@ -118,7 +122,7 @@ jobs:
           else
             export METRICSPIRE_PRESTO_TEST_URL=http://127.0.0.1:18081 METRICSPIRE_REQUIRE_PRESTO_TESTS=1
           fi
-          go test -race -count=1 -v ./internal/adapter/trinoquery ./cmd/metricspire -run 'TestRealTPCH|TestServeTrinoPrestoWithoutDatabricks'
+          go test -race -count=1 -v ./internal/adapter/trinoquery ./cmd/metricspire -run 'TestRealTPCH|TestSemanticLayerWalkthrough|TestServeTrinoPrestoWithoutDatabricks'
       - name: Fixture failure diagnostics
         if: failure()
         env:

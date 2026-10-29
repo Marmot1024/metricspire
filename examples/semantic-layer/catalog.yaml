@@ -1,0 +1,35 @@
+api_version: metricspire.io/v1alpha1
+kind: AnalysisCatalog
+engine: trino
+metadata: {name: tpch_orders, version: "1"}
+namespace: demo
+tenant: demo
+datasets:
+  - name: orders
+    description: Public synthetic TPCH orders, not a business dataset.
+    resource: {kind: table, catalog: tpch, schema: tiny, table: orders}
+    fields:
+      - {name: day, column: orderdate, type: date, calendar_timezone: UTC}
+      - {name: customer, column: custkey, type: integer}
+attributes:
+  - {name: day, dataset: orders, field: day}
+  - {name: customer, dataset: orders, field: customer}
+sources:
+  - name: orders
+    description: Temporary totals over public TPCH orders, counted at order grain.
+    dataset: orders
+    dimensions: [day, customer]
+    roles: [analyst]
+    max_window_days: 31
+    max_rows: 100
+    timeout: 1m
+policy:
+  api_version: metricspire.io/v1alpha1
+  kind: PolicySource
+  metadata: {name: example_analysis_access, version: "1"}
+  tenant: demo
+  rules:
+    - name: analyst_reads_example
+      effect: allow
+      roles: [analyst]
+      dimensions: [day, customer]

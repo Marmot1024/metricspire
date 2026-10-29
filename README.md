@@ -1,78 +1,68 @@
 <p align="center"><img src="docs/assets/metricspire-mark.svg" width="44" height="44" alt="MetricSpire"></p>
-
-Portable startup and engine configuration: [runtime engines](docs/runtime-engines.md).
-
-Structured scope selection: [metric definitions](docs/metric-definitions.md).
-
 <h1 align="center">MetricSpire</h1>
-
-<p align="center"><strong>A metric catalog and data service with MCP access.</strong></p>
-
+<p align="center"><strong>Define a metric once. Query it from your apps and AI assistants.</strong></p>
 <p align="center"><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a></p>
 
-MetricSpire is an open-source metric catalog and data service connecting your analytical databases, applications and AI assistants. Your team manages what each metric means and how it is calculated; applications and AI query data through shared interfaces.
+MetricSpire is an open-source metric catalog and data service with HTTP and MCP access. Your team reviews and publishes metric definitions; applications and AI assistants discover their meaning and query through the same service.
 
-- **Metric catalog:** maintain definitions, calculation rules and versions for your team to discover, review and publish.
-- **Data service:** query an OLAP engine (a database for analytical workloads) by metric, time range and grouping, and return result tables to applications.
-- **MCP access:** let AI assistants find metrics, understand their definitions and call the data service to answer questions.
-- **Exploratory analysis, optionally:** connect an external semantic-layer repository and use its field meanings, table relationships and business rules for temporary analyses.
+- **Maintain metrics:** drafts, definition review, versioned publication and a web workbench.
+- **Serve data:** structured metric/time/grouping requests, access checks and typed result tables.
+- **Explore when needed:** load reviewed external semantics for temporary questions that published metrics do not cover.
 
-## Walk through an order example
+For example, publish a definition for “paid orders,” then ask “How many paid orders did each region have last week?” The service uses the published definition and your configured data route. An application can request the same metric through HTTP.
 
-The following fictional data illustrates the workflow.
+> **Development preview.** There is no published production-ready release or public demo service. Connecting your data requires deployment, identity and reviewed definitions. See [status and acceptance boundaries](docs/development-status.md).
 
-**1. Your team defines a metric.** For example, “paid orders” counts distinct order IDs with successful payments, using the payment date. A maintainer connects this definition to existing OLAP tables and publishes it.
+## Try it with Go, without a database
 
-**2. A user asks a question.** In a connected AI assistant:
+With Go 1.26 or 1.27 and Git installed:
 
-> How many paid orders did each region have last week?
+```sh
+git clone https://github.com/marmot1024/metricspire.git
+cd metricspire
+sh examples/quickstart.sh
+```
 
-**3. The service queries and returns data.** The AI assistant finds the metric and turns the question into a query request. MetricSpire checks access, queries the OLAP engine using the published definition and returns data for the assistant to present:
+The script compiles the neutral order model and access policy, then prints a query plan for **average order value and refund rate, grouped by day and customer segment**. It writes four JSON artifacts into a new `dist/quickstart.*` directory and ends with:
 
-| Region | Paid orders |
-| --- | ---: |
-| East | 120 |
-| South | 80 |
+```text
+Offline example complete. No database connection or data query was made.
+```
 
-An application can query the same metric through the HTTP API and reuse its calculation rules. Your team needs to connect its data and publish definitions before querying.
+This is a real compiler/planner walkthrough, not a data-result demo. The first run downloads Go dependencies. [Inspect each step](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database).
 
-**What about a follow-up without an existing metric?** For example, “What share of these orders exceeded 500 in order value?” With exploration enabled, the AI can use order amount, region and relationship rules configured in the external semantic layer to build a temporary query, without creating a fixed metric first. The semantic layer describes the data and how to use it; the OLAP engine still queries the actual data. See [external semantic-layer configuration](docs/exploration.md) for the input format.
+## Choose your next step
 
-## Where it fits in your data stack
-
-**Your existing pipelines collect and prepare data. The OLAP engine stores and computes business data. MetricSpire manages metrics and serves queries.** A separate relational database stores metric definitions and versions; an optional external semantic layer provides context for exploratory analysis.
-
-![MetricSpire architecture: web users, applications and AI call the catalog and data service; adapters query the OLAP engine, a relational store holds metric definitions, and an optional external semantic-layer repository supplies analysis definitions.](docs/assets/architecture.svg)
-
-Solid arrows show service calls or data writes; the dashed arrow supplies optional semantic configuration. **The OLAP engine, metric store and external semantic layer have distinct responsibilities.**
-
-**Implemented paths:** PostgreSQL or MySQL 8.4 for metric definitions, versions and audit; Databricks SQL for analytical metric queries; PostgreSQL, ClickHouse or Doris for HTTP/MCP queries over precomputed DWS/ADS aggregates; and Databricks or bounded [Trino/Presto exploration](docs/trino-presto.md). A self-hosted OIDC deployment can disable Databricks analytical queries and use the independent serving/exploration paths without a Databricks account. ClickHouse/Doris exploration and general analytical metric queries are not supported. See [architecture and adapter support](docs/architecture.md#adapter-support) for the scope of each path.
-
-## Choose where to start
-
-> **Development preview.** Querying your data requires a configured service and data permissions. There is no published production-ready release. [Check the current status](docs/development-status.md).
-
-| Your goal | Start here | You will need |
+| Your goal | Start here | What you need |
 | --- | --- | --- |
-| Use your team's service from local Codex CLI | [Databricks installer](docs/mcp-installer.md#get-the-installer) or [OIDC installer](docs/oidc-mcp.md#user-installation) | A deployed instance, its team installer, and your own identity/data permissions for that deployment. |
-| Connect another MCP client | [MCP connection guide](docs/mcp.md#connect) | An instance URL and the authentication setup supported by that deployment. |
-| Understand metric definitions without connecting to data | [Run the offline example](docs/getting-started.md#compile-and-inspect-a-plan-without-a-database) | Go; no database or cloud account. This produces query plans, not data results. |
-| Run a service for your team | [Service setup](docs/getting-started.md#run-the-http-service) | PostgreSQL or MySQL metadata, identity configuration and a [supported query profile](docs/runtime-engines.md). |
+| Query your team's existing service | [Databricks installer](docs/mcp-installer.md#get-the-installer) or [OIDC installer](docs/oidc-mcp.md#user-installation); [other MCP clients](docs/mcp.md#connect) | Instance URL, team connection package and your own permissions. No source checkout required. |
+| Add or maintain a metric | [First definition → draft → publish → query](docs/metric-maintenance.md) · [optional maintainer skill](skills/metricspire-maintainer/SKILL.md) | Agreed definition, model-management permission and an existing data route. |
+| Start without Databricks | [PostgreSQL + OIDC walkthrough](docs/self-hosted.md) | Metadata/results databases, an identity provider and prepared aggregates. Query users need no Databricks account. |
+| Connect an existing semantic layer | [Export → configure → discover → reconcile](docs/semantic-layer.md) | Reviewed AnalysisCatalog export and a supported exploration engine. No automatic Git/dbt/Cube import. |
 
-Already have web access? Open your team's instance and start in the **metric catalog**. This repository does not include a public instance or your company's metric definitions.
+Already have web access? Open your team's instance and start in the **metric catalog**. Detailed guides are currently in English; the three project overviews cover the same scope.
 
-## Documentation and project status
+## Where it fits
 
-- [Getting started](docs/getting-started.md) — offline example, local catalog and service setup.
-- [MCP integration](docs/mcp.md) · [HTTP API](docs/http-api.md) — connect a client or application.
-- [Architecture and adapters](docs/architecture.md) — system responsibilities, query paths and current database support.
-- [Operator refresh](docs/online-refresh.md): PostgreSQL typed batch export, reconciliation and atomic tenant refresh.
-- [Doris aggregate serving](docs/doris-online.md) · [runtime.doris.example.yaml](examples/runtime.doris.example.yaml).
-- [ClickHouse aggregate serving](docs/clickhouse-online.md) · [runtime.clickhouse.example.yaml](examples/runtime.clickhouse.example.yaml).
-- [Team configuration](config/README.md) · [External semantic layer](docs/exploration.md) — maintain private settings and definitions for exploration.
-- [Development status](docs/development-status.md) — implemented features, verification evidence and remaining gaps.
-- [Contributing](CONTRIBUTING.md) · [All documentation](docs/README.md).
+Your pipelines prepare data. Your query engine stores and computes it. MetricSpire manages definitions, checks access and serves structured queries.
 
-The order scenario above explains the product; the [TPCH acceptance fixture](testdata/acceptance/databricks-tpch) provides reproducible technical requests and expected results. The semantic contract, [`metricspire.io/v1alpha1`](contracts/metricspire.schema.json), is versioned separately from the planned product `v0.1.0` release.
+![MetricSpire architecture: web, HTTP and MCP clients call the catalog and data service; separate adapters connect query engines, metric metadata and optional semantic exports.](docs/assets/architecture.svg)
 
-Licensed under [Apache 2.0](LICENSE). Public examples use neutral data; keep company definitions, credentials and production data outside this repository.
+| Responsibility | Implemented options |
+| --- | --- |
+| Definitions, releases and audit | PostgreSQL or MySQL 8.4 |
+| Published-metric analytical queries | Databricks SQL |
+| Precomputed aggregate serving | PostgreSQL, ClickHouse or Doris, through HTTP/MCP |
+| Temporary analysis using reviewed semantics | Databricks; bounded single-table DATE exploration on Trino/Presto |
+
+An independent OIDC deployment can disable Databricks analytical queries. Database support is specific to each row: a metadata adapter is not a general query adapter. MetricSpire does not replace upstream ETL or provision your business tables. See [adapter scope](docs/architecture.md#adapter-support).
+
+## Documentation and contributing
+
+- [All documentation](docs/README.md) · [Getting started](docs/getting-started.md)
+- [MCP workflow](docs/mcp.md) · [HTTP API](docs/http-api.md)
+- [Private team configuration](config/README.md) · [Runtime engines](docs/runtime-engines.md)
+- [Data refresh and reconciliation](docs/online-refresh.md) · [Isolated technical acceptance](deploy/testing/README.md)
+- [Architecture](docs/architecture.md) · [Development status](docs/development-status.md) · [Contributing](CONTRIBUTING.md)
+
+Licensed under [Apache 2.0](LICENSE). Public examples are neutral; keep company definitions, physical mappings, credentials and production data in private storage. The semantic contract `metricspire.io/v1alpha1` is versioned separately from the planned product `v0.1.0` release.

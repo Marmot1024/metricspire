@@ -15,8 +15,9 @@ computed independently. Never sum ratios; export their additive components.
 ## 1. Provision separately
 
 Review `examples/online/model.yaml`, its PostgreSQL `binding.yaml`, and the
-DDL in [PostgreSQL online](online-query.md). Provision that serving table
-and schema before running the producer. Target columns must match the binding
+neutral [fixture DDL](../examples/online/producer/schema.sql). Provision that serving table
+and schema before running the producer. Run the DDL only in a fresh disposable
+database; it intentionally refuses an existing schema. Target columns must match the binding
 exactly: string → text/varchar, integer → bigint, decimal → numeric, boolean →
 boolean, date → date, plus the four non-null snapshot columns. A tenant snapshot
 must have a unique entity key. Partitioned/inherited tables, triggers (including foreign-key triggers), rules,

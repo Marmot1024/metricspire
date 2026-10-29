@@ -151,6 +151,79 @@ func TestCatalogAndCompilerBoundaries(t *testing.T) {
 	}
 }
 
+func TestSemanticLayerWalkthrough(t *testing.T) {
+	var c exploration.Catalog
+	var q exploration.Query
+	if err := contractio.ReadFile("../../../examples/semantic-layer/catalog.yaml", &c); err != nil {
+		t.Fatal(err)
+	}
+	if err := contractio.ReadFile("../../../examples/semantic-layer/query.json", &q); err != nil {
+		t.Fatal(err)
+	}
+	rc := model.RequestContext{Tenant: "demo", Principal: "synthetic", Roles: []string{"analyst"}, RequestID: "walkthrough"}
+	if err := ValidateCatalog(c, Trino); err != nil {
+		t.Fatal(err)
+	}
+	p, err := exploration.PlanCatalog(c, q, rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Compile(p, Trino); err != nil {
+		t.Fatal(err)
+	}
+	raw := os.Getenv("METRICSPIRE_TRINO_TEST_URL")
+	if raw == "" {
+		if os.Getenv("METRICSPIRE_REQUIRE_TRINO_TESTS") == "1" {
+			t.Fatal("engine URL required")
+		}
+		t.Log("example planning passed; real query requires disposable Trino")
+		return
+	}
+	e, err := New(Config{Driver: Trino, Connection: raw, User: "synthetic_reader"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	got, err := e.Execute(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Independent SQL over the documented public fixture, not compiler output.
+	u := *e.endpoint
+	u.Path = "/v1/statement"
+	method, body := http.MethodPost, `SELECT orderdate, count(*), count(DISTINCT custkey) FROM tpch.tiny.orders WHERE orderdate >= DATE '1996-01-01' AND orderdate < DATE '1996-01-08' GROUP BY orderdate ORDER BY orderdate`
+	var oracle [][]any
+	for {
+		r, err := e.request(ctx, method, &u, body, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var pg page
+		d := json.NewDecoder(r.Body)
+		d.UseNumber()
+		err = d.Decode(&pg)
+		r.Body.Close()
+		if err != nil || r.StatusCode != http.StatusOK || len(pg.Error) > 0 {
+			t.Fatal("walkthrough oracle failed", err)
+		}
+		oracle = append(oracle, pg.Data...)
+		if pg.Next == "" {
+			break
+		}
+		next, err := e.next(pg.Next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u, method, body = *next, http.MethodGet, ""
+	}
+	a, _ := json.Marshal(got.Result.Rows)
+	b, _ := json.Marshal(oracle)
+	if len(oracle) != 7 || string(a) != string(b) {
+		t.Fatalf("walkthrough mismatch: got %s want %s", a, b)
+	}
+}
+
 // The public TPCH connector generates ~6M rows at sf1; no business data is read.
 func TestRealTPCH(t *testing.T) {
 	for _, driver := range []string{Trino, Presto} {

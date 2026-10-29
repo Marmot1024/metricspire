@@ -4,6 +4,9 @@ Start with `examples/runtime.postgres.example.yaml` for OIDC and PostgreSQL-only
 serving, or `examples/runtime.example.yaml` for Databricks analytical queries.
 These are deployment-owned configuration files, not chat inputs.
 
+For the first setup, use [PostgreSQL + OIDC](self-hosted.md); for a reviewed
+external catalog, use [the semantic-layer walkthrough](semantic-layer.md).
+
 | Configuration | Responsibility | Implemented drivers |
 | --- | --- | --- |
 | `storage` | Metric definitions, revisions, releases and audit records | `postgres`, `mysql` |
@@ -32,7 +35,9 @@ For ClickHouse result serving with PostgreSQL metadata, see [the ClickHouse guid
    the migration CLI still takes `--database-url` or `METRICSPIRE_DATABASE_URL`.
    `serve` does not migrate or synchronize business data.
 2. Configure a standard OIDC issuer, audience, client and session key as described
-   in the HTTP guide. OIDC identity verification is independent of the query engine.
+   in the HTTP guide. `METRICSPIRE_SESSION_KEY` must contain base64 encoding of
+   exactly 32 random bytes; retain it through your secret store across restarts.
+   OIDC identity verification is independent of the query engine.
 3. Publish a reviewed model in the metadata catalog. Populate its precomputed
    results separately, with the online snapshot/freshness contract, then grant a
    dedicated non-superuser read credential. See `examples/online/README.md`.
