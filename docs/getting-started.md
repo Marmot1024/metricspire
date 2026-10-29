@@ -28,55 +28,23 @@ Run the following commands from the repository root. The `dist/` directory conta
 
 The example uses public, neutral order data. It compiles a semantic model and policy, then produces logical and physical plans without submitting an analytical query.
 
-Run all steps with `sh examples/quickstart.sh`. It creates a new `dist/quickstart.*`
-directory and prints the logical plan. The equivalent individual commands follow:
-
-```bash
-mkdir -p dist/demo
-
-go run ./cmd/metricspire compile \
-  --source examples/orders/model.yaml \
-  --out dist/demo/manifest.json
-
-go run ./cmd/metricspire compile-policy \
-  --source examples/orders/policy.yaml \
-  --manifest dist/demo/manifest.json \
-  --out dist/demo/policy-bundle.json
-
-go run ./cmd/metricspire plan \
-  --manifest dist/demo/manifest.json \
-  --policy dist/demo/policy-bundle.json \
-  --context examples/orders/context.json \
-  --query examples/orders/query.json \
-  --binding examples/orders/binding.json \
-  --capabilities examples/orders/capabilities.json \
-  --logical-out dist/demo/logical-plan.json \
-  --physical-out dist/demo/physical-plan.json
+```sh
+sh examples/quickstart.sh
 ```
 
-On success, the commands create four JSON files in `dist/demo/`: the compiled definition (`manifest.json`), access rules (`policy-bundle.json`), metric calculation plan (`logical-plan.json`) and data-access plan (`physical-plan.json`).
+The [script](../examples/quickstart.sh) is the maintained command sequence. It
+prints the logical plan and writes four JSON files into a new `dist/quickstart.*`
+directory: compiled definitions (`manifest.json`), access rules (`policy.json`),
+`logical-plan.json` and `physical-plan.json`.
 
 This example requests average order value and refund rate, grouped by day and customer segment, filtered to the east and south regions. Open `logical-plan.json` to inspect the selected metrics, grouping and time range, then `physical-plan.json` to inspect the approved table mappings. **There are no revenue rows or other data results:** the example plans the query but does not execute it. The example's `context.json` is trusted **only** in this offline CLI path. HTTP and MCP callers cannot submit their own tenant, identity, policy, binding, release, engine, or SQL.
 
 ## Try the catalog lifecycle locally
 
-The Compose password is for local development only. Do not reuse it in a deployed environment.
-
-```bash
-docker compose up -d postgres
-export METRICSPIRE_DATABASE_URL='postgres://metricspire:metricspire_dev_only@127.0.0.1:54329/metricspire?sslmode=disable'
-
-go run ./cmd/metricspire migrate
-go run ./cmd/metricspire draft-put \
-  --namespace demo --source examples/orders/model.yaml \
-  --actor local-user --expected-revision 0
-go run ./cmd/metricspire publish \
-  --namespace demo --model commerce --revision 1 --actor local-user
-go run ./cmd/metricspire release-list \
-  --namespace demo --model commerce
-```
-
-This demonstrates draft revisions, explicit publication, immutable releases, and the active pointer. PostgreSQL stores control metadata, not analytical facts or result rows. To execute `query-active`, additionally provide a reviewed source binding, a read-only Databricks SQL warehouse, and appropriate engine credentials. Real-engine tests are opt-in and require an explicitly configured environment.
+Follow [metric maintenance](metric-maintenance.md#2-save-a-draft) for the single
+maintained example: a disposable PostgreSQL catalog, draft revision, review,
+publication and the prerequisites for a reconciled query. Publication stores
+control metadata; it does not create or fill business tables.
 
 ## Configure your team
 
@@ -140,14 +108,6 @@ The [Dockerfile](../Dockerfile) builds a non-root static-binary image. It is the
 
 ## Verify a change
 
-```bash
-python3 tools/check_docs.py
-node --test internal/httpapi/ui/app_test.js
-go test ./...
-go test -race ./...
-go vet ./...
-go mod verify
-CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' ./cmd/metricspire
-```
-
-The default suite uses local fixtures and mocks where appropriate. A passing build, unit test, or health probe is not a substitute for an authenticated deployment and a real, bounded analytical query.
+Run [the local quality gate](../CONTRIBUTING.md#local-quality-gate). Optional
+real-engine tests require their explicitly configured environment; default
+fixture tests do not establish deployed authentication or business correctness.
