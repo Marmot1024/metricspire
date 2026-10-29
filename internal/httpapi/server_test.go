@@ -818,7 +818,8 @@ func TestHTTPCatalogSearchAndUIUseTheSameAPI(t *testing.T) {
 		!strings.Contains(body, "catalog-status-filter") || !strings.Contains(body, "query-metric-search") ||
 		!strings.Contains(body, "business-verification-note") ||
 		!strings.Contains(body, "run-query-button") || !strings.Contains(body, "governance-tab") ||
-		!strings.Contains(body, "<h1>指标治理</h1>") || !strings.Contains(body, "metric-inventory") || !strings.Contains(body, "editor-status") ||
+		!strings.Contains(body, `id="governance-workspace"`) || !strings.Contains(body, `id="detail-maintain-button"`) ||
+		!strings.Contains(body, "metric-inventory") || !strings.Contains(body, "editor-status") ||
 		!strings.Contains(body, "<h1>查询验证</h1>") {
 		t.Fatal("UI is missing a catalog, governance, query or feedback entry")
 	}
