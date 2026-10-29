@@ -32,6 +32,7 @@ const state = {
   creatingMetric: false,
   editorDirty: false,
   metricExpressionFilters: [],
+  governanceSequence: 0,
 };
 
 function setNotice(message, tone = "neutral") {
@@ -330,7 +331,7 @@ function appendChip(container, label, tone = "") {
   container.append(chip);
 }
 
-function activateTab(name) {
+function activateTab(name, load = true) {
   for (const button of document.querySelectorAll("[data-tab]")) {
     const active = button.dataset.tab === name;
     button.classList.toggle("active", active);
@@ -340,7 +341,7 @@ function activateTab(name) {
     workspace.hidden = workspace.dataset.workspace !== name;
   }
   if (typeof window !== "undefined" && window.scrollTo) window.scrollTo({top: 0, behavior: "auto"});
-  if (name === "governance" && state.governanceRoute && !state.draft) loadGovernance();
+  if (load && name === "governance" && state.governanceRoute && !state.draft) loadGovernance();
   if (name === "query") updateQueryBuilder();
 }
 
@@ -602,6 +603,9 @@ function renderMetricDetail(metric) {
   byID("detail-query-button").textContent = draft ? "带入草稿试查" : pending ? "暂不可查询" : "带入查询验证";
   byID("detail-query-button").disabled = pending || metric.deprecated || !hasPermission("query:execute") || (draft && !hasPermission("model:manage"));
   byID("detail-query-button").onclick = () => addMetricToQuery(metric);
+  const maintain = byID("detail-maintain-button");
+  maintain.hidden = !maintenanceRoute(metric);
+  maintain.onclick = () => maintainMetric(metric);
   if (metric.definition) {
     byID("detail-source-state").textContent = "先确认口径";
     byID("detail-physical-source").textContent = "带入查询并选择口径后可查看执行计划。";
@@ -1333,6 +1337,33 @@ function governanceMetrics() {
   return state.draft?.source?.spec?.metrics || [];
 }
 
+function maintenanceRoute(metric) {
+  if (!hasPermission("model:manage") || metric.namespace !== state.namespace) return null;
+  return (state.context.models || []).find((route) => route.namespace === metric.namespace &&
+    route.model_name === metric.semantic_model_name) || null;
+}
+
+async function maintainMetric(metric) {
+  const route = maintenanceRoute(metric);
+  if (!route || !confirmDiscardDraft()) return;
+  state.governanceRoute = route;
+  byID("governance-route").value = String(state.context.models.filter((candidate) => candidate.namespace === state.namespace).indexOf(route));
+  byID("governance-metric-search").value = "";
+  activateTab("governance", false);
+  await loadGovernance(metric.name);
+}
+
+function focusMaintenance(id) {
+  const target = byID(id);
+  target.scrollIntoView?.({behavior: "smooth", block: "start"});
+  target.focus?.({preventScroll: true});
+}
+
+function showPublicationReview() {
+  if (!requireAppliedEditor()) return;
+  focusMaintenance("publication-review");
+}
+
 function metricFilterLabel(filter = {}) {
   const operators = {eq: "=", neq: "<>", in: "IN", not_in: "NOT IN", is_null: "IS NULL", is_not_null: "IS NOT NULL"};
   const operator = operators[filter.operator] || String(filter.operator || "").toUpperCase();
@@ -1420,12 +1451,13 @@ function renderMetricInventory() {
 }
 
 function selectGovernanceMetric(index) {
-  if (state.editorDirty && !window.confirm("这条指标有尚未保存的修改。放弃修改并切换？")) return;
+  if (state.editorDirty && !window.confirm("这条指标有尚未保存的修改。放弃修改并切换？")) return false;
   state.metricIndex = index;
   state.creatingMetric = false;
   byID("metric-select").value = String(index);
   renderMetricEditor(governanceMetrics()[index]);
   renderMetricInventory();
+  return true;
 }
 
 function datasetForEntity(entityName) {
@@ -1579,6 +1611,10 @@ function renderMetricEditor(metric) {
   byID("editor-status").hidden = true;
   const aggregate = !metric || metric.kind === "aggregate";
   const executionLocked = metricExecutionLocked(metric);
+  byID("calculation-details").open = !executionLocked;
+  byID("calculation-summary").textContent = executionLocked ? "查看计算规则与可用维度（口径已锁定）" : "编辑计算规则与可用维度";
+  byID("metadata-details").open = false;
+  byID("verification-details").open = false;
   byID("metric-editor-kicker").textContent = state.creatingMetric ? "新建草稿" : metricIsPublished(metric) ? "已发布指标" : "未发布草稿";
   byID("metric-editor-title").textContent = state.creatingMetric ? "新增基础指标" : (metric?.display_name || metric?.name || "选择一条指标");
   byID("duplicate-metric-button").hidden = Boolean(metric?.definition) || !metric || metric.kind !== "aggregate" || !metricIsPublished(metric);
@@ -1664,7 +1700,9 @@ function expressionFromEditor() {
 
 function refreshFormulaPreview() {
   if (!byID("metric-formula-preview")) return;
-  byID("metric-formula-preview").textContent = metricExpressionLabel(expressionFromEditor());
+  const current = governanceMetrics()[state.metricIndex];
+  byID("metric-formula-preview").textContent = metricExpressionLabel(
+    !state.creatingMetric && metricExecutionLocked(current) ? current.expression : expressionFromEditor());
 }
 
 function metricFromEditor() {
@@ -1788,13 +1826,15 @@ function renderReview() {
   byID("binding-status-meta").textContent = review.binding.message;
   setStatus("review-status", issues.length
     ? `发布前还需处理 ${issues.length} 项问题，已归并为 ${issueGroups.length} 类。`
+    : review.binding.status !== "ready"
+      ? `数据源绑定尚未就绪：${review.binding.message}。请联系维护该模型配置的管理员，展开右侧绑定信息查看。`
     : review.structure_changed
       ? "候选内容修改了内部模型结构，不能从简化页面直接发布。"
       : !changes.length
         ? "草稿与当前线上版本没有指标变化。"
     : breaking.length
       ? `发现 ${changes.length} 项指标变化，其中 ${breaking.length} 项会改变已发布契约，不能直接发布。`
-      : `发现 ${changes.length} 项可审查变更；发布动作仍会重复执行完整校验。`, issues.length || review.structure_changed || breaking.length ? "error" : "success");
+      : `发现 ${changes.length} 项可审查变更；发布动作仍会重复执行完整校验。`, issues.length || review.structure_changed || breaking.length || review.binding.status !== "ready" ? "error" : "success");
   const list = byID("change-list");
   list.replaceChildren();
   for (const change of changes) {
@@ -1804,7 +1844,11 @@ function renderReview() {
     title.textContent = `${({added: "新增", changed: "修改", removed: "删除"})[change.kind] || change.kind} · ${change.display_name || change.code}`;
     const meta = document.createElement("small");
     const details = [];
-    if ((change.fields || []).length) details.push(`变化字段：${change.fields.join("、")}`);
+    const fieldLabels = {display_name: "名称", description: "定义说明", owner: "负责人", tags: "标签",
+      usage_examples: "使用示例", verification: "验证证据", expression: "计算公式", definition: "统计口径",
+      allowed_dimensions: "可用维度", time_dimension: "时间维度", deprecated: "停用状态", external_code: "业务编号",
+      value_type: "结果类型", unit: "单位", entity: "业务实体"};
+    if ((change.fields || []).length) details.push(`变化字段：${change.fields.map((field) => fieldLabels[field] || field).join("、")}`);
     if ((change.dependents || []).length) details.push(`内部依赖：${change.dependents.join("、")}`);
     if (change.breaking) details.push("会改变已发布执行契约");
     meta.textContent = details.join("；") || "无下游内部依赖";
@@ -1822,6 +1866,24 @@ function renderReview() {
       ? `影响指标：${preview.join("、")}${group.metrics.length > preview.length ? `，另有 ${group.metrics.length - preview.length} 项` : ""}`
       : group.issues[0];
     card.append(title, meta);
+    for (const code of preview) {
+      const index = governanceMetrics().findIndex((metric) => metric.name === code);
+      if (index < 0) continue;
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = "button secondary compact";
+      action.textContent = `修正 ${governanceMetrics()[index].display_name || code}`;
+      action.addEventListener("click", () => {
+        if (!selectGovernanceMetric(index)) return;
+        byID("governance-metric-search").value = "";
+        renderMetricInventory();
+        const target = ({not_verified: "metric-verified", evidence: "metric-evidence", empty_evidence: "metric-evidence",
+          display_name: "metric-display-name", description: "metric-description", owner: "metric-owner"})[group.key];
+        if (["not_verified", "evidence", "empty_evidence"].includes(group.key)) byID("verification-details").open = true;
+        focusMaintenance(target || "metric-editor-title");
+      });
+      card.append(action);
+    }
     list.append(card);
   }
   if (review.structure_changed) {
@@ -1910,36 +1972,54 @@ function renderReleases() {
 
 async function reviewGovernance() {
   if (!state.draft || !state.governanceRoute) return;
+  const draft = state.draft;
+  const route = state.governanceRoute;
   try {
-    state.review = await requestJSON(routePath(state.governanceRoute, "review"), {
-      method: "POST", body: JSON.stringify({source: state.draft.source}),
+    const review = await requestJSON(routePath(route, "review"), {
+      method: "POST", body: JSON.stringify({source: draft.source}),
     });
+    if (state.draft !== draft || state.governanceRoute !== route) return;
+    state.review = review;
     renderReview();
   } catch (error) {
+    if (state.draft !== draft || state.governanceRoute !== route) return;
     state.review = null;
     setStatus("review-status", errorMessage(error), "error");
     byID("publish-button").disabled = true;
   }
 }
 
-async function loadGovernance() {
+async function loadGovernance(preferredName = "") {
   if (!state.governanceRoute || !hasPermission("model:manage")) return;
+  const route = state.governanceRoute;
+  const sequence = ++state.governanceSequence;
+  state.draft = null;
+  state.review = null;
+  state.editorDirty = false;
+  byID("governance-body").hidden = true;
   setStatus("governance-status", "正在读取草稿、当前发布版本和数据绑定…");
   try {
     const [draft, releases] = await Promise.all([
-      requestJSON(routePath(state.governanceRoute, "draft")),
-      requestJSON(routePath(state.governanceRoute, "releases")),
+      requestJSON(routePath(route, "draft")),
+      requestJSON(routePath(route, "releases")),
     ]);
+    if (state.governanceRoute !== route || sequence !== state.governanceSequence) return;
     state.draft = draft;
     state.releases = releases;
-    byID("governance-namespace-value").textContent = state.governanceRoute.namespace;
+    byID("governance-namespace-value").textContent = route.namespace;
     byID("draft-revision-value").textContent = `revision ${draft.revision}`;
     byID("draft-updated-meta").textContent = [draft.updated_by, draft.updated_at && new Date(draft.updated_at).toLocaleString("zh-CN")].filter(Boolean).join(" · ");
     renderReleases();
     await reviewGovernance();
-    renderMetricSelect();
-    setStatus("governance-status", "维护上下文已载入。线上查询继续只读取当前已发布版本。", "success");
+    if (state.governanceRoute !== route || sequence !== state.governanceSequence) return;
+    const index = governanceMetrics().findIndex((metric) => metric.name === preferredName);
+    renderMetricSelect(Math.max(index, 0));
+    byID("governance-body").hidden = false;
+    setStatus("governance-status", preferredName && index < 0
+      ? "这条记录尚未进入可编辑模型，请由维护者通过受审查的源文件补齐；已打开对应模型。"
+      : "先修改需要的内容，再保存草稿。发布前，线上版本保持不变。", "neutral");
   } catch (error) {
+    if (state.governanceRoute !== route || sequence !== state.governanceSequence) return;
     state.draft = null;
     setStatus("governance-status", errorMessage(error), "error");
   }
@@ -1954,12 +2034,13 @@ async function publishDraft() {
     return;
   }
   try {
+    const preferredName = governanceMetrics()[state.metricIndex]?.name || "";
     setStatus("governance-status", "正在发布不可变版本…");
     const release = await requestJSON(routePath(state.governanceRoute, "publish"), {
       method: "POST", body: JSON.stringify({expected_revision: state.draft.revision, note}),
     });
     byID("release-note").value = "";
-    await loadGovernance();
+    await loadGovernance(preferredName);
     await loadCatalog();
     setStatus("governance-status", `版本 ${release.id} 已发布并成为当前版本。`, "success");
   } catch (error) {
@@ -2076,6 +2157,7 @@ function bindEvents() {
   });
   byID("review-draft-button").addEventListener("click", reviewGovernance);
   byID("publish-button").addEventListener("click", publishDraft);
+  byID("show-review-button").addEventListener("click", showPublicationReview);
   byID("add-filter-button").addEventListener("click", () => {
     const dimension = byID("filter-dimension").value;
     const values = byID("filter-values").value.split(",").map((value) => value.trim()).filter(Boolean);

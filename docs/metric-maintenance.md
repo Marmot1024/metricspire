@@ -16,6 +16,16 @@ The simplified web editor preserves structured definitions and locks their
 calculation fields. It does not configure new databases, bindings or result
 tables. Publication permission (`model:manage`) is separate from query permission.
 
+In the catalog, open a metric and choose **维护这条指标** to open its model and
+select the same metric. Edit its name, definition or owner; expand calculation
+rules for an editable draft. Published formulas stay visible and locked. Business
+codes, tags, examples and verification evidence are in expandable sections.
+Save the draft, then choose **查看发布检查**. A grouped issue's **修正** action opens
+the affected metric and field; it never marks a definition verified for you.
+Review all model changes before publishing: a release contains the whole saved
+model, including other metrics' changes. Publication is still separate from
+data readiness and reader reconciliation below.
+
 ## 1. Write the definition
 
 Start with [the neutral daily sales model](../examples/online/model.yaml). It

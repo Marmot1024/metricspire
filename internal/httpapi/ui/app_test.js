@@ -652,3 +652,92 @@ test("editing and copying never silently remove a structured definition", () => 
   assert.equal(run("state.creatingMetric"),false);
   assert.match(context.document.getElementById("editor-status").textContent,/版本化源文件/);
 });
+
+test("catalog maintenance opens the exact model and metric without discarding edits silently", async () => {
+  const {context, run} = editorContext();
+  run(`state.namespace='demo'; state.context={permissions:['model:manage'],models:[
+    {namespace:'demo',model_name:'other'},{namespace:'demo',model_name:'sales'}]};
+    state.draft.source.spec.metrics=[{name:'orders'}]; state.editorDirty=true;`);
+  context.window = {confirm: () => false};
+  let loads = 0;
+  context.activateTab = () => {};
+  context.loadGovernance = async (name) => { loads++; assert.equal(name, "revenue"); };
+  const metric = {namespace: "demo", semantic_model_name: "sales", name: "revenue"};
+  context.selected = metric;
+  await run("maintainMetric(selected)");
+  assert.equal(loads, 0);
+  assert.equal(run("state.editorDirty"), true);
+  context.window.confirm = () => true;
+  await run("maintainMetric(selected)");
+  assert.equal(loads, 1);
+  assert.equal(run("state.governanceRoute.model_name"), "sales");
+  assert.equal(context.document.getElementById("governance-route").value, "1");
+  run("state.context.permissions=[]");
+  assert.equal(run("maintenanceRoute(selected)"), null);
+  await run("maintainMetric(selected)");
+  assert.equal(loads, 1);
+});
+
+test("publication issues lead to the affected field without inventing verification evidence", () => {
+  const {context, run} = editorContext();
+  run(`state.creatingMetric=false; state.metricIndex=0; state.draft.source.spec.metrics=[
+    {name:'revenue',display_name:'收入',entity:'orders',kind:'aggregate',expression:{op:'sum',field:'orders.amount'},verification:{status:'unverified'}},
+    {name:'orders',display_name:'订单数',entity:'orders',kind:'aggregate',expression:{op:'count',field:'orders.id'},verification:{status:'unverified'}}];
+    state.review={active_release:null,metric_changes:[],publication_issues:['metric "orders" has no verification evidence'],binding:{status:'ready',message:'ready'}};
+    renderReview();`);
+  const card = context.document.getElementById("change-list").children[0];
+  const action = card.children.find((child) => child.textContent === "修正 订单数");
+  assert.ok(action);
+  let focused = false;
+  context.document.getElementById("metric-evidence").focus = () => { focused = true; };
+  action.handlers.click();
+  assert.equal(run("state.metricIndex"), 1);
+  assert.equal(context.document.getElementById("verification-details").open, true);
+  assert.equal(context.document.getElementById("metric-verified").checked, false);
+  assert.equal(focused, true);
+  assert.equal(context.document.getElementById("publish-button").disabled, true);
+});
+
+test("review explains model changes and a missing binding even when configuration is collapsed", () => {
+  const {context, run} = editorContext();
+  run(`state.review={active_release:null,metric_changes:[{code:'revenue',kind:'added',fields:['description','owner']}],
+    publication_issues:[],binding:{status:'missing',message:'No binding'}}; renderReview();`);
+  assert.match(context.document.getElementById("change-list").children[0].children[1].textContent, /定义说明、负责人/);
+  assert.match(context.document.getElementById("review-status").textContent, /数据源绑定尚未就绪/);
+  assert.equal(context.document.getElementById("publish-button").disabled, true);
+});
+
+test("metadata edits keep a locked derived formula visible and preserve its contract", () => {
+  const {context, run} = editorContext();
+  run(`state.creatingMetric=false; state.metricIndex=0; state.review={active_release:{id:'rel_1'},metric_changes:[]};
+    state.draft.source.spec.metrics=[{name:'aov',display_name:'客单价',description:'收入除以订单数',owner:'demo-team',entity:'orders',kind:'ratio',
+      value_type:'decimal',expression:{op:'divide',args:[{op:'metric',metric:'revenue'},{op:'metric',metric:'orders'}]},verification:{status:'unverified'}}];
+    renderMetricEditor(state.draft.source.spec.metrics[0]); refreshFormulaPreview();`);
+  assert.match(context.document.getElementById("metric-formula-preview").textContent, /revenue.*orders/);
+  assert.equal(context.document.getElementById("calculation-details").open, false);
+  assert.equal(run("metricFromEditor().expression.op"), "divide");
+  assert.equal(context.document.getElementById("metric-operation").disabled, true);
+});
+
+test("a late governance load cannot replace the newly selected model", async () => {
+  const {context, run} = editorContext();
+  run(`state.context={permissions:['model:manage']}; state.governanceRoute={namespace:'demo',model_name:'old'};`);
+  const pending = new Map();
+  context.requestJSON = (path) => new Promise((resolve) => pending.set(path, resolve));
+  const old = run("loadGovernance()");
+  assert.equal(context.document.getElementById("governance-body").hidden, true);
+  run("state.governanceRoute={namespace:'demo',model_name:'new'}");
+  const newer = run("loadGovernance('revenue')");
+  const draft = (name) => ({revision: 1, source: {spec: {metrics: [{name}, {name: 'revenue'}]}}});
+  context.renderMetricSelect = (index) => assert.equal(index, 1);
+  context.renderReleases = () => {};
+  context.reviewGovernance = async () => {};
+  pending.get("/api/v1/namespaces/demo/models/new/draft")(draft("new"));
+  pending.get("/api/v1/namespaces/demo/models/new/releases")([]);
+  await newer;
+  pending.get("/api/v1/namespaces/demo/models/old/draft")(draft("old"));
+  pending.get("/api/v1/namespaces/demo/models/old/releases")([]);
+  await old;
+  assert.equal(run("state.draft.source.spec.metrics[0].name"), "new");
+  assert.equal(context.document.getElementById("governance-body").hidden, false);
+});
