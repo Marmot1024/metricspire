@@ -94,7 +94,15 @@ The serving pool is bounded to four connections; the default online handling bud
 
 ## Verification and release gate
 
-For code review, read the layers in this order: `internal/model/contracts.go` (snapshot/result types), `internal/adapter/postgresquery` (capabilities, SQL and read guards), `internal/application/online.go` (numeric-code routing and reused policy/audit), `internal/httpapi/online.go` (trusted HTTP identity), then `cmd/metricspire/serve.go` and `internal/runtimeconfig` (opt-in assembly). The deterministic [package dependency graph](online-query-dependencies.json) records direct imports, not runtime calls. Existing analytical adapter, job manager and MCP contracts are regression surfaces; none is the subject of the online endpoint.
+For code review, read the layers in this order: `internal/model/contracts.go` (snapshot/result types), `internal/adapter/postgresquery` (capabilities, SQL and read guards), `internal/application/online.go` (numeric-code routing and reused policy/audit), `internal/httpapi/online.go` (trusted HTTP identity), then `cmd/metricspire/serve.go` and `internal/runtimeconfig` (opt-in assembly). Existing analytical adapter, job manager and MCP contracts are regression surfaces; none is the subject of the online endpoint.
+
+Inspect current direct package imports, rather than a saved dependency snapshot:
+
+```sh
+go list -f '{{.ImportPath}}: {{join .Imports ", "}}' \
+  ./cmd/metricspire ./internal/adapter/postgresquery ./internal/application \
+  ./internal/httpapi ./internal/repository/postgres
+```
 
 Unit tests cover code resolution, policy denial, budgets, parameter binding, source allowlists, disabled behavior, overload and cancellation. Opt-in local PostgreSQL integration tests use a real HTTP server, isolated schemas, a SELECT-only role and durable audit, then clean up their synthetic data:
 

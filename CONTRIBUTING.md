@@ -26,7 +26,7 @@ python3 -m unittest discover -s deploy/databricks-apps -p test_render.py
 go mod verify
 go test -race ./...
 go vet ./...
-CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' ./cmd/metricspire
+CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o dist/metricspire ./cmd/metricspire
 git diff --check
 ```
 
