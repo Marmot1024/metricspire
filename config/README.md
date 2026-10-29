@@ -1,5 +1,8 @@
 # Team deployment configuration
 
+First-time operators: use [the independent service walkthrough](../docs/self-hosted.md)
+or [connect one semantic export](../docs/semantic-layer.md) before adapting these templates.
+
 Start here when adapting MetricSpire to a team. These templates use public,
 neutral fixtures. Copy both files to the ignored private directory:
 

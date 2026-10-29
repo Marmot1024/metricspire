@@ -5,13 +5,16 @@ New to MetricSpire? Read the [overview and sample result](../README.md) first, t
 ## Use your team's service
 
 - **Web:** open your team's instance and start in the metric catalog. The repository does not provide a public instance.
-- **Local Codex CLI:** [get the team installer](mcp-installer.md#get-the-installer), install it using your existing Databricks profile, and verify a first query.
+- **Local Codex CLI:** use the team's [Databricks installer](mcp-installer.md#get-the-installer) or [independent OIDC installer](oidc-mcp.md#user-installation), then verify a first query with your own identity.
 - **Other AI clients:** read [MCP integration](mcp.md#connect) for deployment-specific connection and authentication requirements.
 - **Applications:** read the [HTTP API and sample request](http-api.md#example-query-a-published-metric).
 
 ## Learn or operate
 
 - [Offline example](getting-started.md#compile-and-inspect-a-plan-without-a-database) — compile metric definitions and inspect a plan without a database.
+- [Maintain a metric](metric-maintenance.md) — first definition, draft, review, publication and reader-result reconciliation; optional [maintainer skill](../skills/metricspire-maintainer/SKILL.md).
+- [Start without Databricks](self-hosted.md) — PostgreSQL metadata/results, OIDC and the first query.
+- [Connect an existing semantic layer](semantic-layer.md) — one reviewed export, engine configuration, discovery and reconciliation.
 - [Service setup](getting-started.md#run-the-http-service) — prepare catalog storage, identity, bindings and engine access.
 - [Team configuration](../config/README.md) — maintain private runtime settings, business aliases and reviewed semantic exports.
 - [Development status](development-status.md) — distinguish implemented features, acceptance evidence and remaining gaps before a pilot.

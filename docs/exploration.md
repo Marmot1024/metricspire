@@ -2,7 +2,9 @@
 
 Use this optional path when a question needs fields or calculations that are not yet a published metric. For example, after querying paid order counts by region, ask what share had an order value above 500. The AI client can build a temporary query from the sources, fields and relationships declared in your external semantic layer. MetricSpire checks it and queries the OLAP engine; the result does not need to become a permanent metric.
 
-The semantic-layer repository describes what data means and how it may be combined. Business data stays in the OLAP engine. To connect the repository, a maintainer exports the reviewed definitions into an `AnalysisCatalog` file and configures MetricSpire to load it. Pointing at a Git URL or a folder of prose does not perform that export automatically. The current execution adapter is Databricks SQL; see [adapter support](architecture.md#adapter-support) for the distinction between the integration design and shipped implementations.
+The semantic-layer repository describes what data means and how it may be combined. Business data stays in the OLAP engine. To connect the repository, a maintainer exports the reviewed definitions into an `AnalysisCatalog` file and configures MetricSpire to load it. Pointing at a Git URL or a folder of prose does not perform that export automatically. Execution supports Databricks SQL and bounded single-table DATE analysis on Trino/Presto; see [adapter support](architecture.md#adapter-support) for each path's limits.
+
+For a first integration, follow [export → configure → discover → reconcile](semantic-layer.md).
 
 Existing `SemanticQuery` and the online metric service keep their own contracts.
 
@@ -110,8 +112,9 @@ path; choose exploration explicitly for unsupported grain/formulas. Permission
 or timeout failures never trigger an automatic route change.
 
 Requests contain no SQL, physical bindings, identity, policy or executable plan.
-Public discovery/plans/results omit those internals. Tokens reach only engine
-execution. Admission/completion audit failures withhold results. Jobs are owned
+Public discovery/plans/results omit those internals. Databricks execution uses
+the authorized user's token; Trino/Presto uses its dedicated configured reader.
+Admission/completion audit failures withhold results. Jobs are owned
 by tenant, namespace and principal; accepted work survives request disconnect.
 Cancellation requests propagate to the warehouse; the worker publishes a terminal
 state after completion audit. Once that outcome is sealed, late cancellation does
